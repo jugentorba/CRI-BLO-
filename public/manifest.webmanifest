@@ -1,0 +1,17 @@
+{
+  "name": "CRI BLO",
+  "short_name": "CRI BLO",
+  "description": "Application terrain Orange — Compte-rendu d'intervention Boucle Locale (CRI BLO).",
+  "lang": "fr-FR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FF7900",
+  "theme_color": "#FF7900",
+  "categories": ["productivity", "utilities", "business"],
+  "icons": [
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

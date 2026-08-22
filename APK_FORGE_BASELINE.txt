@@ -1,0 +1,3 @@
+Recovered Criblo baseline adapted to a plain client-only Vite/TanStack Router build.
+The application features are preserved; only the packaging/build layer was changed.
+No camera zoom feature was added in this pass.

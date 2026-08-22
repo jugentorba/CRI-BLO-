@@ -1,0 +1,34 @@
+<!--
+  Paste the <uses-permission> entries below into:
+    android/app/src/main/AndroidManifest.xml
+  (inside <manifest>, above the <application> tag)
+
+  This file is reference-only. It is NOT used by Capacitor directly.
+  The android/ folder is generated locally by `npx cap add android`.
+-->
+
+<!-- GPS — précis + approximatif -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<!-- Caméra -->
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-feature android:name="android.hardware.camera" android:required="false" />
+
+<!-- Galerie / Photos (Android 13+ : médias granulaires) -->
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+<!-- Android 12 et antérieurs -->
+<uses-permission
+    android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />
+<uses-permission
+    android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    android:maxSdkVersion="29" />
+
+<!-- Réseau (offline-aware) -->
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+<!-- Notifications (Android 13+) -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

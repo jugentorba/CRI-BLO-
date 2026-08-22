@@ -1,0 +1,202 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-glow: var(--primary-glow);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans:
+    "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --shadow-elevated: 0 10px 30px -12px color-mix(in oklab, var(--primary) 35%, transparent);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Orange France palette */
+  --background: oklch(0.985 0.003 60);
+  --foreground: oklch(0.16 0.02 60);
+  --surface: oklch(1 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.02 60);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.02 60);
+
+  /* Orange #FF7900 */
+  --primary: oklch(0.71 0.21 47);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-glow: oklch(0.78 0.18 55);
+
+  --secondary: oklch(0.96 0.012 60);
+  --secondary-foreground: oklch(0.18 0.02 60);
+
+  --muted: oklch(0.96 0.008 60);
+  --muted-foreground: oklch(0.48 0.02 60);
+
+  --accent: oklch(0.95 0.04 55);
+  --accent-foreground: oklch(0.18 0.02 60);
+
+  --destructive: oklch(0.6 0.23 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.66 0.16 150);
+  --success-foreground: oklch(0.99 0 0);
+
+  --warning: oklch(0.82 0.16 85);
+  --warning-foreground: oklch(0.18 0.02 60);
+
+  --border: oklch(0.92 0.008 60);
+  --input: oklch(0.92 0.008 60);
+  --ring: oklch(0.71 0.21 47);
+
+  --sidebar: oklch(0.08 0.01 60);
+  --sidebar-foreground: oklch(0.99 0 0);
+  --sidebar-primary: oklch(0.71 0.21 47);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.16 0.015 60);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.22 0.015 60);
+  --sidebar-ring: oklch(0.71 0.21 47);
+}
+
+.dark {
+  --background: oklch(0.13 0.012 60);
+  --foreground: oklch(0.98 0.003 60);
+  --surface: oklch(0.18 0.012 60);
+
+  --card: oklch(0.18 0.012 60);
+  --card-foreground: oklch(0.98 0.003 60);
+
+  --popover: oklch(0.18 0.012 60);
+  --popover-foreground: oklch(0.98 0.003 60);
+
+  --primary: oklch(0.74 0.2 50);
+  --primary-foreground: oklch(0.13 0.012 60);
+  --primary-glow: oklch(0.8 0.17 55);
+
+  --secondary: oklch(0.24 0.012 60);
+  --secondary-foreground: oklch(0.98 0.003 60);
+
+  --muted: oklch(0.24 0.012 60);
+  --muted-foreground: oklch(0.7 0.015 60);
+
+  --accent: oklch(0.28 0.04 50);
+  --accent-foreground: oklch(0.98 0.003 60);
+
+  --destructive: oklch(0.68 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.7 0.16 150);
+  --success-foreground: oklch(0.13 0.012 60);
+
+  --warning: oklch(0.82 0.16 85);
+  --warning-foreground: oklch(0.13 0.012 60);
+
+  --border: oklch(0.28 0.012 60 / 60%);
+  --input: oklch(0.28 0.012 60);
+  --ring: oklch(0.74 0.2 50);
+
+  --sidebar: oklch(0.08 0.01 60);
+  --sidebar-foreground: oklch(0.98 0.003 60);
+  --sidebar-primary: oklch(0.74 0.2 50);
+  --sidebar-primary-foreground: oklch(0.13 0.012 60);
+  --sidebar-accent: oklch(0.16 0.015 60);
+  --sidebar-accent-foreground: oklch(0.98 0.003 60);
+  --sidebar-border: oklch(0.22 0.015 60);
+  --sidebar-ring: oklch(0.74 0.2 50);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Compact field controls: keep touch targets usable while making every Lucide
+   glyph visibly 28% smaller, including icons whose component classes win the
+   normal utility cascade. */
+@layer components {
+  .cri-app svg.lucide {
+    scale: 0.72;
+    transform-origin: center;
+  }
+
+  .cri-app button:has(> svg.lucide),
+  .cri-app a:has(> svg.lucide) {
+    column-gap: 0.375rem;
+  }
+}
+
+@utility safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}
+
+@layer base {
+  [id^="f-"],
+  [id^="s-"] {
+    scroll-margin-top: 8rem;
+  }
+  /* Smooth in-page jump for missing-fields navigation. */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
