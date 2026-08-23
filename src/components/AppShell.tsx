@@ -3,14 +3,7 @@ import { Home, History, Settings, ChevronLeft, Bot, Globe } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { PermissionSetupDialog } from "@/components/PermissionSetupDialog";
-
-const navItems = [
-  { to: "/", label: "Accueil", icon: Home },
-  { to: "/assistant", label: "Assistant", icon: Bot },
-  { to: "/navigateur", label: "Navigateur", icon: Globe },
-  { to: "/historique", label: "Historique", icon: History },
-  { to: "/parametres", label: "Réglages", icon: Settings },
-] as const;
+import { useI18n } from "@/lib/i18n/use-i18n";
 
 interface AppShellProps {
   title: string;
@@ -21,6 +14,15 @@ interface AppShellProps {
 
 export function AppShell({ title, subtitle, children, showBack = false }: AppShellProps) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { t } = useI18n();
+
+  const navItems = [
+    { to: "/", label: t.nav_home, icon: Home },
+    { to: "/assistant", label: t.nav_assistant, icon: Bot },
+    { to: "/navigateur", label: t.nav_browser, icon: Globe },
+    { to: "/historique", label: t.nav_history, icon: History },
+    { to: "/parametres", label: t.nav_settings, icon: Settings },
+  ] as const;
 
   return (
     <div className="cri-app flex min-h-screen flex-col bg-background">
