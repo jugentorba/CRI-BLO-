@@ -1,53 +1,49 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import "./styles.css";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { MSALProvider } from '@azure/react-msal';
+import { PublicClientApplication } from '@azure/msal-browser';
+import FieldWorkApp from '@/app/FieldWorkApp';
+import { networkService } from '@/lib/sync/NetworkService';
+import '@/styles/globals.css';
 
-const root = document.getElementById("root");
-if (!root) throw new Error("CRI BLO: root element #root is missing");
+// Initialize MSAL for Azure authentication
+const msalConfig = {
+  auth: {
+    clientId: process.env.REACT_APP_AZURE_CLIENT_ID || '',
+    authority: process.env.REACT_APP_AZURE_AUTHORITY || '',
+    redirectUri: process.env.REACT_APP_REDIRECT_URI || 'http://localhost:3000',
+  },
+  cache: {
+    cacheLocation: 'localStorage',
+    storeAuthStateInCookie: false,
+  },
+};
 
-function BootstrapError({ error }: { error: unknown }) {
-  const message = error instanceof Error ? error.message : String(error);
-  const stack = error instanceof Error ? error.stack : undefined;
-  return (
-    <div style={{ minHeight: "100vh", boxSizing: "border-box", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fff", color: "#111", overflow: "auto" }}>
-      <h1 style={{ marginBottom: 12 }}>CRI BLO — startup error</h1>
-      <p style={{ marginBottom: 12 }}>The application could not load its interface.</p>
-      <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#f5f5f5", padding: 16, borderRadius: 12 }}>{message}{stack ? "\n\n" + stack : ""}</pre>
-    </div>
-  );
-}
+const msalInstance = new PublicClientApplication(msalConfig);
 
-const appRoot = createRoot(root);
+// Initialize network monitoring
+null;
+null;
+networkService.initialize().catch((error) => {
+  console.warn('Failed to initialize network monitoring:', error);
+});
 
-document.documentElement.lang = "fr";
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement
+);
 
-// Register the lightweight runtime cache only in production. It makes the PWA
-// reopen offline after the shell/chunks have been visited once, including in
-// Android WebView/APK wrappers.
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  void navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch((error) => {
-    console.warn("CRI BLO service worker registration failed", error);
-  });
-}
+root.render(
+  <React.StrictMode>
+    <MSALProvider instance={msalInstance}>
+      <Router>
+        <Routes>
+          <Route path="/work" element={<FieldWorkApp />} />
+          <Route path="/" element={<Navigate to="/work" replace />} />
+        </Routes>
+      </Router>
+    </MSALProvider>
+  </React.StrictMode>
+);
 
-// Keep the router out of the initial static module graph. In an Android WebView,
-// a failure in any route/module dependency can otherwise happen before React
-// renders anything, producing an indistinguishable blank screen.
-Promise.all([import("./router"), import("@tanstack/react-router")])
-  .then(([{ getRouter }, { RouterProvider }]) => {
-    const router = getRouter();
-    appRoot.render(
-      <StrictMode>
-        <RouterProvider router={router} />
-      </StrictMode>,
-    );
-  })
-  .catch((error) => {
-    console.error("CRI BLO startup failure", error);
-    appRoot.render(
-      <StrictMode>
-        <BootstrapError error={error} />
-      </StrictMode>,
-    );
-  });
-
+export default root;
