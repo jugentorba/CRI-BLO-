@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Building2, UserCircle2, FolderOpen, Save, Camera, ImageIcon, Languages, Zap, Sun, Moon, Monitor, Rows3, LayoutGrid, Minimize2 } from "lucide-react";
+import { Building2, UserCircle2, FolderOpen, Save, Camera, ImageIcon, Languages, Zap, Sun, Moon, Monitor, Rows3, LayoutGrid, Minimize2, ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { openPermissionsDialog } from "@/components/PermissionSetupDialog";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
@@ -80,6 +81,25 @@ function Parametres() {
           >
             <Save className="h-3 w-3" /> {saved ? "Enregistré" : "Enregistrer le profil"}
           </button>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Autorisations</h2>
+          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <ShieldCheck className="h-4 w-4 text-primary" /> Caméra, Localisation &amp; Fichiers
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Vérifiez et accordez les autorisations requises par l'application. Si une autorisation a été refusée, vous pouvez l'activer directement depuis les Réglages du téléphone.
+            </p>
+            <button
+              type="button"
+              onClick={openPermissionsDialog}
+              className="mt-3 h-11 w-full rounded-xl bg-primary text-sm font-bold text-primary-foreground transition active:scale-95"
+            >
+              Gérer les autorisations
+            </button>
+          </div>
         </section>
 
         <section>

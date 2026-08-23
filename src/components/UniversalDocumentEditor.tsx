@@ -140,16 +140,76 @@ export function UniversalDocumentEditor({
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-background">
       <div className="flex items-center gap-2 border-b border-border bg-card p-3">
-        <FilePenLine className="h-4 w-4 text-primary" /><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{document.name}</div><div className="text-[10px] text-muted-foreground">{title}</div></div>
-        <button type="button" onClick={onClose} className="rounded-full p-2"><X className="h-4 w-4" /></button>
+        <FilePenLine className="h-4 w-4 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold">{document.name}</div>
+          <div className="text-[10px] text-muted-foreground">{title}</div>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-full p-2" aria-label="Fermer">
+          <X className="h-4 w-4" />
+        </button>
       </div>
       {error && <div className="m-3 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">{error}</div>}
-      {busy && !text && !cells.length ? <div className="p-4 text-sm">Ouverture…</div> : kind === "xlsx" ? (
-        <div className="min-h-0 flex-1 overflow-auto p-3"><table className="min-w-full border-collapse text-xs"><tbody>{cells.map((row,r)=><tr key={r}>{row.map((v,c)=><td key={c} className="border border-border p-0"><input value={v} onChange={e=>setCells(prev=>prev.map((rr,ri)=>ri===r?rr.map((cc,ci)=>ci===c?e.target.value:cc):rr))} className="min-w-24 bg-background p-2 outline-none focus:bg-primary/5"/></td>)}</tr>)}</tbody></table><button type="button" onClick={()=>setCells(p=>[...p,Array(p[0]?.length||6).fill("")])} className="mt-2 rounded-lg border px-3 py-2 text-xs"><Plus className="mr-1 inline h-3 w-3"/>Ajouter une ligne</button></div>
+      {busy && !text && !cells.length ? (
+        <div className="p-4 text-sm text-muted-foreground">Ouverture…</div>
+      ) : kind === "xlsx" ? (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-w-max p-3">
+            <table className="border-collapse text-xs">
+              <tbody>
+                {cells.map((row, r) => (
+                  <tr key={r}>
+                    {row.map((v, c) => (
+                      <td key={c} className="border border-border p-0">
+                        <input
+                          value={v}
+                          onChange={(e) =>
+                            setCells((prev) =>
+                              prev.map((rr, ri) =>
+                                ri === r ? rr.map((cc, ci) => (ci === c ? e.target.value : cc)) : rr,
+                              ),
+                            )
+                          }
+                          className="w-28 bg-background p-2 outline-none focus:bg-primary/5"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button
+              type="button"
+              onClick={() => setCells((p) => [...p, Array(p[0]?.length || 6).fill("")])}
+              className="mt-2 rounded-lg border px-3 py-2 text-xs"
+            >
+              <Plus className="mr-1 inline h-3 w-3" />
+              Ajouter une ligne
+            </button>
+          </div>
+        </div>
       ) : (
-        <textarea value={text} onChange={e=>setText(e.target.value)} className="min-h-0 flex-1 resize-none p-4 font-mono text-sm outline-none" spellCheck={false}/>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="min-h-0 flex-1 resize-none p-4 font-mono text-sm outline-none"
+          spellCheck={false}
+        />
       )}
-      <div className="border-t border-border bg-card p-3"><button type="button" disabled={busy} onClick={()=>void save()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground"><Save className="h-4 w-4"/>Enregistrer sous…</button><p className="mt-1 text-center text-[10px] text-muted-foreground">PDF : le texte est recréé dans un nouveau PDF. Excel conserve le classeur. DOCX conserve le conteneur DOCX mais réécrit le corps du document.</p></div>
+      <div className="border-t border-border bg-card p-3">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground"
+        >
+          <Save className="h-4 w-4" />
+          Enregistrer sous…
+        </button>
+        <p className="mt-1 text-center text-[10px] text-muted-foreground">
+          PDF : le texte est recréé dans un nouveau PDF. Excel conserve le classeur. DOCX conserve le conteneur DOCX mais réécrit le corps du document.
+        </p>
+      </div>
     </div>
   );
 }
