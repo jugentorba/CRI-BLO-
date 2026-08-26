@@ -1,3 +1,5 @@
+import { Capacitor } from "@capacitor/core";
+
 export const CRI_BLO_VERSION = "0.1.0";
 export const CRI_BLO_RELEASE_REPOSITORY = "jugentorba/CRI-BLO-";
 
@@ -60,7 +62,12 @@ export function isNewerVersion(latest: string, current: string): boolean {
 }
 
 export function detectAppPlatform(): AppPlatform {
-  const ua = navigator.userAgent.toLowerCase();
+  const nativePlatform = Capacitor.getPlatform();
+  if (nativePlatform === "android" || nativePlatform === "ios") return nativePlatform;
+
+  // Browser/PWA fallback. This keeps an installed mobile PWA informative while
+  // native packages use Capacitor rather than fragile user-agent detection.
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent.toLowerCase() : "";
   if (ua.includes("android")) return "android";
   if (/iphone|ipad|ipod/.test(ua)) return "ios";
   return "web";
