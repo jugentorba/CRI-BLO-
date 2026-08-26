@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+      - criblo-master-spec-v1
 
 concurrency:
-  group: criblo-ci-${{ github.event.pull_request.number || github.ref }}
+  group: criblo-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
