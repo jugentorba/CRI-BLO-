@@ -55,7 +55,7 @@ export const CRI_SECTIONS: SectionDef[] = [
         freeTextLabel: "Nom (si RIP)",
       },
       { id: "oiOc", label: "OI/OC ?", type: "choice", options: ["OI", "OC"] },
-      { id: "nbLiaisonsGTR", label: "Nb liaisons avec GTR", type: "number" },
+      { id: "nbLiaisonsGTR", label: "Nb liaisons avec GTR", type: "numberNA" },
       { id: "clientProvisoire", label: "Client dépanné en provisoire", type: "yesno" },
       { id: "nomValideur", label: "Nom valideur", type: "text" },
       { id: "dommageReseau", label: "Dommage au réseau", type: "yesno" },
@@ -70,7 +70,7 @@ export const CRI_SECTIONS: SectionDef[] = [
       { id: "gpsCoordsA", label: "Coordonnées GPS", type: "text", hint: "Rempli automatiquement par le bouton GPS" },
       { id: "adresseA", label: "Adresse", type: "text", hint: "Rempli automatiquement par le bouton GPS" },
       { id: "chambrePoteauA", label: "N° de chambre / poteau", type: "text" },
-      { id: "distanceDefautA", label: "Distance par rapport au défaut (m)", type: "number" },
+      { id: "distanceDefautA", label: "Distance par rapport au défaut (m)", type: "numberNA" },
     ],
   },
   {
@@ -81,7 +81,7 @@ export const CRI_SECTIONS: SectionDef[] = [
       { id: "gpsCoordsB", label: "Coordonnées GPS", type: "text", hint: "Rempli automatiquement par le bouton GPS" },
       { id: "adresseB", label: "Adresse", type: "text", hint: "Rempli automatiquement par le bouton GPS" },
       { id: "chambrePoteauB", label: "N° de chambre / poteau", type: "text" },
-      { id: "distanceDefautB", label: "Distance par rapport au défaut (m)", type: "number" },
+      { id: "distanceDefautB", label: "Distance par rapport au défaut (m)", type: "numberNA" },
     ],
   },
   {
@@ -95,7 +95,7 @@ export const CRI_SECTIONS: SectionDef[] = [
       { id: "codePostal", label: "Code postal", type: "text" },
       { id: "nomVoie", label: "Nom de la voie (Avenue/Rue/…)", type: "text" },
       { id: "numeroVoie", label: "Numéro de la voie", type: "text" },
-      { id: "longueur", label: "Longueur (m)", type: "number" },
+      { id: "longueur", label: "Longueur (m)", type: "numberNA" },
     ],
   },
   {
@@ -120,7 +120,7 @@ export const CRI_SECTIONS: SectionDef[] = [
       { id: "numTroncon", label: "N° du Tronçon", type: "text" },
       { id: "transportDistribution", label: "Transport / Distribution", type: "select", options: ["Transport", "Distribution"] },
       { id: "typeCable", label: "Type de câble (ex : 24FO L1092 Modulo 6)", type: "text" },
-      { id: "longueurCable", label: "Longueur câble (m)", type: "number" },
+      { id: "longueurCable", label: "Longueur câble (m)", type: "numberNA" },
     ],
   },
 
