@@ -19,6 +19,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Keep publishing the accepted working branch without merging the draft PR.
       - name: Checkout current CRI-BLO working branch
         uses: actions/checkout@v4
         with:
