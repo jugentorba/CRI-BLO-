@@ -2,7 +2,7 @@ import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
-export type AiProvider = "gemini" | "custom";
+export type AiProvider = "gemini";
 
 export interface AppSettings {
   id: "app";
@@ -18,11 +18,11 @@ export interface AppSettings {
   cloudSyncEnabled?: boolean;
   cloudProvider?: "onedrive";
   lastSyncAt?: string;
-  /** Personal AI provider. Gemini is the default no-required-payment option. */
+  /** CRI-BLO's personal AI provider. */
   aiProvider?: AiProvider;
-  /** Legacy/custom OpenAI-compatible endpoint; kept for backward compatibility. */
+  /** Legacy field retained only so older local records can be migrated safely. */
   aiEndpoint?: string;
-  /** User-supplied API key. Never supplied by the build or committed to GitHub. */
+  /** User-supplied Gemini API key. Never supplied by the build or committed to GitHub. */
   aiApiKey?: string;
   aiModel?: string;
   permissionsOnboardingDone?: boolean;
@@ -49,35 +49,23 @@ const DEFAULTS: AppSettings = {
 };
 
 function normalizeAiSettings(settings: AppSettings): AppSettings {
-  if ((settings.aiProvider ?? "gemini") === "gemini") {
-    return {
-      ...settings,
-      aiProvider: "gemini",
-      // A stale custom endpoint must never silently override Gemini.
-      aiEndpoint: "",
-      aiModel: settings.aiModel?.startsWith("gemini-")
-        ? settings.aiModel
-        : DEFAULT_GEMINI_MODEL,
-    };
-  }
-  return settings;
+  return {
+    ...settings,
+    aiProvider: "gemini",
+    // Old custom/OpenAI-compatible endpoints are intentionally retired. This
+    // prevents a stale endpoint from silently bypassing the Gemini setup shown
+    // in Settings on upgraded installations.
+    aiEndpoint: "",
+    aiModel: settings.aiModel?.startsWith("gemini-")
+      ? settings.aiModel
+      : DEFAULT_GEMINI_MODEL,
+  };
 }
 
 export async function getSettings(): Promise<AppSettings> {
   return tx(STORE_SETTINGS, "readonly", async (s) => {
     const r = (await reqAsync(s.get("app"))) as AppSettings | undefined;
-    let merged: AppSettings = { ...DEFAULTS, ...(r ?? {}) };
-
-    // Existing CRI-BLO installs used a generic OpenAI-compatible endpoint. Keep
-    // those settings working, but new/no-endpoint installs use Gemini directly.
-    if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
-    if (!r?.aiProvider && !r?.aiEndpoint?.trim()) {
-      merged.aiProvider = "gemini";
-      if (!r?.aiModel || r.aiModel === "gpt-4o-mini") merged.aiModel = DEFAULT_GEMINI_MODEL;
-    }
-
-    merged = normalizeAiSettings(merged);
-    return merged;
+    return normalizeAiSettings({ ...DEFAULTS, ...(r ?? {}) });
   });
 }
 
