@@ -1,9 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 
 export const CRI_BLO_VERSION = "0.1.0";
-export const CRI_BLO_RELEASE_REPOSITORY = "jugentorba/CRI-BLO-";
-
-const LATEST_RELEASE_API = `https://api.github.com/repos/${CRI_BLO_RELEASE_REPOSITORY}/releases/latest`;
+export const CRI_BLO_RELEASE_REPOSITORIES = ["jugentorba/CRIBLO", "jugentorba/CRI-BLO-"] as const;
 
 interface GitHubReleaseAsset {
   name: string;
@@ -89,25 +87,35 @@ function selectAsset(assets: GitHubReleaseAsset[], platform: AppPlatform): GitHu
   return undefined;
 }
 
-export async function checkForAppUpdate(signal?: AbortSignal): Promise<AppUpdateInfo> {
-  const response = await fetch(LATEST_RELEASE_API, {
-    method: "GET",
-    headers: {
-      Accept: "application/vnd.github+json",
-    },
-    cache: "no-store",
-    signal,
-  });
+async function fetchLatestRelease(signal?: AbortSignal): Promise<GitHubLatestReleaseResponse> {
+  let lastStatus = 404;
 
-  if (response.status === 404) {
+  for (const repository of CRI_BLO_RELEASE_REPOSITORIES) {
+    const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+      cache: "no-store",
+      signal,
+    });
+
+    lastStatus = response.status;
+    if (response.ok) return (await response.json()) as GitHubLatestReleaseResponse;
+    if (response.status !== 404) {
+      throw new Error(`Impossible de vérifier les mises à jour (${response.status}).`);
+    }
+  }
+
+  if (lastStatus === 404) {
     throw new Error("Aucune version CRI-BLO n'est encore publiée dans GitHub Releases.");
   }
 
-  if (!response.ok) {
-    throw new Error(`Impossible de vérifier les mises à jour (${response.status}).`);
-  }
+  throw new Error(`Impossible de vérifier les mises à jour (${lastStatus}).`);
+}
 
-  const release = (await response.json()) as GitHubLatestReleaseResponse;
+export async function checkForAppUpdate(signal?: AbortSignal): Promise<AppUpdateInfo> {
+  const release = await fetchLatestRelease(signal);
   const latestVersion = release.tag_name?.trim();
   const releaseUrl = release.html_url?.trim();
 
