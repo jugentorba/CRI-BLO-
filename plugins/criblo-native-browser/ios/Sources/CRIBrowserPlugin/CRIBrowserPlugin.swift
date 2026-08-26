@@ -311,9 +311,38 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       if (window.__cribloLongPressInstalled) return;
       window.__cribloLongPressInstalled = true;
 
+      function clamp01(value) {
+        value = Number(value || 0);
+        return Math.max(0, Math.min(1, value));
+      }
+
+      function forwardIntoFrame(frame, x, y) {
+        try {
+          if (!frame || !frame.contentWindow) return false;
+          var rect = frame.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+          frame.contentWindow.postMessage({
+            __cribloLongPress: true,
+            rx: clamp01((x - rect.left) / rect.width),
+            ry: clamp01((y - rect.top) / rect.height)
+          }, '*');
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
       function dispatchAt(x, y) {
         var target = document.elementFromPoint(x, y);
         if (!target) return false;
+
+        // GeoReseaux and similar enterprise mapping pages can host their map in
+        // a same-origin or cross-origin iframe. postMessage is allowed across
+        // origins and this bridge is injected into every WKWebView frame, so
+        // forward normalized coordinates recursively until the map frame gets it.
+        if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') {
+          return forwardIntoFrame(target, x, y);
+        }
 
         // Normal link navigation remains a normal tap. This compatibility path
         // exists for map/canvas interactions that iOS WebKit may otherwise eat.
@@ -355,9 +384,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return true;
       }
 
+      window.addEventListener('message', function (event) {
+        var data = event && event.data;
+        if (!data || data.__cribloLongPress !== true) return;
+        var x = window.innerWidth * clamp01(data.rx);
+        var y = window.innerHeight * clamp01(data.ry);
+        dispatchAt(x, y);
+      }, false);
+
       window.__cribloDispatchLongPress = function (rx, ry) {
-        var x = Math.max(0, Math.min(window.innerWidth, window.innerWidth * Number(rx || 0)));
-        var y = Math.max(0, Math.min(window.innerHeight, window.innerHeight * Number(ry || 0)));
+        var x = window.innerWidth * clamp01(rx);
+        var y = window.innerHeight * clamp01(ry);
         return dispatchAt(x, y);
       };
     })();
