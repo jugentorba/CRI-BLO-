@@ -183,6 +183,42 @@
   .cri-app a:has(> svg.lucide) {
     column-gap: 0.375rem;
   }
+
+  /*
+    CRI field N/A controls belong to the field itself, not to its label.
+    Ordinary text/text-area quick buttons are rendered by FieldRow beside the
+    label in JSX; move them visually onto the right edge of the editable
+    control while keeping the DOM and saved value unchanged.
+  */
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) {
+    position: relative;
+  }
+
+  .cri-app [id^="f-"] button[aria-label="Insérer N/A"] {
+    position: absolute;
+    right: 0.25rem;
+    top: 1.25rem;
+    z-index: 5;
+    margin-left: 0;
+    height: 2rem;
+    min-width: 2.75rem;
+    border-color: var(--color-border);
+    background: var(--color-card);
+  }
+
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) > input,
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) textarea {
+    padding-right: 3.5rem;
+  }
+
+  /* Numeric N/A fields previously displayed their N/A button on the left. */
+  .cri-app [id^="f-"] .flex:has(> input[type="number"]) > button[aria-pressed] {
+    order: 2;
+  }
+
+  .cri-app [id^="f-"] .flex:has(> input[type="number"]) > input[type="number"] {
+    order: 1;
+  }
 }
 
 @utility safe-bottom {
@@ -199,4 +235,3 @@
     scroll-behavior: smooth;
   }
 }
-
