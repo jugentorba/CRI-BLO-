@@ -25,7 +25,8 @@ const OFFICIAL_PHOTO_LABELS: Record<string, string> = {
 };
 
 function esc(v: unknown): string {
-  return String(v ?? "")
+  const text = v === "na" || v === "N/A" ? "N/A" : String(v ?? "");
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -34,7 +35,7 @@ function esc(v: unknown): string {
 function fmtValue(v: unknown): string {
   if (v === true) return "Oui";
   if (v === false) return "Non";
-  if (v === "na") return "N/A";
+  if (v === "na" || v === "N/A") return "N/A";
   if (v == null || v === "") return "";
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
     const d = new Date(v);
