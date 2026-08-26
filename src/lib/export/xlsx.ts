@@ -27,14 +27,14 @@ export const FIELD_CELLS: Record<string, CellMap> = {
   zone: { sheet: "FICHE SAV BLO", cell: "H6" }, // F6:G6 = label "zone"
   ripZone: { sheet: "FICHE SAV BLO", cell: "B7" },
   oiOc: { sheet: "FICHE SAV BLO", cell: "E7" },
-  nbLiaisonsGTR: { sheet: "FICHE SAV BLO", cell: "H7" }, // F7:G7 = label
+  nbLiaisonsGTR: { sheet: "FICHE SAV BLO", cell: "H7", format: fmtNumberNA }, // F7:G7 = label
   clientProvisoire: { sheet: "FICHE SAV BLO", cell: "B8", format: fmtRadioOuiNon }, // efface aussi C8
   nomValideur: { sheet: "FICHE SAV BLO", cell: "F8" }, // D8:E8 = label
   dommageReseau: { sheet: "FICHE SAV BLO", cell: "B9", format: fmtRadioOuiNon },
   constatNum: { sheet: "FICHE SAV BLO", cell: "F9" }, // D9:E9 = label, F9:H9 = valeur
 
   // Localisation
-  longueur: { sheet: "FICHE SAV BLO", cell: "E15" }, // C15:D15 = label
+  longueur: { sheet: "FICHE SAV BLO", cell: "E15", format: fmtNumberNA }, // C15:D15 = label
   // Adresse : labels en A16 / F16, valeurs en dessous (ligne 17, laissée libre entre le label et la ligne "Coordonnées GPS" du template)
   adresseA: { sheet: "FICHE SAV BLO", cell: "A17", format: fmtCleanText },
   adresseB: { sheet: "FICHE SAV BLO", cell: "F17", format: fmtCleanText },
@@ -44,15 +44,15 @@ export const FIELD_CELLS: Record<string, CellMap> = {
   // Chambre / Distance : label en ligne N, valeur en ligne N+1 (col A et F)
   chambrePoteauA: { sheet: "FICHE SAV BLO", cell: "A22" },
   chambrePoteauB: { sheet: "FICHE SAV BLO", cell: "F22" },
-  distanceDefautA: { sheet: "FICHE SAV BLO", cell: "A24" },
-  distanceDefautB: { sheet: "FICHE SAV BLO", cell: "F24" },
+  distanceDefautA: { sheet: "FICHE SAV BLO", cell: "A24", format: fmtNumberNA },
+  distanceDefautB: { sheet: "FICHE SAV BLO", cell: "F24", format: fmtNumberNA },
   defautLocalise: { sheet: "FICHE SAV BLO", cell: "B26", format: fmtDefautLocalise },
   referenceContenant: { sheet: "FICHE SAV BLO", cell: "B27" },
   causePrincipale: { sheet: "FICHE SAV BLO", cell: "B28", format: fmtCause },
   numTroncon: { sheet: "FICHE SAV BLO", cell: "B30" },
   transportDistribution: { sheet: "FICHE SAV BLO", cell: "E30" }, // overrides radio label
   typeCable: { sheet: "FICHE SAV BLO", cell: "B31" },
-  longueurCable: { sheet: "FICHE SAV BLO", cell: "G31" }, // E31:F31 label, G31:H31 valeur
+  longueurCable: { sheet: "FICHE SAV BLO", cell: "G31", format: fmtNumberNA }, // E31:F31 label, G31:H31 valeur
 
   // Réparation (label puis "=" — valeur dans la colonne qui suit)
   NBJRT: { sheet: "FICHE SAV BLO", cell: "C35", format: fmtNumberNA },
