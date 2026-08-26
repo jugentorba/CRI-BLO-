@@ -836,7 +836,7 @@ function FieldRow(props: {
             );
           })}
         </div>
-        {f.freeTextLabel && selected && (
+        {f.freeTextLabel && selected === "RIP" && (
           <input
             id={`f-${f.id}-input`}
             type="text"
