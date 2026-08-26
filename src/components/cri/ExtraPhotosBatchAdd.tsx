@@ -3,13 +3,24 @@ import { ImagePlus, Loader2 } from "lucide-react";
 import { savePhoto } from "@/lib/photos/repository";
 import { watermarkImage } from "@/lib/photos/watermark";
 import { downloadBlob } from "@/lib/export/folder";
-import type { Address } from "@/lib/cri/types";
+import { getCurrentPosition } from "@/lib/geo/gps";
+import type { Address, GpsCoords } from "@/lib/cri/types";
+
+function fileCaptureDate(file: File): Date {
+  if (Number.isFinite(file.lastModified) && file.lastModified > 0) {
+    const date = new Date(file.lastModified);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return new Date();
+}
+
+function coordinates(gps: GpsCoords | null): string | undefined {
+  return gps ? `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}` : undefined;
+}
 
 /**
  * Ajout par lot des « Photos supplémentaires (PHOTOS OI) ».
- * Sélectionne plusieurs photos depuis la galerie en une fois et les place
- * automatiquement dans les prochains emplacements libres photo_extra_N.
- * Ne modifie pas les autres slots ni la logique d'export.
+ * Files are processed in a small worker pool to keep mobile memory bounded.
  */
 export function ExtraPhotosBatchAdd({
   criId,
@@ -31,45 +42,75 @@ export function ExtraPhotosBatchAdd({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function handleFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return;
+    if (!fileList || fileList.length === 0 || busy) return;
     const files = Array.from(fileList);
 
-    // Emplacements libres, dans l'ordre.
     const freeSlots: string[] = [];
-    for (let i = 1; freeSlots.length < files.length; i++) {
-      const slot = `photo_extra_${i}`;
+    for (let index = 1; freeSlots.length < files.length; index += 1) {
+      const slot = `photo_extra_${index}`;
       if (!photos[slot]) freeSlots.push(slot);
     }
 
     const toProcess = files.slice(0, freeSlots.length);
     setBusy(true);
     setProgress({ done: 0, total: toProcess.length });
+
     try {
-      // Process a few images concurrently so the UI does not feel blocked,
-      // while still avoiding a large memory spike on mobile devices.
-      const results: Array<{ slot: string; blob: Blob }> = [];
+      // One best-effort position for this user action; no repeated permission/GPS
+      // prompts for every image in the selected batch.
+      let batchGps: GpsCoords | null = null;
+      try {
+        batchGps = await getCurrentPosition();
+      } catch {
+        // Evidence remains valid and explicitly marks GPS unavailable.
+      }
+
+      const results: Array<{ slot: string; blob: Blob; capturedAt: Date }> = [];
       let cursor = 0;
       const worker = async () => {
         while (cursor < toProcess.length) {
-          const i = cursor++;
-          const file = toProcess[i];
-          const slot = freeSlots[i];
+          const index = cursor++;
+          const file = toProcess[index];
+          const slot = freeSlots[index];
+          const capturedAt = fileCaptureDate(file);
           const isImage =
             file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
-          const blob =
+          const evidenceBlob =
             watermarkEnabled && isImage
-              ? await watermarkImage(file, { date: new Date(), address })
+              ? await watermarkImage(file, {
+                  date: capturedAt,
+                  address,
+                  coordinates: coordinates(batchGps),
+                })
               : file;
-          await savePhoto(criId, slot, blob);
-          results.push({ slot, blob });
-          setProgress((p) => p ? { ...p, done: p.done + 1 } : p);
+
+          await savePhoto(criId, slot, evidenceBlob, {
+            originalBlob: file,
+            capturedAt: capturedAt.toISOString(),
+            gps: batchGps,
+            address,
+            watermarked: watermarkEnabled && isImage,
+          });
+          results.push({ slot, blob: evidenceBlob, capturedAt });
+          setProgress((current) =>
+            current ? { ...current, done: current.done + 1 } : current,
+          );
         }
       };
-      await Promise.all(Array.from({ length: Math.min(3, toProcess.length) }, () => worker()));
+
+      await Promise.all(
+        Array.from({ length: Math.min(3, toProcess.length) }, () => worker()),
+      );
+
       const next = { ...photos };
-      for (const { slot, blob } of results) {
+      for (const { slot, blob, capturedAt } of results) {
         next[slot] = slot;
-        if (saveToGallery) downloadBlob(`${slot}-${Date.now()}.jpg`, blob);
+        if (saveToGallery && blob.type.startsWith("image/")) {
+          downloadBlob(
+            `${slot}-${capturedAt.toISOString().replace(/[:.]/g, "-")}.jpg`,
+            blob,
+          );
+        }
       }
       onPhotosChange(next);
     } finally {
@@ -93,16 +134,14 @@ export function ExtraPhotosBatchAdd({
           : "Ajouter plusieurs photos / fichiers"}
       </button>
       <p className="mt-2 text-xs text-muted-foreground">
-        Sélection multiple depuis la galerie, les téléchargements, les fichiers, Gmail ou Drive —
-        les photos sont placées automatiquement dans les prochains emplacements libres.
+        Sélection multiple depuis la galerie ou les fichiers. Les originaux sont conservés et les photos sont placées automatiquement dans les prochains emplacements libres.
       </p>
-      {/* Sélecteur Android complet (Galerie, Téléchargements, Fichiers, Gmail, Drive…) */}
       <input
         ref={inputRef}
         type="file"
         multiple
         className="hidden"
-        onChange={(e) => void handleFiles(e.target.files)}
+        onChange={(event) => void handleFiles(event.target.files)}
       />
     </div>
   );
