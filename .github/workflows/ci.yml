@@ -36,6 +36,13 @@ jobs:
       - name: Lint source
         run: npm run lint
 
+      - name: Upload PWA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-PWA
+          path: dist/
+          if-no-files-found: error
+
   android-debug-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
