@@ -9,6 +9,13 @@ export interface EditableDocument {
   blob: Blob;
 }
 
+type SaveFileHandle = {
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
 export function UniversalDocumentEditor({
   document,
   onClose,
@@ -126,7 +133,9 @@ export function UniversalDocumentEditor({
     const file = new File([blob], name, { type: blob.type });
     if ("showSaveFilePicker" in window) {
       try {
-        const picker = (window as Window & { showSaveFilePicker?: (o: unknown) => Promise<any> }).showSaveFilePicker;
+        const picker = (window as Window & {
+          showSaveFilePicker?: (options: unknown) => Promise<SaveFileHandle>;
+        }).showSaveFilePicker;
         const handle = await picker?.({ suggestedName: name });
         if (handle) {
           const w = await handle.createWritable(); await w.write(blob); await w.close(); return;
