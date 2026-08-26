@@ -1,7 +1,8 @@
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
 export const FREE_GEMINI_MODELS = [
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
 ] as const;
@@ -87,7 +88,6 @@ export async function callGemini({
           },
         ],
         generationConfig: {
-          temperature: 0.2,
           maxOutputTokens: 1600,
         },
       }),
