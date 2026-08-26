@@ -185,30 +185,45 @@
   }
 
   /*
-    CRI field N/A controls belong to the field itself, not to its label.
-    Ordinary text/text-area quick buttons are rendered by FieldRow beside the
-    label in JSX; move them visually onto the right edge of the editable
-    control while keeping the DOM and saved value unchanged.
+    N/A belongs beside the editable control, never beside the label. FieldRow
+    keeps the button inside its label wrapper for backward-compatible JSX, so
+    `display: contents` promotes the label and button into this two-column grid.
   */
   .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) {
-    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 0.375rem;
+    row-gap: 0.25rem;
+    align-items: start;
+  }
+
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) > .mb-1 {
+    display: contents;
+  }
+
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) > .mb-1 > label {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 
   .cri-app [id^="f-"] button[aria-label="Insérer N/A"] {
-    position: absolute;
-    right: 0.25rem;
-    top: 1.25rem;
-    z-index: 5;
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
     margin-left: 0;
-    height: 2rem;
-    min-width: 2.75rem;
+    height: 2.5rem;
+    min-width: 3rem;
+    padding-inline: 0.625rem;
     border-color: var(--color-border);
     background: var(--color-card);
+    font-size: 0.6875rem;
   }
 
   .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) > input,
-  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) textarea {
-    padding-right: 3.5rem;
+  .cri-app [id^="f-"]:has(button[aria-label="Insérer N/A"]) > .space-y-1\.5 {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
   }
 
   /* Numeric N/A fields previously displayed their N/A button on the left. */
@@ -218,6 +233,7 @@
 
   .cri-app [id^="f-"] .flex:has(> input[type="number"]) > input[type="number"] {
     order: 1;
+    min-width: 0;
   }
 }
 
