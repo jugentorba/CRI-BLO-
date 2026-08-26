@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { Camera } from "@capacitor/camera";
 import { Geolocation } from "@capacitor/geolocation";
 
 export type NativePermissionState = "granted" | "denied" | "unavailable";
@@ -14,19 +15,27 @@ function stopStream(stream: MediaStream | null | undefined) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
-async function requestMedia(kind: "camera" | "microphone"): Promise<NativePermissionState> {
+async function requestMicrophone(): Promise<NativePermissionState> {
   if (!navigator.mediaDevices?.getUserMedia) return "unavailable";
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(
-      kind === "camera"
-        ? { video: { facingMode: { ideal: "environment" } }, audio: false }
-        : { video: false, audio: true },
-    );
+    const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
     stopStream(stream);
     return "granted";
   } catch (error) {
     const name = error instanceof DOMException ? error.name : "";
     if (name === "NotAllowedError" || name === "SecurityError") return "denied";
+    return "unavailable";
+  }
+}
+
+async function requestCamera(): Promise<NativePermissionState> {
+  try {
+    const current = await Camera.checkPermissions();
+    if (current.camera === "granted") return "granted";
+    if (current.camera === "denied") return "denied";
+    const requested = await Camera.requestPermissions({ permissions: ["camera"] });
+    return requested.camera === "granted" ? "granted" : "denied";
+  } catch {
     return "unavailable";
   }
 }
@@ -64,8 +73,8 @@ export async function requestNativeStartupPermissions(): Promise<NativePermissio
   }
 
   const location = await requestLocation();
-  const camera = await requestMedia("camera");
-  const microphone = await requestMedia("microphone");
+  const camera = await requestCamera();
+  const microphone = await requestMicrophone();
 
   const snapshot: NativePermissionSnapshot = {
     native: true,
