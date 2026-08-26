@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies from public npm
         run: npm install --no-audit --no-fund
 
-      - name: Lint
-        run: npm run lint
-
       - name: Build PWA
         run: npm run build
+
+      - name: Lint source
+        run: npm run lint
