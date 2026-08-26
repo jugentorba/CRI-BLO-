@@ -28,7 +28,7 @@ export interface AppSettings {
   permissionsOnboardingDone?: boolean;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
 
 const DEFAULTS: AppSettings = {
   id: "app",
