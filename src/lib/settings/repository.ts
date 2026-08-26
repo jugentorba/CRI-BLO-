@@ -2,6 +2,7 @@ import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
+export type AiProvider = "gemini" | "custom";
 
 export interface AppSettings {
   id: "app";
@@ -17,7 +18,11 @@ export interface AppSettings {
   cloudSyncEnabled?: boolean;
   cloudProvider?: "onedrive";
   lastSyncAt?: string;
+  /** Personal AI provider. Gemini is the default no-required-payment option. */
+  aiProvider?: AiProvider;
+  /** Legacy/custom OpenAI-compatible endpoint; kept for backward compatibility. */
   aiEndpoint?: string;
+  /** User-supplied API key. Never supplied by the build or committed to GitHub. */
   aiApiKey?: string;
   aiModel?: string;
   permissionsOnboardingDone?: boolean;
@@ -34,16 +39,27 @@ const DEFAULTS: AppSettings = {
   scale: 100,
   cloudSyncEnabled: false,
   cloudProvider: "onedrive",
+  aiProvider: "gemini",
   aiEndpoint: "",
   aiApiKey: "",
-  aiModel: "gpt-4o-mini",
+  aiModel: "gemini-3.5-flash",
   permissionsOnboardingDone: false,
 };
 
 export async function getSettings(): Promise<AppSettings> {
   return tx(STORE_SETTINGS, "readonly", async (s) => {
     const r = (await reqAsync(s.get("app"))) as AppSettings | undefined;
-    return { ...DEFAULTS, ...(r ?? {}) };
+    const merged = { ...DEFAULTS, ...(r ?? {}) };
+
+    // Existing CRI-BLO installs used a generic OpenAI-compatible endpoint. Keep
+    // those settings working, but new/no-endpoint installs use Gemini directly.
+    if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
+    if (!r?.aiProvider && !r?.aiEndpoint?.trim()) {
+      merged.aiProvider = "gemini";
+      if (!r?.aiModel || r.aiModel === "gpt-4o-mini") merged.aiModel = "gemini-3.5-flash";
+    }
+
+    return merged;
   });
 }
 
