@@ -1,6 +1,7 @@
 // OneDrive / Microsoft Graph configuration.
-// Publishable Azure App Registration Client ID — safe to expose in a public PWA.
-// Set VITE_AZURE_CLIENT_ID in Lovable Cloud env once the Azure app is registered.
+// The Azure App Registration Client ID is a publishable build-time value.
+// Set VITE_AZURE_CLIENT_ID in the build/deployment environment used for CRI-BLO.
+// Technicians must never be asked to create or configure an Azure application.
 
 export const AZURE_CLIENT_ID: string =
   (import.meta.env.VITE_AZURE_CLIENT_ID as string | undefined)?.trim() || "";
