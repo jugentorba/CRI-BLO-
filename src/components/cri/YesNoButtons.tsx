@@ -1,6 +1,11 @@
 import { cn } from "@/lib/utils";
 
-type Value = true | false | "na" | undefined;
+type Value = true | false | "na" | "N/A" | undefined;
+
+type Item = {
+  v: true | false | "N/A";
+  label: string;
+};
 
 export function YesNoButtons({
   value,
@@ -8,35 +13,39 @@ export function YesNoButtons({
   allowNA = false,
 }: {
   value: Value;
-  onChange: (v: Value) => void;
+  onChange: (value: Value) => void;
   allowNA?: boolean;
 }) {
-  const items: { v: Value; label: string }[] = [
+  const items: Item[] = [
     { v: true, label: "Oui" },
     { v: false, label: "Non" },
   ];
-  if (allowNA) items.push({ v: "na", label: "N/A" });
+  if (allowNA) items.push({ v: "N/A", label: "N/A" });
+
   return (
     <div className={cn("grid gap-2", allowNA ? "grid-cols-3" : "grid-cols-2")}>
-      {items.map((it) => {
-        const active = value === it.v;
+      {items.map((item) => {
+        // `na` remains readable for records created by older CRI-BLO versions,
+        // while every new selection is stored as the exact literal `N/A`.
+        const active =
+          item.v === "N/A" ? value === "N/A" || value === "na" : value === item.v;
         return (
           <button
-            key={String(it.v)}
+            key={String(item.v)}
             type="button"
-            onClick={() => onChange(active ? undefined : it.v)}
+            onClick={() => onChange(active ? undefined : item.v)}
             className={cn(
               "h-12 rounded-xl border text-sm font-bold transition active:scale-95",
               active
-                ? it.v === true
+                ? item.v === true
                   ? "border-success bg-success text-success-foreground"
-                  : it.v === false
+                  : item.v === false
                     ? "border-destructive bg-destructive text-destructive-foreground"
                     : "border-muted-foreground bg-muted-foreground text-background"
                 : "border-border bg-card text-foreground hover:border-primary/40",
             )}
           >
-            {it.label}
+            {item.label}
           </button>
         );
       })}
