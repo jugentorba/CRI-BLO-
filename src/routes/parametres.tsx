@@ -23,6 +23,7 @@ import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repo
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS } from "@/lib/ai/gemini";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
@@ -262,31 +263,87 @@ function Parametres() {
 
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
-            IA indépendante
+            Assistant IA — Gemini
           </h2>
-          <div className="space-y-2 rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="text-xs text-muted-foreground">
-              Utilisez votre propre endpoint compatible OpenAI. Si aucun endpoint n'est configuré, l'Assistant conserve son fonctionnement existant.
+          <div className="space-y-3 rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              CRI-BLO utilise directement votre clé Gemini personnelle. Aucun endpoint à configurer et aucune clé n'est intégrée à l'APK. La clé saisie ici reste dans les données locales de l'application.
             </p>
-            <input
-              value={settings.aiEndpoint ?? ""}
-              onChange={(event) => void patchSettings({ aiEndpoint: event.target.value })}
-              placeholder="https://votre-endpoint/v1/chat/completions"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-            />
-            <input
-              value={settings.aiModel ?? "gpt-4o-mini"}
-              onChange={(event) => void patchSettings({ aiModel: event.target.value })}
-              placeholder="Modèle"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-            />
-            <input
-              type="password"
-              value={settings.aiApiKey ?? ""}
-              onChange={(event) => void patchSettings({ aiApiKey: event.target.value })}
-              placeholder="Clé API (stockée localement)"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-            />
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Clé Gemini
+              </span>
+              <input
+                type="password"
+                value={settings.aiApiKey ?? ""}
+                onChange={(event) =>
+                  void patchSettings({
+                    aiProvider: "gemini",
+                    aiEndpoint: "",
+                    aiApiKey: event.target.value,
+                    aiModel: settings.aiModel?.startsWith("gemini-")
+                      ? settings.aiModel
+                      : DEFAULT_GEMINI_MODEL,
+                  })
+                }
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="AIza…"
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Modèle
+              </span>
+              <select
+                value={
+                  FREE_GEMINI_MODELS.some((model) => model.id === settings.aiModel)
+                    ? settings.aiModel
+                    : DEFAULT_GEMINI_MODEL
+                }
+                onChange={(event) =>
+                  void patchSettings({
+                    aiProvider: "gemini",
+                    aiEndpoint: "",
+                    aiModel: event.target.value,
+                  })
+                }
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+              >
+                {FREE_GEMINI_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/5 px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                {settings.aiApiKey?.trim()
+                  ? "Gemini configuré sur cet appareil."
+                  : "Ajoutez une clé Gemini pour activer l'IA en ligne."}
+              </div>
+              {settings.aiApiKey?.trim() && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void patchSettings({
+                      aiProvider: "gemini",
+                      aiEndpoint: "",
+                      aiApiKey: "",
+                      aiModel: DEFAULT_GEMINI_MODEL,
+                    })
+                  }
+                  className="shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-[10px] font-bold text-foreground active:scale-95"
+                >
+                  Effacer la clé
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
