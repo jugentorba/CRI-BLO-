@@ -28,6 +28,8 @@ export interface AppSettings {
   permissionsOnboardingDone?: boolean;
 }
 
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+
 const DEFAULTS: AppSettings = {
   id: "app",
   autoSave: true,
@@ -42,30 +44,46 @@ const DEFAULTS: AppSettings = {
   aiProvider: "gemini",
   aiEndpoint: "",
   aiApiKey: "",
-  aiModel: "gemini-3.5-flash",
+  aiModel: DEFAULT_GEMINI_MODEL,
   permissionsOnboardingDone: false,
 };
+
+function normalizeAiSettings(settings: AppSettings): AppSettings {
+  if ((settings.aiProvider ?? "gemini") === "gemini") {
+    return {
+      ...settings,
+      aiProvider: "gemini",
+      // A stale custom endpoint must never silently override Gemini.
+      aiEndpoint: "",
+      aiModel: settings.aiModel?.startsWith("gemini-")
+        ? settings.aiModel
+        : DEFAULT_GEMINI_MODEL,
+    };
+  }
+  return settings;
+}
 
 export async function getSettings(): Promise<AppSettings> {
   return tx(STORE_SETTINGS, "readonly", async (s) => {
     const r = (await reqAsync(s.get("app"))) as AppSettings | undefined;
-    const merged = { ...DEFAULTS, ...(r ?? {}) };
+    let merged: AppSettings = { ...DEFAULTS, ...(r ?? {}) };
 
     // Existing CRI-BLO installs used a generic OpenAI-compatible endpoint. Keep
     // those settings working, but new/no-endpoint installs use Gemini directly.
     if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
     if (!r?.aiProvider && !r?.aiEndpoint?.trim()) {
       merged.aiProvider = "gemini";
-      if (!r?.aiModel || r.aiModel === "gpt-4o-mini") merged.aiModel = "gemini-3.5-flash";
+      if (!r?.aiModel || r.aiModel === "gpt-4o-mini") merged.aiModel = DEFAULT_GEMINI_MODEL;
     }
 
+    merged = normalizeAiSettings(merged);
     return merged;
   });
 }
 
 export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
-  const next: AppSettings = { ...current, ...patch, id: "app" };
+  const next: AppSettings = normalizeAiSettings({ ...current, ...patch, id: "app" });
   await tx(STORE_SETTINGS, "readwrite", (s) => reqAsync(s.put(next)));
   try {
     window.dispatchEvent(new CustomEvent("criblo:settings", { detail: next }));
