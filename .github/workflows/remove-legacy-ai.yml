@@ -1,0 +1,67 @@
+name: Remove obsolete custom AI branch
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove legacy endpoint path
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/assistant.tsx')
+          s = p.read_text()
+          s = s.replace('import { getSettings } from "@/lib/settings/repository";\n', '')
+          s = s.replace('import { callIndependentAi } from "@/lib/ai/independent";\n', '')
+          old = '''        const settings = await getSettings();
+        if (settings.aiEndpoint?.trim()) {
+          output = await callIndependentAi(
+            { endpoint: settings.aiEndpoint, apiKey: settings.aiApiKey ?? "", model: settings.aiModel ?? "gpt-4o-mini" },
+            `Réponds en ${outputLang}. Ton: ${tone}.\\n${context.slice(0, 6000)}`,
+          );
+        } else {
+          const res = await askAssistant({
+            data: { text: context.slice(0, 6000), inputLang, outputLang, tone },
+          });
+          if (res.ok) output = res.text;
+          else {
+            setError(res.message);
+            output = outputLang === "fr" ? translateNotes(clean) : "";
+          }
+        }
+'''
+          new = '''        const res = await askAssistant({
+          data: { text: context.slice(0, 6000), inputLang, outputLang, tone },
+        });
+        if (res.ok) output = res.text;
+        else {
+          setError(res.message);
+          output = outputLang === "fr" ? translateNotes(clean) : "";
+        }
+'''
+          if old not in s:
+              raise SystemExit('legacy AI block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Remove helper and commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/remove-legacy-ai.yml
+          git add src/routes/assistant.tsx
+          git commit -m "Remove legacy custom AI endpoint path"
+          git push origin HEAD:criblo-master-spec-v1
