@@ -10,20 +10,20 @@ type Item = {
 export function YesNoButtons({
   value,
   onChange,
-  allowNA = false,
 }: {
   value: Value;
   onChange: (value: Value) => void;
+  /** Kept for source compatibility; CRI-BLO now exposes N/A on every Yes/No field. */
   allowNA?: boolean;
 }) {
   const items: Item[] = [
     { v: true, label: "Oui" },
     { v: false, label: "Non" },
+    { v: "N/A", label: "N/A" },
   ];
-  if (allowNA) items.push({ v: "N/A", label: "N/A" });
 
   return (
-    <div className={cn("grid gap-2", allowNA ? "grid-cols-3" : "grid-cols-2")}>
+    <div className="grid grid-cols-3 gap-2">
       {items.map((item) => {
         // `na` remains readable for records created by older CRI-BLO versions,
         // while every new selection is stored as the exact literal `N/A`.
