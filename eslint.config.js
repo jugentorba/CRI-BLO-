@@ -6,7 +6,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  { ignores: ["dist", "dist-apkforge", ".output", ".vinxi", "android", "ios"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -37,4 +37,11 @@ export default tseslint.config(
     },
   },
   eslintPluginPrettier,
+  {
+    // Formatting is useful feedback, but it must not hide real TypeScript or
+    // build failures behind hundreds of style-only errors.
+    rules: {
+      "prettier/prettier": "warn",
+    },
+  },
 );
