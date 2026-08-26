@@ -25,8 +25,6 @@ import {
 } from "@/lib/ai/chats";
 import { useOnline } from "@/hooks/use-online";
 import { cn } from "@/lib/utils";
-import { getSettings } from "@/lib/settings/repository";
-import { callIndependentAi } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/assistant")({
   head: () => ({
@@ -112,21 +110,13 @@ function Assistant() {
               .map((m) => `${m.role === "user" ? "Note" : "Réponse"} : ${m.text}`)
               .join("\n")}\n\nNouvelle demande : ${clean}`
           : clean;
-        const settings = await getSettings();
-        if (settings.aiEndpoint?.trim()) {
-          output = await callIndependentAi(
-            { endpoint: settings.aiEndpoint, apiKey: settings.aiApiKey ?? "", model: settings.aiModel ?? "gpt-4o-mini" },
-            `Réponds en ${outputLang}. Ton: ${tone}.\n${context.slice(0, 6000)}`,
-          );
-        } else {
-          const res = await askAssistant({
-            data: { text: context.slice(0, 6000), inputLang, outputLang, tone },
-          });
-          if (res.ok) output = res.text;
-          else {
-            setError(res.message);
-            output = outputLang === "fr" ? translateNotes(clean) : "";
-          }
+        const res = await askAssistant({
+          data: { text: context.slice(0, 6000), inputLang, outputLang, tone },
+        });
+        if (res.ok) output = res.text;
+        else {
+          setError(res.message);
+          output = outputLang === "fr" ? translateNotes(clean) : "";
         }
       }
     } catch {
