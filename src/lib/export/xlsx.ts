@@ -139,6 +139,7 @@ function sortPhotoSlots(slots: string[]): string[] {
 }
 
 function fmtDateTime(v: unknown): string {
+  if (v === "na" || v === "N/A") return "N/A";
   if (!v || typeof v !== "string") return "";
   const d = new Date(v);
   return isNaN(d.getTime()) ? String(v) : d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
@@ -146,6 +147,7 @@ function fmtDateTime(v: unknown): string {
 function fmtYesNo(v: unknown): string {
   if (v === true) return "oui";
   if (v === false) return "non";
+  if (v === "na" || v === "N/A") return "N/A";
   return "";
 }
 function fmtYesNoNa(v: unknown): string {
@@ -165,6 +167,7 @@ function fmtNumberNA(v: unknown): string {
 function fmtRadioOuiNon(v: unknown): string {
   if (v === true) return "☒ oui   ☐ non";
   if (v === false) return "☐ oui   ☒ non";
+  if (v === "na" || v === "N/A") return "N/A";
   return "";
 }
 function fmtDefautLocalise(v: unknown, cri: CriRecord): string {
