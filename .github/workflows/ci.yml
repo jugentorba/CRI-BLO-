@@ -82,3 +82,39 @@ jobs:
           name: CRI-BLO-Android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  ios-simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies from public npm
+        run: npm install --no-audit --no-fund
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Generate iOS project
+        run: npx cap add ios
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Build iOS simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
