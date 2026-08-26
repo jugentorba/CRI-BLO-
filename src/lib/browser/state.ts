@@ -1,6 +1,8 @@
 // État persistant (en mémoire) du navigateur intégré : conservé quand on
 // quitte l'onglet Navigateur puis qu'on y revient.
 
+import { hasNativeCriBrowser } from "@/lib/browser/native";
+
 export interface BrowserState {
   stack: string[];
   index: number;
@@ -13,6 +15,9 @@ const state: BrowserState = { stack: [], index: -1, reloadKey: 0 };
 let pageCache: { url: string; reloadKey: number; html: string; title: string } | null = null;
 
 export function getPageCache(url: string, reloadKey: number): { html: string; title: string } | null {
+  // Native Android/iOS browsing is a live WebView/WKWebView session. Never let
+  // the PWA proxy cache suppress reopening the native browser for a saved tab.
+  if (hasNativeCriBrowser()) return null;
   if (pageCache && pageCache.url === url && pageCache.reloadKey === reloadKey) {
     return { html: pageCache.html, title: pageCache.title };
   }
@@ -20,6 +25,7 @@ export function getPageCache(url: string, reloadKey: number): { html: string; ti
 }
 
 export function setPageCache(url: string, reloadKey: number, html: string, title: string): void {
+  if (hasNativeCriBrowser()) return;
   pageCache = { url, reloadKey, html, title };
 }
 
