@@ -1,0 +1,38 @@
+name: Patch iOS GeoReseaux auxclick
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-ios-georeseaux-auxclick.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Correct right-button auxclick
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
+          s = p.read_text()
+          old = "mouse(target, 'auxclick', x, y, 1, 0);"
+          new = "mouse(target, 'auxclick', x, y, 2, 0);"
+          if old not in s:
+              raise SystemExit('auxclick target not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit correction and remove helper
+        run: |
+          rm .github/workflows/patch-ios-georeseaux-auxclick.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Correct iOS GeoReseaux right-click fallback'
+          git push origin HEAD:criblo-master-spec-v1
