@@ -267,6 +267,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.keyboardDismissMode = .interactive
+        webView.scrollView.delaysContentTouches = false
+        webView.allowsLinkPreview = false
         webView.translatesAutoresizingMaskIntoConstraints = false
 
         // Orange/SiteMinder can reject the stripped WKWebView user agent after
@@ -275,7 +277,16 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // persistence in the app's default website data store.
         let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
         let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
-        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+        if longPressCompatibility {
+            // GeoReseaux works in Android Chrome/WebView but not iOS Safari.
+            // Send the same Chrome-class Android identity at the HTTP layer so
+            // any server-side Orange feature gating also selects the Android map
+            // implementation. Previous builds changed navigator.userAgent only
+            // after the page was already delivered, which was too late for that.
+            webView.customUserAgent = "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+        } else {
+            webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+        }
 
         if longPressCompatibility {
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
@@ -778,13 +789,25 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     (function () {
       try {
         var host = String(location.hostname || '').toLowerCase();
-        var isTarget = host === 'mobi-prod.orange.fr' || host.indexOf('georeseaux') >= 0 || host.indexOf('geo-reseaux') >= 0;
+        var isTarget = host === 'orange.fr' || host.slice(-10) === '.orange.fr' || host.indexOf('georeseaux') >= 0 || host.indexOf('geo-reseaux') >= 0;
         if (!isTarget) return;
         var androidUA = 'Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36';
         try { Object.defineProperty(navigator, 'userAgent', { configurable: true, get: function(){ return androidUA; } }); } catch (_) {}
         try { Object.defineProperty(navigator, 'platform', { configurable: true, get: function(){ return 'Linux armv8l'; } }); } catch (_) {}
         try { Object.defineProperty(navigator, 'vendor', { configurable: true, get: function(){ return 'Google Inc.'; } }); } catch (_) {}
         try { Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, get: function(){ return 5; } }); } catch (_) {}
+        try { Object.defineProperty(navigator, 'appVersion', { configurable: true, get: function(){ return androidUA.replace(/^Mozilla\//, ''); } }); } catch (_) {}
+        try {
+          if (!navigator.userAgentData) {
+            Object.defineProperty(navigator, 'userAgentData', { configurable: true, get: function(){ return {
+              mobile: true,
+              platform: 'Android',
+              brands: [{ brand: 'Chromium', version: '139' }, { brand: 'Google Chrome', version: '139' }],
+              getHighEntropyValues: function(){ return Promise.resolve({ platform: 'Android', platformVersion: '16', mobile: true, model: 'Pixel 9 Pro' }); }
+            }; }});
+          }
+        } catch (_) {}
+        try { if (!window.chrome) window.chrome = { runtime: {} }; } catch (_) {}
         window.__cribloGeoReseauxAndroidCompat = true;
       } catch (_) {}
     })();
@@ -1008,6 +1031,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         try { if (window.maplibregl) wrapConstructor(window.maplibregl, 'Map', 'MapLibre'); } catch (_) {}
       }
       installMapHooks();
+      // External map libraries execute before the next parser script. A capture
+      // listener on SCRIPT load lets CRI-BLO wrap their constructors immediately
+      // after the library defines them and before the following app bundle can
+      // construct a map hidden inside a closure.
+      var __cribloScriptLoadHook = function (event) {
+        try {
+          var target = event && event.target;
+          if (target && String(target.tagName || '').toUpperCase() === 'SCRIPT') installMapHooks();
+        } catch (_) {}
+      };
+      document.addEventListener('load', __cribloScriptLoadHook, true);
       var __cribloHookTicks = 0;
       var __cribloHookTimer = setInterval(function () {
         installMapHooks();
