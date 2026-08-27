@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Keep publishing the accepted working branch without merging the draft PR.
+      # This run publishes the iOS GPS and multi-photo reliability fixes.
       - name: Checkout current CRI-BLO working branch
         uses: actions/checkout@v4
         with:
