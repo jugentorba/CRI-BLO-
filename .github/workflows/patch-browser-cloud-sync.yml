@@ -1,0 +1,152 @@
+name: Patch browser cloud sync
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - .github/workflows/patch-browser-cloud-sync.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+
+      - name: Add password-free browser state backup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # ---------------- iOS native browser ----------------
+          p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
+          s = p.read_text()
+
+          old = '''private struct BrowserRecord: Codable {\n    let url: String\n    let title: String\n    let visitedAt: TimeInterval\n}\n'''
+          new = old + '''\nprivate struct BrowserBackup: Codable {\n    let version: Int\n    let updatedAt: TimeInterval\n    let lastURL: String?\n    let tabs: [String]\n    let history: [BrowserRecord]\n    let favorites: [BrowserRecord]\n}\n'''
+          if old not in s: raise SystemExit('Swift BrowserRecord target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    public let pluginMethods: [CAPPluginMethod] = [\n        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise)\n    ]'''
+          new = '''    public let pluginMethods: [CAPPluginMethod] = [\n        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),\n        CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),\n        CAPPluginMethod(name: "restoreState", returnType: CAPPluginReturnPromise)\n    ]'''
+          if old not in s: raise SystemExit('Swift pluginMethods target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    private weak var activeBrowser: CRIBrowserViewController?\n\n    @objc func open(_ call: CAPPluginCall) {'''
+          new = '''    private weak var activeBrowser: CRIBrowserViewController?\n\n    @objc func getState(_ call: CAPPluginCall) {\n        call.resolve(["stateJson": CRIBrowserViewController.exportPersistentState()])\n    }\n\n    @objc func restoreState(_ call: CAPPluginCall) {\n        guard let raw = call.getString("stateJson") else {\n            call.reject("État navigateur manquant.")\n            return\n        }\n        do {\n            let applied = try CRIBrowserViewController.restorePersistentState(raw)\n            call.resolve(["applied": applied])\n        } catch {\n            call.reject("Sauvegarde navigateur invalide.")\n        }\n    }\n\n    @objc func open(_ call: CAPPluginCall) {'''
+          if old not in s: raise SystemExit('Swift plugin method insertion target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    private static let tabsKey = "criblo.browser.native.tabs"\n'''
+          new = old + '''    private static let stateUpdatedAtKey = "criblo.browser.native.updatedAt"\n'''
+          if old not in s: raise SystemExit('Swift tabs key target missing')
+          s = s.replace(old, new, 1)
+
+          marker = '''    static let pinnedOrangeURL = URL(string: "https://mobi-prod.orange.fr/mobi2/web/home/?codeContexte=MOBI2")!\n'''
+          addition = marker + '''\n    static func exportPersistentState() -> String {\n        let defaults = UserDefaults.standard\n        func records(_ key: String) -> [BrowserRecord] {\n            guard let data = defaults.data(forKey: key) else { return [] }\n            return (try? JSONDecoder().decode([BrowserRecord].self, from: data)) ?? []\n        }\n        let backup = BrowserBackup(\n            version: 1,\n            updatedAt: defaults.double(forKey: stateUpdatedAtKey),\n            lastURL: defaults.string(forKey: lastURLKey),\n            tabs: defaults.stringArray(forKey: tabsKey) ?? [],\n            history: records(historyKey),\n            favorites: records(favoritesKey)\n        )\n        guard let data = try? JSONEncoder().encode(backup) else { return "{}" }\n        return String(data: data, encoding: .utf8) ?? "{}"\n    }\n\n    static func restorePersistentState(_ raw: String) throws -> Bool {\n        guard let data = raw.data(using: .utf8) else { throw NSError(domain: "CRIBrowser", code: 1) }\n        let backup = try JSONDecoder().decode(BrowserBackup.self, from: data)\n        guard backup.version == 1 else { throw NSError(domain: "CRIBrowser", code: 2) }\n        let defaults = UserDefaults.standard\n        let localUpdatedAt = defaults.double(forKey: stateUpdatedAtKey)\n        guard backup.updatedAt > localUpdatedAt else { return false }\n\n        let validTabs = backup.tabs.filter { value in\n            if value == "about:blank" { return true }\n            guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }\n            return scheme == "http" || scheme == "https"\n        }\n        defaults.set(validTabs.isEmpty ? [pinnedOrangeURL.absoluteString] : validTabs, forKey: tabsKey)\n\n        if let last = backup.lastURL,\n           let url = URL(string: last),\n           let scheme = url.scheme?.lowercased(),\n           scheme == "http" || scheme == "https" {\n            defaults.set(last, forKey: lastURLKey)\n        }\n        if let historyData = try? JSONEncoder().encode(Array(backup.history.prefix(100))) {\n            defaults.set(historyData, forKey: historyKey)\n        }\n        if let favoriteData = try? JSONEncoder().encode(Array(backup.favorites.prefix(100))) {\n            defaults.set(favoriteData, forKey: favoritesKey)\n        }\n        defaults.set(backup.updatedAt, forKey: stateUpdatedAtKey)\n        return true\n    }\n\n    private static func touchPersistentState() {\n        defaultsSetUpdatedAt(Date().timeIntervalSince1970 * 1000)\n    }\n\n    private static func defaultsSetUpdatedAt(_ value: TimeInterval) {\n        UserDefaults.standard.set(value, forKey: stateUpdatedAtKey)\n    }\n'''
+          if marker not in s: raise SystemExit('Swift pinned URL target missing')
+          s = s.replace(marker, addition, 1)
+
+          old = '''    private func persistTabs() {\n        UserDefaults.standard.set(tabURLs, forKey: Self.tabsKey)\n    }'''
+          new = '''    private func persistTabs() {\n        UserDefaults.standard.set(tabURLs, forKey: Self.tabsKey)\n        Self.touchPersistentState()\n    }'''
+          if old not in s: raise SystemExit('Swift persistTabs target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    private func saveRecords(_ records: [BrowserRecord], key: String) {\n        guard let data = try? JSONEncoder().encode(records) else { return }\n        UserDefaults.standard.set(data, forKey: key)\n    }'''
+          new = '''    private func saveRecords(_ records: [BrowserRecord], key: String) {\n        guard let data = try? JSONEncoder().encode(records) else { return }\n        UserDefaults.standard.set(data, forKey: key)\n        Self.touchPersistentState()\n    }'''
+          if old not in s: raise SystemExit('Swift saveRecords target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''            controller.addAction(UIAlertAction(title: "Effacer l'historique", style: .destructive) { _ in\n                UserDefaults.standard.removeObject(forKey: Self.historyKey)\n            })'''
+          new = '''            controller.addAction(UIAlertAction(title: "Effacer l'historique", style: .destructive) { _ in\n                UserDefaults.standard.removeObject(forKey: Self.historyKey)\n                Self.touchPersistentState()\n            })'''
+          if old not in s: raise SystemExit('Swift clear history target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # ---------------- Android native browser ----------------
+          p = Path('plugins/criblo-native-browser/android/src/main/java/com/criblo/nativebrowser/CRIBrowserPlugin.java')
+          s = p.read_text()
+          old = '''    private static final String KEY_TABS = "tabs";\n'''
+          new = old + '''    private static final String KEY_UPDATED_AT = "updatedAt";\n'''
+          if old not in s: raise SystemExit('Android tabs key target missing')
+          s = s.replace(old, new, 1)
+
+          marker = '''    @PluginMethod\n    public void open(PluginCall call) {'''
+          methods = '''    @PluginMethod\n    public void getState(PluginCall call) {\n        SharedPreferences storage = getActivity().getSharedPreferences(PREFS, 0);\n        try {\n            JSONObject state = new JSONObject();\n            state.put("version", 1);\n            state.put("updatedAt", storage.getLong(KEY_UPDATED_AT, 0));\n            String last = storage.getString(KEY_LAST_URL, null);\n            if (last != null) state.put("lastURL", last);\n            state.put("tabs", new JSONArray(storage.getString(KEY_TABS, "[]")));\n            state.put("history", exportRecords(storage.getString(KEY_HISTORY, "[]")));\n            state.put("favorites", exportRecords(storage.getString(KEY_FAVORITES, "[]")));\n            JSObject result = new JSObject();\n            result.put("stateJson", state.toString());\n            call.resolve(result);\n        } catch (Exception error) {\n            call.reject("Impossible de lire l'état navigateur.");\n        }\n    }\n\n    @PluginMethod\n    public void restoreState(PluginCall call) {\n        String raw = call.getString("stateJson");\n        if (raw == null) { call.reject("État navigateur manquant."); return; }\n        SharedPreferences storage = getActivity().getSharedPreferences(PREFS, 0);\n        try {\n            JSONObject state = new JSONObject(raw);\n            if (state.optInt("version", 0) != 1) throw new IllegalArgumentException("version");\n            long remoteUpdatedAt = state.optLong("updatedAt", 0);\n            long localUpdatedAt = storage.getLong(KEY_UPDATED_AT, 0);\n            JSObject result = new JSObject();\n            if (remoteUpdatedAt <= localUpdatedAt) {\n                result.put("applied", false);\n                call.resolve(result);\n                return;\n            }\n\n            JSONArray tabs = state.optJSONArray("tabs");\n            JSONArray validTabs = new JSONArray();\n            if (tabs != null) {\n                for (int i = 0; i < tabs.length(); i++) {\n                    String value = tabs.optString(i);\n                    if (value.equals("about:blank") || value.startsWith("http://") || value.startsWith("https://")) validTabs.put(value);\n                }\n            }\n            if (validTabs.length() == 0) validTabs.put(PINNED_ORANGE_URL);\n\n            SharedPreferences.Editor editor = storage.edit();\n            editor.putString(KEY_TABS, validTabs.toString());\n            String last = state.optString("lastURL", "");\n            if (last.startsWith("http://") || last.startsWith("https://")) editor.putString(KEY_LAST_URL, last);\n            editor.putString(KEY_HISTORY, importRecords(state.optJSONArray("history")).toString());\n            editor.putString(KEY_FAVORITES, importRecords(state.optJSONArray("favorites")).toString());\n            editor.putLong(KEY_UPDATED_AT, remoteUpdatedAt);\n            editor.apply();\n            result.put("applied", true);\n            call.resolve(result);\n        } catch (Exception error) {\n            call.reject("Sauvegarde navigateur invalide.");\n        }\n    }\n\n    private static JSONArray exportRecords(String raw) {\n        JSONArray result = new JSONArray();\n        try {\n            JSONArray local = new JSONArray(raw);\n            for (int i = 0; i < local.length(); i++) {\n                JSONObject source = local.optJSONObject(i);\n                if (source == null) continue;\n                JSONObject item = new JSONObject();\n                item.put("url", source.optString("url"));\n                item.put("title", source.optString("title"));\n                item.put("visitedAt", source.optLong("time", 0));\n                result.put(item);\n            }\n        } catch (Exception ignored) {}\n        return result;\n    }\n\n    private static JSONArray importRecords(JSONArray cloud) {\n        JSONArray result = new JSONArray();\n        if (cloud == null) return result;\n        for (int i = 0; i < Math.min(100, cloud.length()); i++) {\n            JSONObject source = cloud.optJSONObject(i);\n            if (source == null) continue;\n            try {\n                JSONObject item = new JSONObject();\n                item.put("url", source.optString("url"));\n                item.put("title", source.optString("title"));\n                item.put("time", (long) source.optDouble("visitedAt", 0));\n                result.put(item);\n            } catch (Exception ignored) {}\n        }\n        return result;\n    }\n\n    private void touchState() {\n        SharedPreferences storage = prefs != null ? prefs : getActivity().getSharedPreferences(PREFS, 0);\n        storage.edit().putLong(KEY_UPDATED_AT, System.currentTimeMillis()).apply();\n    }\n\n''' + marker
+          if marker not in s: raise SystemExit('Android open method marker missing')
+          s = s.replace(marker, methods, 1)
+
+          old = '''    private void persistTabs() {\n        JSONArray arr = new JSONArray();\n        for (String url : tabUrls) arr.put(url);\n        prefs.edit().putString(KEY_TABS, arr.toString()).apply();\n    }'''
+          new = '''    private void persistTabs() {\n        JSONArray arr = new JSONArray();\n        for (String url : tabUrls) arr.put(url);\n        prefs.edit().putString(KEY_TABS, arr.toString()).apply();\n        touchState();\n    }'''
+          if old not in s: raise SystemExit('Android persistTabs target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''        prefs.edit().putString(key, arr.toString()).apply();\n    }\n\n    private String displayHost'''
+          new = '''        prefs.edit().putString(key, arr.toString()).apply();\n        touchState();\n    }\n\n    private String displayHost'''
+          if old not in s: raise SystemExit('Android saveRecords target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''            .setNeutralButton(history.isEmpty() ? "" : "Clear history", (dialog, which) -> prefs.edit().remove(KEY_HISTORY).apply())'''
+          new = '''            .setNeutralButton(history.isEmpty() ? "" : "Clear history", (dialog, which) -> { prefs.edit().remove(KEY_HISTORY).apply(); touchState(); })'''
+          if old not in s: raise SystemExit('Android clear history target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # ---------------- JS native bridge ----------------
+          p = Path('src/lib/browser/native.ts')
+          s = p.read_text()
+          old = '''interface CRIBrowserPlugin {\n  open(options: NativeBrowserOpenOptions): Promise<NativeBrowserOpenResult>;\n}'''
+          new = '''interface CRIBrowserPlugin {\n  open(options: NativeBrowserOpenOptions): Promise<NativeBrowserOpenResult>;\n  getState(): Promise<{ stateJson?: string }>;\n  restoreState(options: { stateJson: string }): Promise<{ applied?: boolean }>;\n}'''
+          if old not in s: raise SystemExit('native.ts interface target missing')
+          s = s.replace(old, new, 1)
+          s += '''\nexport async function getNativeBrowserStateJson(): Promise<string> {\n  if (!hasNativeCriBrowser()) return "";\n  const result = await CRIBrowser.getState();\n  return result.stateJson ?? "";\n}\n\nexport async function restoreNativeBrowserState(stateJson: string): Promise<boolean> {\n  if (!hasNativeCriBrowser() || !stateJson.trim()) return false;\n  const result = await CRIBrowser.restoreState({ stateJson });\n  return result.applied ?? false;\n}\n'''
+          p.write_text(s)
+
+          # ---------------- OneDrive Browser folder ----------------
+          p = Path('src/lib/onedrive/config.ts')
+          s = p.read_text()
+          old = '''  zip: "ZIP Packages",\n} as const;'''
+          new = '''  zip: "ZIP Packages",\n  browser: "Browser",\n} as const;'''
+          if old not in s: raise SystemExit('OneDrive folder target missing')
+          p.write_text(s.replace(old, new, 1))
+
+          # ---------------- Browser cloud sync helper ----------------
+          p = Path('src/lib/browser/sync.ts')
+          p.write_text('''import { getNativeBrowserStateJson, hasNativeCriBrowser, restoreNativeBrowserState } from "@/lib/browser/native";\nimport { getCurrentAccount } from "@/lib/onedrive/auth";\nimport { APP_FOLDERS, isOneDriveConfigured } from "@/lib/onedrive/config";\nimport { downloadFile, ensureAppFolders, uploadFile } from "@/lib/onedrive/graph";\n\nconst BROWSER_BACKUP_PATH = `${APP_FOLDERS.browser}/browser-state.json`;\n\nfunction updatedAt(raw: string): number {\n  try {\n    const value = JSON.parse(raw) as { version?: unknown; updatedAt?: unknown };\n    if (value.version !== 1) return 0;\n    const stamp = Number(value.updatedAt ?? 0);\n    return Number.isFinite(stamp) && stamp > 0 ? stamp : 0;\n  } catch {\n    return 0;\n  }\n}\n\nasync function canSync(): Promise<boolean> {\n  if (!hasNativeCriBrowser() || !isOneDriveConfigured()) return false;\n  return Boolean(await getCurrentAccount());\n}\n\nexport async function syncNativeBrowserBeforeOpen(): Promise<\n  "disabled" | "restored" | "uploaded" | "current"\n> {\n  if (!(await canSync())) return "disabled";\n  const localRaw = await getNativeBrowserStateJson();\n  const localStamp = updatedAt(localRaw);\n  await ensureAppFolders();\n\n  try {\n    const cloudBlob = await downloadFile(BROWSER_BACKUP_PATH);\n    const cloudRaw = await cloudBlob.text();\n    const cloudStamp = updatedAt(cloudRaw);\n    if (cloudStamp > localStamp) {\n      const applied = await restoreNativeBrowserState(cloudRaw);\n      return applied ? "restored" : "current";\n    }\n    if (localStamp > cloudStamp && localStamp > 0) {\n      await uploadFile(BROWSER_BACKUP_PATH, new Blob([localRaw], { type: "application/json" }));\n      return "uploaded";\n    }\n    return "current";\n  } catch {\n    if (localStamp > 0) {\n      try {\n        await uploadFile(BROWSER_BACKUP_PATH, new Blob([localRaw], { type: "application/json" }));\n        return "uploaded";\n      } catch {\n        return "current";\n      }\n    }\n    return "current";\n  }\n}\n\nexport async function backupNativeBrowserToCloud(): Promise<boolean> {\n  if (!(await canSync())) return false;\n  const stateJson = await getNativeBrowserStateJson();\n  if (!updatedAt(stateJson)) return false;\n  await ensureAppFolders();\n  await uploadFile(BROWSER_BACKUP_PATH, new Blob([stateJson], { type: "application/json" }));\n  return true;\n}\n''')
+
+          # ---------------- Native navigator integration ----------------
+          p = Path('src/routes/navigateur.tsx')
+          s = p.read_text()
+          old = '''import { hasNativeCriBrowser, openNativeCriBrowser } from "@/lib/browser/native";\n'''
+          new = old + '''import { backupNativeBrowserToCloud, syncNativeBrowserBeforeOpen } from "@/lib/browser/sync";\n'''
+          if old not in s: raise SystemExit('Navigator import target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''    try {\n      const result = await openNativeCriBrowser(PINNED_ORANGE_URL, {'''
+          new = '''    try {\n      await syncNativeBrowserBeforeOpen().catch(() => "disabled" as const);\n      const result = await openNativeCriBrowser(PINNED_ORANGE_URL, {'''
+          if old not in s: raise SystemExit('Navigator pre-open target missing')
+          s = s.replace(old, new, 1)
+
+          old = '''      if (mountedRef.current) setClosed(true);\n    } catch (cause) {'''
+          new = '''      await backupNativeBrowserToCloud().catch(() => false);\n      if (mountedRef.current) setClosed(true);\n    } catch (cause) {'''
+          if old not in s: raise SystemExit('Navigator post-close target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Commit patch and remove helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-browser-cloud-sync.yml
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          git add plugins/criblo-native-browser/android/src/main/java/com/criblo/nativebrowser/CRIBrowserPlugin.java
+          git add src/lib/browser/native.ts src/lib/browser/sync.ts src/lib/onedrive/config.ts src/routes/navigateur.tsx
+          git commit -m "Sync browser metadata through OneDrive"
+          git push origin HEAD:criblo-master-spec-v1
