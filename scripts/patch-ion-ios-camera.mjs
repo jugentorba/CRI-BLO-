@@ -36,7 +36,7 @@ if (savedMatches !== 2) {
 
 source = source.replace(
   anchor,
-  `            // Swift 5.10 rejects capturing a mutable local variable from the\n` +
+  `            // Swift rejects capturing a mutable local variable from the\n` +
     `            // concurrently executing thumbnail/metadata closures. Freeze the\n` +
     `            // completed gallery result before either closure captures it.\n` +
     `            let savedForResult = saved\n` +
@@ -44,5 +44,13 @@ source = source.replace(
 );
 source = source.split(savedUse).join('saved: savedForResult)');
 
-fs.writeFileSync(target, source);
+// SwiftPM checks dependency working copies out read-only. Make only the file we
+// need to patch writable, then restore it to read-only after the edit.
+const originalMode = fs.statSync(target).mode & 0o777;
+fs.chmodSync(target, originalMode | 0o200);
+try {
+  fs.writeFileSync(target, source);
+} finally {
+  fs.chmodSync(target, originalMode);
+}
 console.log(`Patched Swift concurrency capture in ${target}`);
