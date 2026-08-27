@@ -919,7 +919,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
         pointer(target, 'pointerup', x, y, 2, 0);
         mouse(target, 'mouseup', x, y, 2, 0);
-        mouse(target, 'auxclick', x, y, 1, 0);
+        mouse(target, 'auxclick', x, y, 2, 0);
         return handled;
       }
 
