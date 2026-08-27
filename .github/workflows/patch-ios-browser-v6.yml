@@ -1,0 +1,48 @@
+name: Patch iOS browser v6
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-ios-browser-v6.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Make helper map replacement resilient
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patch-ios-browser-v6.py')
+          s = p.read_text()
+          old_head = "map_anchor = '      function invokeMapEngine(target, x, y, sourceEvent) {\\n        var values = safeObjectValues(window, 2);'\nif '__cribloMapInstances' not in text:\n"
+          new_head = "map_pattern = re.compile(r'      function invokeMapEngine\\(target, x, y, sourceEvent\\) \\{\\s*var values = safeObjectValues\\(window, 2\\);')\nif '__cribloMapInstances' not in text:\n"
+          if old_head not in s:
+              raise SystemExit('helper map header anchor not found')
+          s = s.replace(old_head, new_head, 1)
+          old_tail = "    if map_anchor not in text:\n        raise SystemExit('map engine anchor not found')\n    text = text.replace(map_anchor, map_registry, 1)\n"
+          new_tail = "    text, count = map_pattern.subn(map_registry, text, count=1)\n    if count != 1:\n        raise SystemExit('map engine replacement failed')\n"
+          if old_tail not in s:
+              raise SystemExit('helper map tail anchor not found')
+          s = s.replace(old_tail, new_tail, 1)
+          p.write_text(s)
+          PY
+      - name: Apply browser v6 patch
+        run: python3 scripts/patch-ios-browser-v6.py
+      - name: Commit browser v6
+        shell: bash
+        run: |
+          rm .github/workflows/patch-ios-browser-v6.yml scripts/patch-ios-browser-v6.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift scripts/patch-ios-info.mjs .github/workflows/patch-ios-browser-v6.yml scripts/patch-ios-browser-v6.py
+          git commit -m 'Make iOS GeoReseaux hold adaptive and add Face ID autofill'
+          git push origin HEAD:criblo-master-spec-v1
