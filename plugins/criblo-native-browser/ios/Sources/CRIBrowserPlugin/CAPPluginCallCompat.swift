@@ -14,7 +14,10 @@ extension CAPPluginCall {
         options[key] as? Bool
     }
 
+    // The SwiftPM binary does not export the source-only reject convenience.
+    // These branches are validation failures before the browser is presented;
+    // return a structured failure payload so the JS caller can stop cleanly.
     func reject(_ message: String) {
-        errorHandler(CAPPluginCallError(message: message, code: nil, error: nil, data: nil))
+        resolve(["error": message, "ok": false])
     }
 }
