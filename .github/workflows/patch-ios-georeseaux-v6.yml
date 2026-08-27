@@ -16,6 +16,32 @@ jobs:
         with:
           ref: criblo-master-spec-v1
           fetch-depth: 0
+      - name: Adapt patch helper to current browser source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patch-ios-georeseaux-v6.py')
+          s = p.read_text()
+
+          alias_marker = "      function callCapturedListener(entry, currentTarget, event) {"
+          alias = """      function compatibleContextEvent(target, currentTarget, x, y, sourceEvent) {\n        return compatibleSemanticEvent('contextmenu', target, currentTarget, x, y, sourceEvent);\n      }\n\n"""
+          if alias not in s:
+              if alias_marker not in s:
+                  raise SystemExit('event alias marker missing')
+              s = s.replace(alias_marker, alias + alias_marker, 1)
+
+          start_marker = '# 3) Add exact map-instance registration before invokeMapEngine and deepen fallback scan.'
+          end_marker = '# 4) Dispatch every common semantic event, not only the custom `longpress` name.'
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('map helper section markers missing')
+          map_section = """# 3) The current browser already registers actual map instances at construction time.\nif '__cribloMapRegistry' not in text:\n    raise SystemExit('current map registry missing')\n\n"""
+          s = s[:start] + map_section + s[end:]
+          s = s.replace('__cribloMapInstances.length', '__cribloMapRegistry.length')
+          p.write_text(s)
+          PY
       - name: Apply GeoReseaux v6 patch
         run: python3 scripts/patch-ios-georeseaux-v6.py
       - name: Commit GeoReseaux v6 source
