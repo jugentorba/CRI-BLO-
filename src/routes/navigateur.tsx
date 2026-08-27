@@ -106,17 +106,15 @@ function Navigateur() {
 function NativeNavigator() {
   const mountedRef = useRef(true);
   const [opening, setOpening] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [closed, setClosed] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
-    // Remove the obsolete plaintext password-vault data from older builds. All
-    // credentials are now exclusively handled by the OS password manager.
     try {
       localStorage.removeItem("criblo.browser.passwords");
     } catch {
-      // ignore
+      // ignore obsolete plaintext vault
     }
     return () => {
       mountedRef.current = false;
@@ -127,7 +125,6 @@ function NativeNavigator() {
     if (nativeLaunchInFlight) return;
     nativeLaunchInFlight = true;
     setOpening(true);
-    setClosed(false);
     setError(null);
     try {
       await syncNativeBrowserBeforeOpen().catch(() => "disabled" as const);
@@ -143,7 +140,7 @@ function NativeNavigator() {
         }
       }
       await backupNativeBrowserToCloud().catch(() => false);
-      if (mountedRef.current) setClosed(true);
+      if (mountedRef.current) setSessionReady(true);
     } catch (cause) {
       if (mountedRef.current) {
         setError(cause instanceof Error ? cause.message : "Impossible d'ouvrir CRI-BLO Browser.");
@@ -164,10 +161,10 @@ function NativeNavigator() {
         {opening ? <Loader2 className="h-7 w-7 animate-spin text-primary" /> : <Globe className="h-7 w-7 text-primary" />}
         <div>
           <p className="text-sm font-bold text-foreground">
-            {opening ? "Ouverture du navigateur…" : closed ? "Navigateur fermé" : "CRI-BLO Browser"}
+            {opening ? "Ouverture du navigateur…" : sessionReady ? "Navigateur en arrière-plan" : "CRI-BLO Browser"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Favoris, historique et sessions restent enregistrés. Les mots de passe restent dans Apple Passwords / Android Autofill.
+            Sur iPhone, utilisez le bouton ↓ du navigateur pour revenir à CRI-BLO sans fermer la page. En le reprenant, la même page, la carte, les onglets et la session restent ouverts.
           </p>
         </div>
         {error ? <p className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">{error}</p> : null}
@@ -177,7 +174,7 @@ function NativeNavigator() {
             onClick={() => void launch()}
             className="rounded-full bg-primary px-5 py-2 text-xs font-bold text-primary-foreground"
           >
-            Ouvrir le navigateur
+            {sessionReady ? "Reprendre le navigateur" : "Ouvrir le navigateur"}
           </button>
         ) : null}
       </div>

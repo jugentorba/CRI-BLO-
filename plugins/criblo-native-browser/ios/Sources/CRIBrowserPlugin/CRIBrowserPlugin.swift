@@ -28,7 +28,9 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "restoreState", returnType: CAPPluginReturnPromise)
     ]
 
-    private weak var activeBrowser: CRIBrowserViewController?
+    // Keep the WKWebView/controller alive while the user returns to CRI-BLO.
+    // This preserves the exact page DOM, map position, tabs and login session.
+    private var activeBrowser: CRIBrowserViewController?
 
     @objc func getState(_ call: CAPPluginCall) {
         call.resolve(["stateJson": CRIBrowserViewController.exportPersistentState()])
@@ -68,12 +70,31 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Navigateur indisponible.")
                 return
             }
-            guard self.activeBrowser == nil else {
-                call.reject("Un navigateur CRI-BLO est déjà ouvert.")
-                return
-            }
             guard let host = self.bridge?.viewController else {
                 call.reject("Vue native indisponible.")
+                return
+            }
+
+            // Re-present the same live browser after the user minimized it.
+            // We deliberately do not recreate WKWebView, so GeoReseaux remains
+            // on exactly the same map/page and authenticated cookies stay active.
+            if let browser = self.activeBrowser {
+                if browser.presentingViewController != nil || host.presentedViewController === browser {
+                    call.resolve([
+                        "url": browser.currentURLString,
+                        "title": browser.currentPageTitle,
+                        "reused": true
+                    ])
+                    return
+                }
+                browser.modalPresentationStyle = .fullScreen
+                host.present(browser, animated: true) {
+                    call.resolve([
+                        "url": browser.currentURLString,
+                        "title": browser.currentPageTitle,
+                        "reused": true
+                    ])
+                }
                 return
             }
 
@@ -82,15 +103,17 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
                 longPressCompatibility: longPressCompatibility
             )
             browser.modalPresentationStyle = .fullScreen
-            browser.onClose = { [weak self] finalURL, title in
+            browser.onPermanentClose = { [weak self] _, _ in
                 self?.activeBrowser = nil
-                call.resolve([
-                    "url": finalURL?.absoluteString ?? startString,
-                    "title": title ?? ""
-                ])
             }
             self.activeBrowser = browser
-            host.present(browser, animated: true)
+            host.present(browser, animated: true) {
+                call.resolve([
+                    "url": browser.currentURLString,
+                    "title": browser.currentPageTitle,
+                    "reused": false
+                ])
+            }
         }
     }
 }
@@ -166,7 +189,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
     let startURL: URL
     let longPressCompatibility: Bool
-    var onClose: ((URL?, String?) -> Void)?
+    var onPermanentClose: ((URL?, String?) -> Void)?
+
+    var currentURLString: String { webView?.url?.absoluteString ?? startURL.absoluteString }
+    var currentPageTitle: String { webView?.title ?? "" }
 
     private var webView: WKWebView!
     private let chrome = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
@@ -178,6 +204,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     private lazy var backButton = makeToolbarButton("chevron.backward", action: #selector(goBack))
     private lazy var forwardButton = makeToolbarButton("chevron.forward", action: #selector(goForward))
     private lazy var refreshButton = makeToolbarButton("arrow.clockwise", action: #selector(refreshPage))
+    private lazy var minimizeButton = makeToolbarButton("chevron.down.circle", action: #selector(minimizeBrowser))
     private lazy var favoriteButton = makeToolbarButton("star", action: #selector(showBookmarks))
     private lazy var tabsButton = makeToolbarButton("square.on.square", action: #selector(showTabs))
     private lazy var moreButton = makeToolbarButton("ellipsis.circle", action: #selector(showMore))
@@ -209,12 +236,23 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: Self.autofillCompatibilityScript,
-                injectionTime: .atDocumentEnd,
+                injectionTime: .atDocumentStart,
                 forMainFrameOnly: false
             )
         )
 
         if longPressCompatibility {
+            // GeoReseaux has historically exposed its map hold tools on Android
+            // but not iOS Safari. Keep the HTTP user-agent Safari-compatible for
+            // Orange auth, while presenting Android-style feature signals only
+            // to GeoReseaux/MOBI page JavaScript at document start.
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: Self.geoReseauxPlatformCompatibilityScript,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false
+                )
+            )
             configuration.userContentController.addUserScript(
                 WKUserScript(
                     source: Self.longPressBridgeScript,
@@ -294,7 +332,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         addressField.leftView = leftSpacer
         addressField.leftViewMode = .always
 
-        let controls = UIStackView(arrangedSubviews: [backButton, forwardButton, refreshButton, favoriteButton, tabsButton, moreButton])
+        minimizeButton.accessibilityLabel = "Retour à CRI-BLO"
+        minimizeButton.accessibilityHint = "Masque le navigateur sans fermer la page"
+        let controls = UIStackView(arrangedSubviews: [backButton, forwardButton, refreshButton, minimizeButton, favoriteButton, tabsButton, moreButton])
         controls.axis = .horizontal
         controls.distribution = .fillEqually
         controls.alignment = .center
@@ -386,9 +426,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isBeingDismissed || presentingViewController == nil {
-            finishOnce()
-        }
+        // A dismissal can be a Safari-style minimize back to CRI-BLO. Persist
+        // metadata, but intentionally keep this controller and WKWebView alive.
+        persistSessionSnapshot()
     }
 
     func gestureRecognizer(
@@ -408,6 +448,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
     @objc private func refreshPage() {
         webView.reload()
+    }
+
+    @objc private func minimizeBrowser() {
+        persistSessionSnapshot()
+        dismiss(animated: true)
     }
 
     @objc private func showBookmarks() {
@@ -453,6 +498,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
     @objc private func showMore() {
         let controller = UIAlertController(title: "CRI-BLO Browser", message: nil, preferredStyle: .actionSheet)
+        controller.addAction(UIAlertAction(title: "Retour à CRI-BLO — garder le navigateur ouvert", style: .default) { [weak self] _ in
+            self?.minimizeBrowser()
+        })
         controller.addAction(UIAlertAction(title: "Historique", style: .default) { [weak self] _ in
             self?.showHistory()
         })
@@ -463,8 +511,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             guard let url = self?.webView.url else { return }
             UIApplication.shared.open(url)
         })
-        controller.addAction(UIAlertAction(title: "Fermer le navigateur", style: .destructive) { [weak self] _ in
-            self?.dismiss(animated: true) { self?.finishOnce() }
+        controller.addAction(UIAlertAction(title: "Fermer complètement le navigateur", style: .destructive) { [weak self] _ in
+            self?.closePermanently()
         })
         controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
         presentActionSheet(controller, source: moreButton)
@@ -602,15 +650,25 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return url.host?.replacingOccurrences(of: "www.", with: "") ?? raw
     }
 
+    private func persistSessionSnapshot() {
+        if let url = webView?.url, url.scheme?.hasPrefix("http") == true {
+            UserDefaults.standard.set(url.absoluteString, forKey: Self.lastURLKey)
+            Self.touchPersistentState()
+        }
+        persistTabs()
+    }
+
+    private func closePermanently() {
+        finishOnce()
+        dismiss(animated: true)
+    }
+
     private func finishOnce() {
         guard !completed else { return }
         completed = true
-        if let url = webView?.url, url.scheme?.hasPrefix("http") == true {
-            UserDefaults.standard.set(url.absoluteString, forKey: Self.lastURLKey)
-        }
-        persistTabs()
-        onClose?(webView?.url ?? startURL, webView?.title)
-        onClose = nil
+        persistSessionSnapshot()
+        onPermanentClose?(webView?.url ?? startURL, webView?.title)
+        onPermanentClose = nil
     }
 
     @objc private func handleNativeLongPress(_ recognizer: UILongPressGestureRecognizer) {
@@ -699,25 +757,139 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     </style></head><body><h2>CRI-BLO Browser</h2><p>Favoris</p><a class="card" href="https://mobi-prod.orange.fr/mobi2/web/home/?codeContexte=MOBI2"><div class="o">O</div><strong>Orange GeoReseaux</strong></a></body></html>
     """#
 
+
+    private static let geoReseauxPlatformCompatibilityScript = #"""
+    (function () {
+      try {
+        var host = String(location.hostname || '').toLowerCase();
+        var isTarget = host === 'mobi-prod.orange.fr' || host.indexOf('georeseaux') >= 0 || host.indexOf('geo-reseaux') >= 0;
+        if (!isTarget) return;
+        var androidUA = 'Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36';
+        try { Object.defineProperty(navigator, 'userAgent', { configurable: true, get: function(){ return androidUA; } }); } catch (_) {}
+        try { Object.defineProperty(navigator, 'platform', { configurable: true, get: function(){ return 'Linux armv8l'; } }); } catch (_) {}
+        try { Object.defineProperty(navigator, 'vendor', { configurable: true, get: function(){ return 'Google Inc.'; } }); } catch (_) {}
+        try { Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, get: function(){ return 5; } }); } catch (_) {}
+        window.__cribloGeoReseauxAndroidCompat = true;
+      } catch (_) {}
+    })();
+    """#
+
     private static let autofillCompatibilityScript = #"""
     (function () {
       if (window.__cribloAutofillInstalled) return;
       window.__cribloAutofillInstalled = true;
-      function mark(input) {
+
+      function textHint(input) {
+        return [
+          input && input.getAttribute && input.getAttribute('name'),
+          input && input.getAttribute && input.getAttribute('id'),
+          input && input.getAttribute && input.getAttribute('placeholder'),
+          input && input.getAttribute && input.getAttribute('aria-label'),
+          input && input.getAttribute && input.getAttribute('title')
+        ].filter(Boolean).join(' ').toLowerCase();
+      }
+
+      function visible(input) {
+        try {
+          var r = input.getBoundingClientRect();
+          var s = window.getComputedStyle(input);
+          return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+        } catch (_) { return true; }
+      }
+
+      function isUsernameCandidate(input) {
+        if (!input || input.tagName !== 'INPUT') return false;
+        var type = String(input.getAttribute('type') || 'text').toLowerCase();
+        if (!/^(text|email|tel|url|search)$/.test(type)) return false;
+        var hint = textHint(input);
+        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) return false;
+        return visible(input);
+      }
+
+      function mark(input, forcedKind) {
         if (!input || input.nodeType !== 1 || input.tagName !== 'INPUT') return;
         var type = String(input.getAttribute('type') || 'text').toLowerCase();
+        var hint = textHint(input);
         var current = String(input.getAttribute('autocomplete') || '').trim().toLowerCase();
-        if (current && current !== 'on') return;
-        var hint = [input.getAttribute('name'),input.getAttribute('id'),input.getAttribute('placeholder'),input.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase();
-        if (type === 'password') { input.setAttribute('autocomplete', /new|create|confirm|nouveau|confirmer|signup|register/.test(hint) ? 'new-password' : 'current-password'); return; }
-        if (/user|username|login|email|mail|identifiant|compte|account/.test(hint)) { input.setAttribute('autocomplete', 'username'); return; }
-        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) input.setAttribute('autocomplete', 'one-time-code');
+
+        if (forcedKind === 'username') {
+          input.setAttribute('autocomplete', 'username');
+          input.setAttribute('autocapitalize', 'none');
+          input.setAttribute('spellcheck', 'false');
+          return;
+        }
+
+        if (type === 'password') {
+          // Respect an explicit sign-up/change-password field, but override
+          // autocomplete=off on ordinary login forms so iOS can show the saved
+          // credential directly in the QuickType bar.
+          var isNew = current === 'new-password' || /new|create|confirm|nouveau|confirmer|signup|register|change.?password|modifier/.test(hint);
+          input.setAttribute('autocomplete', isNew ? 'new-password' : 'current-password');
+          return;
+        }
+
+        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) {
+          input.setAttribute('autocomplete', 'one-time-code');
+          return;
+        }
+
+        if (/user|username|login|email|e-mail|mail|identifiant|compte|account/.test(hint)) {
+          mark(input, 'username');
+        }
       }
+
+      function pairLoginFields(root) {
+        try {
+          var scope = root && root.querySelectorAll ? root : document;
+          var forms = [];
+          if (scope.tagName === 'FORM') forms.push(scope);
+          var nested = scope.querySelectorAll ? scope.querySelectorAll('form') : [];
+          for (var f = 0; f < nested.length; f++) forms.push(nested[f]);
+          if (!forms.length) forms = [document];
+
+          for (var fi = 0; fi < forms.length; fi++) {
+            var form = forms[fi];
+            try { form.setAttribute && form.setAttribute('autocomplete', 'on'); } catch (_) {}
+            var inputs = form.querySelectorAll ? Array.prototype.slice.call(form.querySelectorAll('input')) : [];
+            for (var i = 0; i < inputs.length; i++) mark(inputs[i]);
+            for (var p = 0; p < inputs.length; p++) {
+              if (String(inputs[p].getAttribute('type') || '').toLowerCase() !== 'password') continue;
+              mark(inputs[p]);
+              // Apple specifically supports multipage username/password flows
+              // when each page is explicitly tagged. Mark the nearest preceding
+              // identifier field even when Orange did not label it clearly.
+              for (var u = p - 1; u >= 0; u--) {
+                if (isUsernameCandidate(inputs[u])) { mark(inputs[u], 'username'); break; }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       function scan(root) {
-        try { if (root && root.matches && root.matches('input')) mark(root); var nodes = root && root.querySelectorAll ? root.querySelectorAll('input') : []; for (var i=0;i<nodes.length;i++) mark(nodes[i]); } catch (_) {}
+        try {
+          if (root && root.matches && root.matches('input')) mark(root);
+          var nodes = root && root.querySelectorAll ? root.querySelectorAll('input') : [];
+          for (var i = 0; i < nodes.length; i++) mark(nodes[i]);
+          pairLoginFields(root || document);
+        } catch (_) {}
       }
+
       scan(document);
-      try { new MutationObserver(function(changes){ for(var i=0;i<changes.length;i++){var added=changes[i].addedNodes||[];for(var j=0;j<added.length;j++)scan(added[j]);}}).observe(document.documentElement||document,{childList:true,subtree:true}); } catch (_) {}
+      document.addEventListener('focusin', function (event) {
+        var target = event && event.target;
+        if (!target || target.tagName !== 'INPUT') return;
+        scan(target.form || document);
+      }, true);
+
+      try {
+        new MutationObserver(function (changes) {
+          for (var i = 0; i < changes.length; i++) {
+            var added = changes[i].addedNodes || [];
+            for (var j = 0; j < added.length; j++) scan(added[j]);
+          }
+        }).observe(document, { childList: true, subtree: true });
+      } catch (_) {}
     })();
     """#
 
@@ -923,6 +1095,60 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return handled;
       }
 
+      function scheduleAndroidTouchFallback(target, x, y) {
+        if (!target || !target.dispatchEvent) return;
+        var pointerId = 47;
+        try {
+          if (typeof PointerEvent === 'function') {
+            target.dispatchEvent(new PointerEvent('pointerdown', {
+              bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+              screenX:x,screenY:y,button:0,buttons:1,pointerId:pointerId,
+              pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0.5
+            }));
+          }
+        } catch (_) {}
+
+        var syntheticTouch = null;
+        try {
+          if (typeof Touch === 'function' && typeof TouchEvent === 'function') {
+            syntheticTouch = new Touch({
+              identifier:pointerId,target:target,clientX:x,clientY:y,
+              screenX:x,screenY:y,pageX:x+(window.scrollX||0),pageY:y+(window.scrollY||0),
+              radiusX:4,radiusY:4,rotationAngle:0,force:0.5
+            });
+            target.dispatchEvent(new TouchEvent('touchstart', {
+              bubbles:true,cancelable:true,composed:true,
+              touches:[syntheticTouch],targetTouches:[syntheticTouch],changedTouches:[syntheticTouch]
+            }));
+          }
+        } catch (_) {}
+
+        setTimeout(function () {
+          // Give GeoReseaux's own Android long-hold timer time to run before
+          // ending the synthetic touch. Also deliver semantic fallbacks.
+          contextMenu(target, x, y);
+          jqueryContextMenu(target, x, y);
+          customLongPress(target, x, y);
+          try {
+            if (syntheticTouch && typeof TouchEvent === 'function') {
+              target.dispatchEvent(new TouchEvent('touchend', {
+                bubbles:true,cancelable:true,composed:true,
+                touches:[],targetTouches:[],changedTouches:[syntheticTouch]
+              }));
+            }
+          } catch (_) {}
+          try {
+            if (typeof PointerEvent === 'function') {
+              target.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+                screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
+              }));
+            }
+          } catch (_) {}
+        }, 560);
+      }
+
       function dispatchAt(x, y) {
         clearSelection();
         var candidates = candidateElements(x, y);
@@ -938,6 +1164,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (dispatchToTarget(target, x, y)) return true;
         }
 
+        // If no right-click/contextmenu listener consumed the event, emulate
+        // the Android touch hold itself. This is intentionally last so normal
+        // map context-menu implementations remain the fast path.
+        scheduleAndroidTouchFallback(candidates[0], x, y);
         customLongPress(candidates[0], x, y);
         return true;
       }
