@@ -280,8 +280,14 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
 
         if longPressCompatibility {
-            // GeoReseaux v12: WebKit proved it emits a trusted contextmenu.
-            // Do not race it with CRI-BLO's old 720ms synthetic recognizer.
+            // GeoReseaux v13 isolation: restore the same simultaneous native
+            // recognizer that was present when v11 observed a trusted WebKit
+            // contextmenu, but do NOT dispatch any synthetic JS context event.
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
+            longPress.minimumPressDuration = 0.72
+            longPress.cancelsTouchesInView = false
+            longPress.delegate = self
+            webView.addGestureRecognizer(longPress)
         }
 
         view.addSubview(webView)
@@ -696,7 +702,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         let ry = max(0, min(1, location.y / webView.bounds.height))
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        let script = "window.__cribloNativeFallbackLongPress && window.__cribloNativeFallbackLongPress(\(rx), \(ry));"
+        // v13: record only. Do not manufacture pointer/touch/contextmenu JS.
+        let script = "window.__cribloRecordNativeRecognizer && window.__cribloRecordNativeRecognizer(\(rx), \(ry));"
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
@@ -954,7 +961,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         syntheticPointerDowns: 0,
         contextDispatches: 0,
         trustedContextmenus: 0,
-        trustedContextPrevented: false
+        trustedContextPrevented: false,
+        nativeRecognizerFires: 0
       };
 
       // Register actual map instances at construction time. Frameworks often
@@ -1867,6 +1875,14 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return window.__cribloDispatchLongPress(rx, ry);
       };
 
+      window.__cribloRecordNativeRecognizer = function () {
+        try {
+          __cribloGeoDiag.nativeRecognizerFires++;
+          __cribloGeoDiag.lastResult = 'native-recognizer-fired';
+        } catch (_) {}
+        return true;
+      };
+
       window.__cribloGeoDiagnosticsText = function () {
         var engineHints = [];
         try { if (window.L) engineHints.push('L'); } catch (_) {}
@@ -1888,7 +1904,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
           'Trusted contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
           'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),
-          'Native-only long press: true',
+          'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,
+          'Synthetic context fallback: disabled',
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
