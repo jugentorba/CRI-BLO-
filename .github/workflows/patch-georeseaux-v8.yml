@@ -1,5 +1,6 @@
 name: Apply GeoReseaux v8 patch
 
+# Retry after tightening the source matcher; the patch itself remains unchanged.
 on:
   push:
     branches:
