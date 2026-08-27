@@ -9,7 +9,7 @@ export interface AppSettings {
   saveToGallery: boolean;
   watermark: boolean;
   exportFolderName?: string;
-  language: "fr" | "en";
+  language: "fr" | "en" | "sq";
   theme: ThemeMode;
   density: DisplayDensity;
   /** Custom scale in percent, 80–110. Defaults to 100. */

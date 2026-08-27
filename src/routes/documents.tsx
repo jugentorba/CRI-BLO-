@@ -11,9 +11,11 @@ import {
   Save,
   ExternalLink,
   FilePenLine,
+  Wand2,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { UniversalDocumentEditor } from "@/components/UniversalDocumentEditor";
+import { DynamicFormEditor } from "@/components/DynamicForm/DynamicFormEditor";
 import {
   deleteOtherDoc,
   listOtherDocs,
@@ -62,6 +64,8 @@ function Documents() {
   } | null>(null);
   const [saved, setSaved] = useState(false);
   const [editingDoc, setEditingDoc] = useState<OtherDocRecord | null>(null);
+  /** File uploaded for dynamic form generation */
+  const [dynamicFormFile, setDynamicFormFile] = useState<File | null>(null);
 
   async function load() {
     setDocs(await listOtherDocs());
@@ -269,6 +273,17 @@ function Documents() {
                 >
                   Traiter quand même comme CRI BLO
                 </button>
+                {/* Dynamic form generator for non-CRI documents */}
+                {fileRef.current && (
+                  <button
+                    type="button"
+                    onClick={() => setDynamicFormFile(fileRef.current)}
+                    className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 text-xs font-semibold text-primary active:scale-[0.98]"
+                  >
+                    <Wand2 className="h-3 w-3" />
+                    Générer un formulaire automatique / Auto-generate form
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -353,6 +368,13 @@ function Documents() {
           document={{ name: editingDoc.fileName, mimeType: editingDoc.mimeType, blob: editingDoc.blob }}
           onClose={() => setEditingDoc(null)}
           onSaved={() => setError(null)}
+        />
+      )}
+      {dynamicFormFile && (
+        <DynamicFormEditor
+          file={dynamicFormFile}
+          onClose={() => setDynamicFormFile(null)}
+          onSaved={() => setDynamicFormFile(null)}
         />
       )}
     </AppShell>
