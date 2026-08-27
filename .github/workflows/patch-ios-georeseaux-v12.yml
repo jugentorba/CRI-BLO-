@@ -26,19 +26,8 @@ jobs:
           p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
           s = p.read_text()
 
-          old = """        if longPressCompatibility {
-            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
-            longPress.minimumPressDuration = 0.72
-            longPress.cancelsTouchesInView = false
-            longPress.delegate = self
-            webView.addGestureRecognizer(longPress)
-        }
-"""
-          new = """        if longPressCompatibility {
-            // GeoReseaux v12: WebKit proved it emits a trusted contextmenu.
-            // Do not race it with CRI-BLO's old 720ms synthetic recognizer.
-        }
-"""
+          old = "        if longPressCompatibility {\n            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))\n            longPress.minimumPressDuration = 0.72\n            longPress.cancelsTouchesInView = false\n            longPress.delegate = self\n            webView.addGestureRecognizer(longPress)\n        }\n"
+          new = "        if longPressCompatibility {\n            // GeoReseaux v12: WebKit proved it emits a trusted contextmenu.\n            // Do not race it with CRI-BLO's old 720ms synthetic recognizer.\n        }\n"
           if s.count(old) != 1:
               raise SystemExit('native recognizer block mismatch')
           s = s.replace(old, new, 1)
