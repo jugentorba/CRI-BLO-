@@ -758,14 +758,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return nil
     }
 
-    @available(iOS 13.0, *)
-    func webView(
-        _ webView: WKWebView,
-        contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
-        completionHandler: @escaping (UIContextMenuConfiguration?) -> Void
-    ) {
-        completionHandler(nil)
-    }
 
     private static let newTabHTML = #"""
     <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
@@ -963,7 +955,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         lastResult: 'not-run',
         eventProperties: {},
         syntheticPointerDowns: 0,
-        contextDispatches: 0
+        contextDispatches: 0,
+        trustedContextmenus: 0,
+        trustedContextPrevented: false
       };
 
       // Register actual map instances at construction time. Frameworks often
@@ -1771,6 +1765,18 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
       }, true);
 
+      document.addEventListener('contextmenu', function (event) {
+        try {
+          if (!event || !event.isTrusted) return;
+          __cribloGeoDiag.trustedContextmenus++;
+          __cribloGeoDiag.lastResult = 'trusted-contextmenu';
+          clearRealTouchTimer();
+          setTimeout(function () {
+            try { __cribloGeoDiag.trustedContextPrevented = !!event.defaultPrevented; } catch (_) {}
+          }, 0);
+        } catch (_) {}
+      }, true);
+
       document.addEventListener('touchstart', function (event) {
         try {
           if (!event || !event.touches || event.touches.length !== 1) return;
@@ -1807,7 +1813,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
-          realTouchTimer = setTimeout(fireRealTouchLongPress, 600);
+          // Give native WebKit first chance to emit its own trusted contextmenu.
+          // Android does so at ~600ms; fallback only after that window.
+          realTouchTimer = setTimeout(fireRealTouchLongPress, 850);
         } catch (_) {}
       }, { capture: true, passive: true });
 
@@ -1880,6 +1888,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Last result: ' + __cribloGeoDiag.lastResult,
           'Context dispatches: ' + __cribloGeoDiag.contextDispatches,
           'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
+          'Trusted contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
+          'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
