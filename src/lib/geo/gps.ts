@@ -81,6 +81,85 @@ async function getNativePosition(): Promise<GpsCoords> {
   }
 }
 
+function webTimeoutError(): GeolocationPositionError {
+  return {
+    code: 3,
+    message: "CRI BLO GPS watchdog timeout",
+    PERMISSION_DENIED: 1,
+    POSITION_UNAVAILABLE: 2,
+    TIMEOUT: 3,
+  } as GeolocationPositionError;
+}
+
+function attemptCurrentPosition(
+  options: PositionOptions,
+  hardTimeoutMs: number,
+): Promise<GeolocationPosition> {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(webTimeoutError());
+    }, hardTimeoutMs);
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      callback();
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => finish(() => resolve(position)),
+      (error) => finish(() => reject(error)),
+      options,
+    );
+  });
+}
+
+function attemptWatchPosition(
+  options: PositionOptions,
+  hardTimeoutMs: number,
+): Promise<GeolocationPosition> {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    let settled = false;
+    let watchId: number | null = null;
+
+    const cleanup = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      window.clearTimeout(timer);
+    };
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const timer = window.setTimeout(() => {
+      finish(() => reject(webTimeoutError()));
+    }, hardTimeoutMs);
+
+    watchId = navigator.geolocation.watchPosition(
+      (position) => finish(() => resolve(position)),
+      (error) => finish(() => reject(error)),
+      options,
+    );
+  });
+}
+
+function isIosWebApp(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent.toLowerCase();
+  const ios = /iphone|ipad|ipod/.test(ua);
+  const standalone =
+    ("standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone)) ||
+    window.matchMedia?.("(display-mode: standalone)").matches;
+  return ios && Boolean(standalone);
+}
+
 async function getWebPosition(): Promise<GpsCoords> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     throw {
@@ -89,24 +168,17 @@ async function getWebPosition(): Promise<GpsCoords> {
     } satisfies GpsError;
   }
 
-  const permission = await navigator.permissions
-    ?.query?.({ name: "geolocation" as PermissionName })
-    .catch(() => null);
-  if (permission?.state === "denied") {
-    throw {
-      code: "denied",
-      message: "L'autorisation de localisation est refusée. Autorisez la localisation pour CRI BLO puis réessayez.",
-    } satisfies GpsError;
-  }
-
-  const attempt = (options: PositionOptions) =>
-    new Promise<GeolocationPosition>((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(resolve, reject, options),
-    );
-
+  // Do not query navigator.permissions before the location request. WebKit has
+  // historically reported stale geolocation permission state, and in an iOS
+  // standalone PWA the native geolocation callback itself can also hang. Calling
+  // the API immediately preserves the user's tap as the permission-triggering
+  // action; our watchdog guarantees that CRI BLO never waits forever.
   try {
     return readPosition(
-      await attempt({ enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }),
+      await attemptCurrentPosition(
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+        18000,
+      ),
     );
   } catch (first) {
     const err = first as GeolocationPositionError;
@@ -116,18 +188,34 @@ async function getWebPosition(): Promise<GpsCoords> {
         message: "Localisation refusée. Autorisez la position pour CRI BLO puis réessayez.",
       } satisfies GpsError;
     }
+
     try {
+      // watchPosition is a useful second path on iOS/WebKit when a one-shot
+      // getCurrentPosition request never produces a callback in standalone mode.
       return readPosition(
-        await attempt({ enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }),
+        await attemptWatchPosition(
+          { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+          18000,
+        ),
       );
     } catch (second) {
       const e = second as GeolocationPositionError;
+      if (e.code === 1) {
+        throw {
+          code: "denied",
+          message: "Localisation refusée. Autorisez la position pour CRI BLO puis réessayez.",
+        } satisfies GpsError;
+      }
+
+      const iosHelp = isIosWebApp()
+        ? " Sur iPhone, vérifiez Réglages > Confidentialité et sécurité > Service de localisation et autorisez Safari/CRI BLO, puis rouvrez l'app."
+        : "";
       throw {
         code: e.code === 3 ? "timeout" : "unavailable",
         message:
           e.code === 3
-            ? "Le GPS n'a pas répondu. Réessayez à l'extérieur ou avec une meilleure vue du ciel."
-            : "Position indisponible. Vérifiez que la localisation de l'appareil est activée.",
+            ? `Le GPS n'a pas répondu.${iosHelp}`
+            : `Position indisponible. Vérifiez que la localisation de l'appareil est activée.${iosHelp}`,
       } satisfies GpsError;
     }
   }
