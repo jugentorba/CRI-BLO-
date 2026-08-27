@@ -1,1 +1,0 @@
-Validate GeoReseaux real-touch long-press bridge on iOS.
