@@ -1,0 +1,30 @@
+name: Patch persistent iOS browser
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-ios-persistent-browser.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Apply browser patch
+        run: python3 scripts/patch-ios-persistent-browser.py
+      - name: Commit browser patch and remove helpers
+        shell: bash
+        run: |
+          rm scripts/patch-ios-persistent-browser.py
+          rm .github/workflows/patch-ios-persistent-browser.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift src/routes/navigateur.tsx scripts/patch-ios-persistent-browser.py .github/workflows/patch-ios-persistent-browser.yml
+          git commit -m 'Keep iOS browser alive and improve GeoReseaux compatibility'
+          git push origin HEAD:criblo-master-spec-v1
