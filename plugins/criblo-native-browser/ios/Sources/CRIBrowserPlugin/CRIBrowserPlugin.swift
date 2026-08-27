@@ -271,22 +271,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.allowsLinkPreview = false
         webView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Orange/SiteMinder can reject the stripped WKWebView user agent after
-        // authentication even though the same account works in Safari. Present a
-        // normal mobile Safari identity while retaining WKWebView cookie/session
-        // persistence in the app's default website data store.
+        // Keep the actual iPhone/Safari identity for Orange authentication so
+        // WebKit and the login page stay on the same path as Safari Password
+        // AutoFill. GeoReseaux Android compatibility is injected only inside
+        // the GIS page; it no longer changes the Orange login HTTP identity.
         let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
         let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
-        if longPressCompatibility {
-            // GeoReseaux works in Android Chrome/WebView but not iOS Safari.
-            // Send the same Chrome-class Android identity at the HTTP layer so
-            // any server-side Orange feature gating also selects the Android map
-            // implementation. Previous builds changed navigator.userAgent only
-            // after the page was already delivered, which was too late for that.
-            webView.customUserAgent = "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-        } else {
-            webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
-        }
+        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
 
         if longPressCompatibility {
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
@@ -789,7 +780,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     (function () {
       try {
         var host = String(location.hostname || '').toLowerCase();
-        var isTarget = host === 'orange.fr' || host.slice(-10) === '.orange.fr' || host.indexOf('georeseaux') >= 0 || host.indexOf('geo-reseaux') >= 0;
+        var isTarget = host === 'sigreseaux.orange.fr' || host === 'mobi-prod.orange.fr' || host.indexOf('georeseaux') >= 0 || host.indexOf('geo-reseaux') >= 0;
         if (!isTarget) return;
         var androidUA = 'Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36';
         try { Object.defineProperty(navigator, 'userAgent', { configurable: true, get: function(){ return androidUA; } }); } catch (_) {}
@@ -969,7 +960,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         engineCalls: 0,
         registry: [],
         lastTarget: '',
-        lastResult: 'not-run'
+        lastResult: 'not-run',
+        eventProperties: {}
       };
 
       // Register actual map instances at construction time. Frameworks often
@@ -1076,20 +1068,53 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }
 
       function compatibleSemanticEvent(type, target, currentTarget, x, y, sourceEvent) {
+        var isContext = type === 'contextmenu';
+        var sourceTouch = null;
+        try { sourceTouch = sourceEvent && sourceEvent.touches && sourceEvent.touches[0]; } catch (_) {}
+        var pointerId = sourceTouch && sourceTouch.identifier != null ? sourceTouch.identifier : 1;
+        var targetRect = null;
+        try { targetRect = target && target.getBoundingClientRect && target.getBoundingClientRect(); } catch (_) {}
+        var offsetX = targetRect ? x - targetRect.left : x;
+        var offsetY = targetRect ? y - targetRect.top : y;
+
         var raw;
         try {
-          raw = new MouseEvent(type === 'contextmenu' ? 'contextmenu' : 'mousemove', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            clientX: x,
-            clientY: y,
-            screenX: x,
-            screenY: y,
-            button: type === 'contextmenu' ? 2 : 0,
-            buttons: type === 'contextmenu' ? 2 : 1,
-            view: window
-          });
+          // Chrome/Android exposes long-touch contextmenu as PointerEvent with
+          // pointerType=touch and no mouse button held. GeoReseaux runs on a
+          // canvas, so matching this shape matters for its hit-test path.
+          if (isContext && typeof PointerEvent === 'function') {
+            raw = new PointerEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: 0,
+              pointerId: pointerId,
+              pointerType: 'touch',
+              isPrimary: true,
+              width: 9,
+              height: 9,
+              pressure: 0,
+              view: window
+            });
+          } else {
+            raw = new MouseEvent(isContext ? 'contextmenu' : 'mousemove', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: isContext ? 0 : 1,
+              view: window
+            });
+          }
         } catch (_) { raw = {}; }
 
         var prevented = false;
@@ -1123,18 +1148,29 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           srcElement: target,
           currentTarget: currentTarget,
           eventPhase: currentTarget === target ? 2 : 3,
-          button: type === 'contextmenu' ? 2 : 0,
-          buttons: type === 'contextmenu' ? 2 : 1,
-          which: type === 'contextmenu' ? 3 : 1,
+          button: 0,
+          buttons: isContext ? 0 : 1,
+          which: 1,
           clientX: x,
           clientY: y,
+          x: x,
+          y: y,
           pageX: x + (window.scrollX || 0),
           pageY: y + (window.scrollY || 0),
           screenX: x,
           screenY: y,
-          pointerId: 1,
+          offsetX: offsetX,
+          offsetY: offsetY,
+          layerX: offsetX,
+          layerY: offsetY,
+          pointerId: pointerId,
           pointerType: 'touch',
           isPrimary: true,
+          width: 9,
+          height: 9,
+          pressure: isContext ? 0 : 0.5,
+          detail: isContext ? 0 : 1,
+          sourceCapabilities: { firesTouchEvents: true },
           isTrusted: !!(sourceEvent && sourceEvent.isTrusted),
           touches: [touchPoint],
           targetTouches: [touchPoint],
@@ -1153,6 +1189,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         try {
           return new Proxy(raw, {
             get: function (obj, prop) {
+              try {
+                if (isContext && typeof prop === 'string' && prop.indexOf('__criblo') !== 0) {
+                  __cribloGeoDiag.eventProperties[prop] = (__cribloGeoDiag.eventProperties[prop] || 0) + 1;
+                }
+              } catch (_) {}
               if (prop === '__cribloPrevented') return prevented;
               if (prop === '__cribloStopped') return stopped;
               if (prop === '__cribloImmediate') return immediate;
@@ -1830,6 +1871,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Engine calls: ' + __cribloGeoDiag.engineCalls,
           'Registered map instances: ' + __cribloMapRegistry.length,
           'Last result: ' + __cribloGeoDiag.lastResult,
+          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
         ].join('\n');
