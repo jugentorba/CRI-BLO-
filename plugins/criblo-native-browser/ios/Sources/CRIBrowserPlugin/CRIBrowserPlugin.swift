@@ -161,9 +161,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             webView.addGestureRecognizer(longPress)
         }
 
-        configureBottomChrome()
         view.addSubview(webView)
         view.addSubview(chrome)
+        configureBottomChrome()
 
         let stack = chrome.contentView.subviews.first!
         NSLayoutConstraint.activate([

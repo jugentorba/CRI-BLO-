@@ -79,8 +79,10 @@ public class CRIBrowserPlugin extends Plugin {
     @PluginMethod
     public void open(PluginCall call) {
         prefs = getActivity().getSharedPreferences(PREFS, 0);
-        String requested = call.getString("url", PINNED_ORANGE_URL);
-        boolean resumeLast = Boolean.TRUE.equals(call.getBoolean("resumeLast", false));
+        String requested = call.getString("url");
+        if (requested == null) requested = PINNED_ORANGE_URL;
+        Boolean resumeValue = call.getBoolean("resumeLast");
+        boolean resumeLast = resumeValue != null && resumeValue;
         String rawUrl = resumeLast ? prefs.getString(KEY_LAST_URL, requested) : requested;
         if (rawUrl == null || !(rawUrl.startsWith("https://") || rawUrl.startsWith("http://"))) {
             call.reject("Adresse web invalide.");
