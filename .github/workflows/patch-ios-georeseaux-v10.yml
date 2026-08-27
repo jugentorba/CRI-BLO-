@@ -1,0 +1,122 @@
+name: Patch iOS GeoReseaux v10
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+
+      - name: Apply single-contextmenu Android sequence
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
+          s = p.read_text()
+
+          old = """        lastResult: 'not-run',\n        eventProperties: {}\n      };"""
+          new = """        lastResult: 'not-run',\n        eventProperties: {},\n        syntheticPointerDowns: 0,\n        contextDispatches: 0\n      };"""
+          if s.count(old) != 1: raise SystemExit('diagnostic object mismatch')
+          s = s.replace(old, new, 1)
+
+          old = """      var realTouchFired = false;\n      var lastRealTouchLongPressAt = 0;"""
+          new = """      var realTouchFired = false;\n      var lastRealTouchLongPressAt = 0;\n      var lastRealPointerDownAt = 0;\n      var lastRealPointerDownTarget = null;"""
+          if s.count(old) != 1: raise SystemExit('real touch vars mismatch')
+          s = s.replace(old, new, 1)
+
+          start = s.index('      function fireRealTouchLongPress() {')
+          end = s.index("      document.addEventListener('touchstart', function (event) {", start)
+          replacement = r'''      function fireRealTouchLongPress() {
+        realTouchTimer = null;
+        if (!realTouchTarget) return;
+        realTouchFired = true;
+        lastRealTouchLongPressAt = Date.now();
+        clearSelection();
+
+        var styleNode = realTouchTarget;
+        for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
+          try {
+            styleNode.style.webkitUserSelect = 'none';
+            styleNode.style.webkitTouchCallout = 'none';
+            styleNode.style.userSelect = 'none';
+          } catch (_) {}
+        }
+
+        var signature = String((realTouchTarget.tagName || '') + '#' + (realTouchTarget.id || '') + '.' + (realTouchTarget.className && (realTouchTarget.className.baseVal || realTouchTarget.className) || ''));
+        __cribloGeoDiag.lastTarget = signature.slice(0, 180);
+        __cribloGeoDiag.lastResult = 'contextmenu-dispatched';
+
+        // Android trace proves Chromium sends ONE bubbling contextmenu on the
+        // CANVAS about 600ms after pointerdown/touchstart. Do exactly that.
+        // Do not directly call handlers first and do not redispatch to parents:
+        // either approach invokes the same framework listener multiple times.
+        var before = visiblePopupState();
+        __cribloGeoDiag.contextDispatches++;
+        dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
+
+        setTimeout(function () {
+          if (popupChanged(before)) {
+            __cribloGeoDiag.lastResult = 'dom-popup';
+            return;
+          }
+
+          // If WebKit's synthetic DOM dispatch was ignored by the framework,
+          // call the captured contextmenu handlers once as a fallback. This is
+          // deliberately after the faithful one-event path, never before it.
+          var trustedTouch = window.__cribloLastTrustedTouchStart || null;
+          invokeCapturedSemanticHandlers(realTouchTarget, realTouchX, realTouchY, trustedTouch);
+
+          setTimeout(function () {
+            __cribloGeoDiag.lastResult = popupChanged(before) ? 'page-handler-popup' : 'no-popup';
+          }, 180);
+        }, 180);
+      }
+
+      document.addEventListener('pointerdown', function (event) {
+        try {
+          if (!event || String(event.pointerType || '') !== 'touch') return;
+          lastRealPointerDownAt = Date.now();
+          lastRealPointerDownTarget = event.target || null;
+        } catch (_) {}
+      }, true);
+
+'''
+          s = s[:start] + replacement + s[end:]
+
+          marker = """          window.__cribloLastTrustedTouchStart = event;\n          realTouchX = touch.clientX;"""
+          inject = """          window.__cribloLastTrustedTouchStart = event;\n\n          // Android emits pointerdown before touchstart. If this WKWebView did\n          // not emit a matching touch PointerEvent, provide exactly one so the\n          // GeoReseaux framework can establish the same gesture state.\n          if (!(lastRealPointerDownTarget === target && (Date.now() - lastRealPointerDownAt) < 80)) {\n            try {\n              if (typeof PointerEvent === 'function') {\n                target.dispatchEvent(new PointerEvent('pointerdown', {\n                  bubbles:true,cancelable:true,composed:true,\n                  clientX:touch.clientX,clientY:touch.clientY,\n                  screenX:touch.screenX,screenY:touch.screenY,\n                  button:0,buttons:1,pointerId:touch.identifier == null ? 1 : touch.identifier,\n                  pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1,view:window\n                }));\n                __cribloGeoDiag.syntheticPointerDowns++;\n              }\n            } catch (_) {}\n          }\n\n          realTouchX = touch.clientX;"""
+          if s.count(marker) != 1: raise SystemExit('touchstart marker mismatch')
+          s = s.replace(marker, inject, 1)
+
+          old = """        if (fired) {\n          try { event.preventDefault(); } catch (_) {}\n        }"""
+          new = """        // Let the real iOS touchend continue normally. Android also releases\n        // the physical touch after contextmenu; blocking the release can leave\n        // framework gesture state inconsistent.\n        void fired;"""
+          if s.count(old) != 1: raise SystemExit('touchend block mismatch')
+          s = s.replace(old, new, 1)
+
+          old = """          'Last result: ' + __cribloGeoDiag.lastResult,\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"""
+          new = """          'Last result: ' + __cribloGeoDiag.lastResult,\n          'Context dispatches: ' + __cribloGeoDiag.contextDispatches,\n          'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"""
+          if s.count(old) != 1: raise SystemExit('diagnostic text mismatch')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          git diff --cached --check
+          git commit -m "Send one Android-style GeoReseaux contextmenu on iOS"
+          git push origin HEAD:criblo-master-spec-v1
