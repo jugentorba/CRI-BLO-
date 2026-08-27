@@ -1,0 +1,33 @@
+name: Apply GeoReseaux Android Trace
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - '.github/workflows/apply-georeseaux-android-trace.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'Prepare Android GeoReseaux trace')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Apply Android GeoReseaux trace
+        run: python3 scripts/patch-georeseaux-android-trace.py
+      - name: Commit trace and remove helper
+        shell: bash
+        run: |
+          rm -f scripts/patch-georeseaux-android-trace.py
+          rm -f .github/workflows/apply-georeseaux-android-trace.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Trace working Android GeoReseaux long press'
+          git push origin HEAD:criblo-master-spec-v1
