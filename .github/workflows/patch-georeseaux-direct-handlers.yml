@@ -1,0 +1,29 @@
+name: Patch GeoReseaux direct handlers
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-georeseaux-direct-handlers.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Apply direct handler patch
+        run: python3 scripts/patch-georeseaux-direct-handlers.py
+      - name: Commit patched browser
+        run: |
+          rm .github/workflows/patch-georeseaux-direct-handlers.yml
+          rm scripts/patch-georeseaux-direct-handlers.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift .github/workflows/patch-georeseaux-direct-handlers.yml scripts/patch-georeseaux-direct-handlers.py
+          git commit -m 'Call GeoReseaux handlers directly on iOS long press'
+          git push origin HEAD:criblo-master-spec-v1
