@@ -2,7 +2,9 @@ package com.criblo.nativebrowser;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
@@ -10,13 +12,16 @@ import android.os.Build;
 import android.os.Message;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.webkit.CookieManager;
+import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -66,79 +71,107 @@ public class CRIBrowserPlugin extends Plugin {
         """;
 
     private static final String GEORESEAUX_TRACE_SCRIPT = """
-        (function(){
-          if(window.__cribloAndroidGeoTraceInstalled)return;
-          window.__cribloAndroidGeoTraceInstalled=true;
-          var trace={events:[],requests:[],started:Date.now()};
-          function trim(list,max){while(list.length>max)list.shift();}
-          function targetName(t){
-            try{return String((t&&t.tagName)||'')+'#'+String((t&&t.id)||'')+'.'+String((t&&t.className)||'').slice(0,60);}catch(_){return '?';}
-          }
-          function eventRow(e){
+    (function(){
+      if(window.__cribloAndroidGeoTraceInstalled)return;
+      window.__cribloAndroidGeoTraceInstalled=true;
+      var trace={events:[],requests:[],started:Date.now()};
+      function trim(list,max){while(list.length>max)list.shift();}
+      function cleanUrl(raw,base){
+        try{var u=new URL(String(raw||''),base||location.href);return u.origin+u.pathname;}catch(_){return String(raw||'').split('?')[0].slice(0,180);}
+      }
+      function targetName(t){
+        try{return String((t&&t.tagName)||'')+'#'+String((t&&t.id)||'')+'.'+String((t&&t.className)||'').slice(0,60);}catch(_){return '?';}
+      }
+      function eventPoint(e){
+        try{
+          var t=(e.changedTouches&&e.changedTouches.length?e.changedTouches[0]:(e.touches&&e.touches.length?e.touches[0]:e));
+          return ' client='+String(Math.round(Number(t.clientX)||0))+','+String(Math.round(Number(t.clientY)||0))+
+            ' page='+String(Math.round(Number(t.pageX)||0))+','+String(Math.round(Number(t.pageY)||0));
+        }catch(_){return '';}
+      }
+      function eventRow(e,label){
+        try{
+          var pointer=e&&e.pointerType?('/'+e.pointerType):'';
+          var row=String(Date.now()-trace.started)+'ms '+String(label||'top')+' '+String(e.type)+pointer+
+            ' trusted='+String(!!e.isTrusted)+' target='+targetName(e.target)+
+            ' button='+String(e.button==null?'na':e.button)+' buttons='+String(e.buttons==null?'na':e.buttons)+
+            ' offset='+String(Math.round(Number(e.offsetX)||0))+','+String(Math.round(Number(e.offsetY)||0))+
+            eventPoint(e)+' pressure='+String(e.pressure==null?'na':e.pressure)+
+            ' touches='+String(e.touches?e.touches.length:'na')+' changed='+String(e.changedTouches?e.changedTouches.length:'na');
+          trace.events.push(row);
+          trim(trace.events,48);
+        }catch(_){}
+      }
+      function addRequest(row){try{trace.requests.push(String(Date.now()-trace.started)+'ms '+row);trim(trace.requests,36);}catch(_){} }
+      function installFrame(w,label){
+        try{
+          if(!w||!w.document)return;
+          if(!w.__cribloAndroidGeoTraceFrameInstalled){
+            w.__cribloAndroidGeoTraceFrameInstalled=true;
+            ['pointerdown','touchstart','mousedown','contextmenu','pointerup','touchend','mouseup','auxclick','click','touchcancel','pointercancel'].forEach(function(name){
+              try{w.document.addEventListener(name,function(e){eventRow(e,label);},true);}catch(_){}
+            });
             try{
-              var p=e&&e.pointerType?('/'+e.pointerType):'';
-              trace.events.push(String(e.type)+p+' trusted='+String(!!e.isTrusted)+' '+targetName(e.target));
-              trim(trace.events,36);
-            }catch(_){}
-          }
-          ['pointerdown','touchstart','mousedown','contextmenu','pointerup','touchend','mouseup','auxclick','click','touchcancel','pointercancel'].forEach(function(name){
-            try{document.addEventListener(name,eventRow,true);}catch(_){}
-          });
-          function cleanUrl(raw){
-            try{var u=new URL(String(raw||''),location.href);return u.origin+u.pathname;}catch(_){return String(raw||'').split('?')[0].slice(0,180);}
-          }
-          function addRequest(row){try{trace.requests.push(row);trim(trace.requests,24);}catch(_){} }
-          try{
-            if(typeof window.fetch==='function'){
-              var originalFetch=window.fetch;
-              window.fetch=function(input,init){
-                var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
-                var raw=(input&&input.url)||input;
-                var prefix='fetch '+method+' '+cleanUrl(raw);
-                return originalFetch.apply(this,arguments).then(function(response){addRequest(prefix+' -> '+response.status);return response;},function(error){addRequest(prefix+' -> error');throw error;});
-              };
-            }
-          }catch(_){}
-          try{
-            var originalOpen=XMLHttpRequest.prototype.open;
-            var originalSend=XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.open=function(method,url){
-              try{this.__cribloMethod=String(method||'GET').toUpperCase();this.__cribloURL=cleanUrl(url);}catch(_){}
-              return originalOpen.apply(this,arguments);
-            };
-            XMLHttpRequest.prototype.send=function(){
-              try{
-                if(!this.__cribloTraceHook){
-                  this.__cribloTraceHook=true;
-                  this.addEventListener('loadend',function(){addRequest('xhr '+String(this.__cribloMethod||'GET')+' '+String(this.__cribloURL||'')+' -> '+String(this.status||0));});
-                }
-              }catch(_){}
-              return originalSend.apply(this,arguments);
-            };
-          }catch(_){}
-          window.__cribloAndroidGeoTraceText=function(){
-            var scripts=[];
-            try{
-              var nodes=document.scripts||[];
-              for(var i=0;i<nodes.length;i++){
-                var src=String(nodes[i].src||'');
-                if(!src)continue;
-                try{var u=new URL(src,location.href);src=u.pathname.split('/').pop()||u.pathname;}catch(_){}
-                if(scripts.indexOf(src)<0)scripts.push(src.slice(0,80));
-                if(scripts.length>=12)break;
+              if(typeof w.fetch==='function'){
+                var originalFetch=w.fetch;
+                w.fetch=function(input,init){
+                  var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
+                  var raw=(input&&input.url)||input;
+                  var prefix='fetch '+method+' '+cleanUrl(raw,w.location&&w.location.href);
+                  return originalFetch.apply(this,arguments).then(function(response){addRequest(prefix+' -> '+response.status);return response;},function(error){addRequest(prefix+' -> error');throw error;});
+                };
               }
             }catch(_){}
-            return [
-              'URL: '+String(location.href||'').split('?')[0].slice(0,180),
-              'UA: '+String(navigator.userAgent||'').slice(0,180),
-              'Platform: '+String(navigator.platform||''),
-              'Events: '+(trace.events.join(' > ')||'none'),
-              'Requests: '+(trace.requests.join(' | ')||'none'),
-              'Scripts: '+(scripts.join(', ')||'none')
-            ].join('\n');
-          };
-        })();
-        """;
+            try{
+              var originalOpen=w.XMLHttpRequest.prototype.open;
+              var originalSend=w.XMLHttpRequest.prototype.send;
+              w.XMLHttpRequest.prototype.open=function(method,url){
+                try{this.__cribloMethod=String(method||'GET').toUpperCase();this.__cribloURL=cleanUrl(url,w.location&&w.location.href);}catch(_){}
+                return originalOpen.apply(this,arguments);
+              };
+              w.XMLHttpRequest.prototype.send=function(){
+                try{
+                  if(!this.__cribloTraceHook){
+                    this.__cribloTraceHook=true;
+                    this.addEventListener('loadend',function(){addRequest('xhr '+String(this.__cribloMethod||'GET')+' '+String(this.__cribloURL||'')+' -> '+String(this.status||0));});
+                  }
+                }catch(_){}
+                return originalSend.apply(this,arguments);
+              };
+            }catch(_){}
+          }
+          var frames=w.frames||[];
+          for(var i=0;i<frames.length;i++){
+            try{installFrame(frames[i],label+'/f'+i);}catch(_){}
+          }
+        }catch(_){}
+      }
+      function scan(){try{installFrame(window,'top');}catch(_){} }
+      scan();
+      try{setInterval(scan,1000);}catch(_){}
+      window.__cribloAndroidGeoTraceText=function(){
+        var scripts=[];
+        try{
+          var nodes=document.scripts||[];
+          for(var i=0;i<nodes.length;i++){
+            var src=String(nodes[i].src||'');
+            if(!src)continue;
+            try{var u=new URL(src,location.href);src=u.pathname.split('/').pop()||u.pathname;}catch(_){}
+            if(scripts.indexOf(src)<0)scripts.push(src.slice(0,80));
+            if(scripts.length>=12)break;
+          }
+        }catch(_){}
+        return [
+          'URL: '+String(location.href||'').split('?')[0].slice(0,180),
+          'UA: '+String(navigator.userAgent||'').slice(0,180),
+          'Platform: '+String(navigator.platform||''),
+          'Events: '+(trace.events.join(' > ')||'none'),
+          'Requests: '+(trace.requests.join(' | ')||'none'),
+          'Scripts: '+(scripts.join(', ')||'none')
+        ].join(String.fromCharCode(10));
+      };
+    })();
+    """;
 
     private Dialog activeDialog;
     private WebView activeWebView;
@@ -151,6 +184,8 @@ public class CRIBrowserPlugin extends Plugin {
     private SharedPreferences prefs;
     private final ArrayList<String> tabUrls = new ArrayList<>();
     private int activeTab = 0;
+    private final ArrayList<String> nativeTouchTrace = new ArrayList<>();
+    private final ArrayList<String> nativeRequestTrace = new ArrayList<>();
 
     @PluginMethod
     public void getState(PluginCall call) {
@@ -390,6 +425,7 @@ public class CRIBrowserPlugin extends Plugin {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        settings.setGeolocationEnabled(true);
         settings.setSaveFormData(true);
         settings.setSupportMultipleWindows(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
@@ -414,6 +450,10 @@ public class CRIBrowserPlugin extends Plugin {
 
         webView.setLongClickable(true);
         webView.setHapticFeedbackEnabled(true);
+        webView.setOnTouchListener((view, event) -> {
+            recordNativeTouch(event);
+            return false;
+        });
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -423,6 +463,12 @@ public class CRIBrowserPlugin extends Plugin {
                 if (scheme == null || scheme.equals("http") || scheme.equals("https") || scheme.equals("about") || scheme.equals("data") || scheme.equals("blob")) return false;
                 try { getActivity().startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
                 return true;
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                recordNativeRequest(request);
+                return super.shouldInterceptRequest(view, request);
             }
 
             @Override
@@ -444,6 +490,12 @@ public class CRIBrowserPlugin extends Plugin {
             @Override
             public void onReceivedTitle(WebView view, String title) {
                 updateChrome();
+            }
+
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                boolean granted = hasLocationPermission();
+                callback.invoke(origin, granted, granted);
             }
 
             @Override
@@ -594,15 +646,74 @@ public class CRIBrowserPlugin extends Plugin {
         menu.show();
     }
 
+    private void recordNativeTouch(MotionEvent event) {
+        if (event == null) return;
+        String action = switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN -> "down";
+            case MotionEvent.ACTION_MOVE -> "move";
+            case MotionEvent.ACTION_UP -> "up";
+            case MotionEvent.ACTION_CANCEL -> "cancel";
+            default -> "action-" + event.getActionMasked();
+        };
+        String tool = "unknown";
+        if (event.getPointerCount() > 0) {
+            tool = switch (event.getToolType(0)) {
+                case MotionEvent.TOOL_TYPE_FINGER -> "finger";
+                case MotionEvent.TOOL_TYPE_STYLUS -> "stylus";
+                case MotionEvent.TOOL_TYPE_MOUSE -> "mouse";
+                case MotionEvent.TOOL_TYPE_ERASER -> "eraser";
+                default -> "unknown";
+            };
+        }
+        String row = (event.getEventTime() - event.getDownTime()) + "ms " + action + "/" + tool
+            + " x=" + Math.round(event.getX()) + " y=" + Math.round(event.getY())
+            + " pressure=" + event.getPressure() + " buttons=" + event.getButtonState();
+        synchronized (nativeTouchTrace) {
+            nativeTouchTrace.add(row);
+            while (nativeTouchTrace.size() > 48) nativeTouchTrace.remove(0);
+        }
+    }
+
+    private void recordNativeRequest(WebResourceRequest request) {
+        if (request == null || request.getUrl() == null) return;
+        Uri uri = request.getUrl();
+        String host = uri.getHost() == null ? "" : uri.getHost();
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        String row = String.valueOf(request.getMethod()).toUpperCase() + " " + host + path;
+        synchronized (nativeRequestTrace) {
+            nativeRequestTrace.add(row);
+            while (nativeRequestTrace.size() > 48) nativeRequestTrace.remove(0);
+        }
+    }
+
+    private boolean hasLocationPermission() {
+        return getActivity().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || getActivity().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private String nativeTraceText() {
+        String touch;
+        String requests;
+        synchronized (nativeTouchTrace) {
+            touch = nativeTouchTrace.isEmpty() ? "none" : String.join(" > ", nativeTouchTrace);
+        }
+        synchronized (nativeRequestTrace) {
+            requests = nativeRequestTrace.isEmpty() ? "none" : String.join(" | ", nativeRequestTrace);
+        }
+        return "Native touch: " + touch
+            + "\nNative requests: " + requests
+            + "\nAndroid location permission: " + (hasLocationPermission() ? "granted" : "missing");
+    }
+
     private void showGeoDiagnostics() {
         if (activeWebView == null) return;
-        String script = "window.__cribloAndroidGeoTraceText ? window.__cribloAndroidGeoTraceText() : 'Diagnostic GeoReseaux indisponible sur cette page.'";
+        String script = "window.__cribloAndroidGeoTraceText ? window.__cribloAndroidGeoTraceText() : 'JS trace unavailable; native fallback follows.'";
         activeWebView.evaluateJavascript(script, value -> {
-            String message = "Aucune information de diagnostic disponible.";
+            String message = "JS trace unavailable; native fallback follows.";
             try {
                 if (value != null) message = new JSONArray("[" + value + "]").getString(0);
             } catch (Exception ignored) {}
-            final String display = message;
+            final String display = message + "\n" + nativeTraceText();
             getActivity().runOnUiThread(() -> new AlertDialog.Builder(getActivity())
                 .setTitle("Diagnostic GeoReseaux Android")
                 .setMessage(display)
