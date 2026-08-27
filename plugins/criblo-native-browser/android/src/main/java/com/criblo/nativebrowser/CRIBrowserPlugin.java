@@ -5,8 +5,10 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Message;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
@@ -26,6 +28,22 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 @CapacitorPlugin(name = "CRIBrowser")
 public class CRIBrowserPlugin extends Plugin {
+    private static final String AUTOFILL_COMPATIBILITY_SCRIPT = """
+        (function(){
+          function mark(i){
+            if(!i||i.tagName!=='INPUT')return;
+            var t=String(i.getAttribute('type')||'text').toLowerCase();
+            var a=String(i.getAttribute('autocomplete')||'').trim().toLowerCase();
+            if(a&&a!=='on')return;
+            var h=[i.getAttribute('name'),i.getAttribute('id'),i.getAttribute('placeholder'),i.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase();
+            if(t==='password'){i.setAttribute('autocomplete',/new|create|confirm|nouveau|confirmer|signup|register/.test(h)?'new-password':'current-password');return;}
+            if(/user|username|login|email|mail|identifiant|compte|account/.test(h)){i.setAttribute('autocomplete','username');return;}
+            if(/otp|one.?time|verification|security.?code|code.?securite/.test(h)){i.setAttribute('autocomplete','one-time-code');}
+          }
+          var n=document.querySelectorAll('input');for(var x=0;x<n.length;x++)mark(n[x]);
+        })();
+        """;
+
     private Dialog activeDialog;
     private WebView activeWebView;
     private PluginCall activeCall;
@@ -135,11 +153,18 @@ public class CRIBrowserPlugin extends Plugin {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        settings.setSaveFormData(true);
         settings.setSupportMultipleWindows(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+        // Make the embedded browser participate explicitly in Android's Autofill
+        // framework (Google Password Manager or the user's selected provider).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+        }
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -168,6 +193,7 @@ public class CRIBrowserPlugin extends Plugin {
             @Override
             public void onPageFinished(WebView view, String url) {
                 updateAddress(url);
+                view.evaluateJavascript(AUTOFILL_COMPATIBILITY_SCRIPT, null);
             }
         });
 

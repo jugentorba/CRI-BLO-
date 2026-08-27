@@ -111,6 +111,18 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences.preferredContentMode = .recommended
 
+        // WKWebView already participates in iOS Password AutoFill. This script
+        // adds standards-based autocomplete hints only when a website omitted
+        // them, improving iCloud Passwords and third-party credential providers
+        // without CRI-BLO reading or storing the credential itself.
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.autofillCompatibilityScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: false
+            )
+        )
+
         if longPressCompatibility {
             configuration.userContentController.addUserScript(
                 WKUserScript(
@@ -305,6 +317,60 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // Safari's preview/context menu over interactive field maps.
         completionHandler(nil)
     }
+
+    private static let autofillCompatibilityScript = #"""
+    (function () {
+      if (window.__cribloAutofillInstalled) return;
+      window.__cribloAutofillInstalled = true;
+
+      function mark(input) {
+        if (!input || input.nodeType !== 1 || input.tagName !== 'INPUT') return;
+        var type = String(input.getAttribute('type') || 'text').toLowerCase();
+        var current = String(input.getAttribute('autocomplete') || '').trim().toLowerCase();
+        // Respect an explicit site decision. Only repair fields where the site
+        // supplied no meaningful autocomplete metadata.
+        if (current && current !== 'on') return;
+        var hint = [
+          input.getAttribute('name'),
+          input.getAttribute('id'),
+          input.getAttribute('placeholder'),
+          input.getAttribute('aria-label')
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        if (type === 'password') {
+          input.setAttribute('autocomplete', /new|create|confirm|nouveau|confirmer|signup|register/.test(hint)
+            ? 'new-password'
+            : 'current-password');
+          return;
+        }
+        if (/user|username|login|email|mail|identifiant|compte|account/.test(hint)) {
+          input.setAttribute('autocomplete', 'username');
+          return;
+        }
+        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) {
+          input.setAttribute('autocomplete', 'one-time-code');
+        }
+      }
+
+      function scan(root) {
+        try {
+          if (root && root.matches && root.matches('input')) mark(root);
+          var nodes = root && root.querySelectorAll ? root.querySelectorAll('input') : [];
+          for (var i = 0; i < nodes.length; i++) mark(nodes[i]);
+        } catch (_) {}
+      }
+
+      scan(document);
+      try {
+        new MutationObserver(function (changes) {
+          for (var i = 0; i < changes.length; i++) {
+            var added = changes[i].addedNodes || [];
+            for (var j = 0; j < added.length; j++) scan(added[j]);
+          }
+        }).observe(document.documentElement || document, { childList: true, subtree: true });
+      } catch (_) {}
+    })();
+    """#
 
     private static let longPressBridgeScript = #"""
     (function () {
