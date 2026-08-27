@@ -1068,34 +1068,87 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return count;
       }
 
-      function compatibleContextEvent(target, currentTarget, x, y, sourceEvent) {
+      function listenerUsesCapture(options) {
+        try {
+          if (options === true) return true;
+          return !!(options && typeof options === 'object' && options.capture === true);
+        } catch (_) { return false; }
+      }
+
+      function compatibleSemanticEvent(type, target, currentTarget, x, y, sourceEvent) {
         var raw;
         try {
-          raw = new MouseEvent('contextmenu', {
-            bubbles: true, cancelable: true, composed: true,
-            clientX: x, clientY: y, screenX: x, screenY: y,
-            button: 2, buttons: 2, view: window
+          raw = new MouseEvent(type === 'contextmenu' ? 'contextmenu' : 'mousemove', {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            screenX: x,
+            screenY: y,
+            button: type === 'contextmenu' ? 2 : 0,
+            buttons: type === 'contextmenu' ? 2 : 1,
+            view: window
           });
         } catch (_) { raw = {}; }
 
         var prevented = false;
         var stopped = false;
         var immediate = false;
+        var touch = null;
+        try { touch = sourceEvent && sourceEvent.touches && sourceEvent.touches[0]; } catch (_) {}
+        var touchPoint = {
+          identifier: touch && touch.identifier != null ? touch.identifier : 1,
+          target: target,
+          clientX: x,
+          clientY: y,
+          pageX: x + (window.scrollX || 0),
+          pageY: y + (window.scrollY || 0),
+          screenX: x,
+          screenY: y,
+          radiusX: 4,
+          radiusY: 4,
+          rotationAngle: 0,
+          force: 0.5
+        };
+        var composed = [];
+        var n = target;
+        while (n) { composed.push(n); n = n.parentNode; }
+        if (composed.indexOf(document) < 0) composed.push(document);
+        composed.push(window);
+
         var overrides = {
-          type: 'contextmenu', target: target, srcElement: target,
-          currentTarget: currentTarget, eventPhase: currentTarget === target ? 2 : 3,
-          button: 2, buttons: 2, which: 3,
-          clientX: x, clientY: y, pageX: x + (window.scrollX || 0),
-          pageY: y + (window.scrollY || 0), screenX: x, screenY: y,
-          isTrusted: true,
-          preventDefault: function () { prevented = true; try { sourceEvent && sourceEvent.preventDefault && sourceEvent.preventDefault(); } catch (_) {} },
+          type: type,
+          target: target,
+          srcElement: target,
+          currentTarget: currentTarget,
+          eventPhase: currentTarget === target ? 2 : 3,
+          button: type === 'contextmenu' ? 2 : 0,
+          buttons: type === 'contextmenu' ? 2 : 1,
+          which: type === 'contextmenu' ? 3 : 1,
+          clientX: x,
+          clientY: y,
+          pageX: x + (window.scrollX || 0),
+          pageY: y + (window.scrollY || 0),
+          screenX: x,
+          screenY: y,
+          pointerId: 1,
+          pointerType: 'touch',
+          isPrimary: true,
+          isTrusted: !!(sourceEvent && sourceEvent.isTrusted),
+          touches: [touchPoint],
+          targetTouches: [touchPoint],
+          changedTouches: [touchPoint],
+          originalEvent: sourceEvent || raw,
+          nativeEvent: sourceEvent || raw,
+          srcEvent: sourceEvent || raw,
+          preventDefault: function () {
+            prevented = true;
+            try { sourceEvent && sourceEvent.preventDefault && sourceEvent.preventDefault(); } catch (_) {}
+          },
           stopPropagation: function () { stopped = true; },
           stopImmediatePropagation: function () { stopped = true; immediate = true; },
-          composedPath: function () {
-            var path = []; var n = target;
-            while (n) { path.push(n); n = n.parentNode; }
-            path.push(window); return path;
-          }
+          composedPath: function () { return composed.slice(); }
         };
         try {
           return new Proxy(raw, {
@@ -1111,9 +1164,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             }
           });
         } catch (_) {
-          Object.keys(overrides).forEach(function (key) { try { raw[key] = overrides[key]; } catch (_) {} });
           return raw;
         }
+      }
+
+      function compatibleContextEvent(target, currentTarget, x, y, sourceEvent) {
+        return compatibleSemanticEvent('contextmenu', target, currentTarget, x, y, sourceEvent);
       }
 
       function callCapturedListener(entry, currentTarget, event) {
@@ -1124,7 +1180,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) { return false; }
       }
 
-      function invokeCapturedContextMenu(target, x, y, sourceEvent) {
+      function invokeCapturedSemanticHandlers(target, x, y, sourceEvent) {
         if (!target) return false;
         var path = [];
         var node = target;
@@ -1133,98 +1189,58 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         path.push(window);
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
 
-        var invoked = false;
-        // Native contextmenu capture phase: window/document/ancestors -> target.
-        for (var p = path.length - 1; p >= 0; p--) {
-          var current = path[p];
-          var entries = __cribloCapturedListeners.get(current) || [];
-          for (var i = 0; i < entries.length; i++) {
-            if (entries[i].type !== 'contextmenu') continue;
-            var event = compatibleContextEvent(target, current, x, y, sourceEvent);
-            if (callCapturedListener(entries[i], current, event)) {
-              invoked = true; __cribloGeoDiag.capturedCalls++;
-              if (event.__cribloImmediate || event.__cribloStopped) return true;
-              if (event.__cribloPrevented) return true;
-            }
-          }
-        }
-        // Bubble phase: target -> window.
-        for (var b = 0; b < path.length; b++) {
-          var bubbleCurrent = path[b];
-          var bubbleEntries = __cribloCapturedListeners.get(bubbleCurrent) || [];
-          for (var j = 0; j < bubbleEntries.length; j++) {
-            if (bubbleEntries[j].type !== 'contextmenu') continue;
-            var bubbleEvent = compatibleContextEvent(target, bubbleCurrent, x, y, sourceEvent);
-            if (callCapturedListener(bubbleEntries[j], bubbleCurrent, bubbleEvent)) {
-              invoked = true; __cribloGeoDiag.capturedCalls++;
-              if (bubbleEvent.__cribloImmediate || bubbleEvent.__cribloStopped) return true;
-              if (bubbleEvent.__cribloPrevented) return true;
-            }
-          }
-        }
-        try {
-          if (typeof target.oncontextmenu === 'function') {
-            var directEvent = compatibleContextEvent(target, target, x, y, sourceEvent);
-            target.oncontextmenu(directEvent);
-            __cribloGeoDiag.capturedCalls++;
-            invoked = true;
-          }
-        } catch (_) {}
-        return invoked;
-      }
-
-      function invokeCapturedSemanticLongPress(target, x, y, sourceEvent) {
-        if (!target) return false;
-        var path = [];
-        var node = target;
-        while (node) { path.push(node); node = node.parentNode; }
-        if (path.indexOf(document) < 0) path.push(document);
-        path.push(window);
-        var semanticTypes = ['longpress', 'long-press', 'hold', 'press'];
+        var semanticTypes = ['contextmenu', 'longpress', 'long-press', 'hold', 'press'];
         var invoked = false;
 
-        for (var p = path.length - 1; p >= 0; p--) {
-          var current = path[p];
-          var entries = __cribloCapturedListeners.get(current) || [];
-          for (var i = 0; i < entries.length; i++) {
-            if (semanticTypes.indexOf(entries[i].type) < 0) continue;
-            var event = compatibleContextEvent(target, current, x, y, sourceEvent);
-            try {
-              event = new Proxy(event, {
-                get: function (obj, prop) {
-                  if (prop === 'type') return entries[i] && entries[i].type || 'longpress';
-                  if (prop === 'detail') return { clientX: x, clientY: y, source: 'criblo-ios-real-touch' };
-                  return obj[prop];
-                }
-              });
-            } catch (_) {}
-            if (callCapturedListener(entries[i], current, event)) {
-              invoked = true;
-              __cribloGeoDiag.semanticCalls++;
+        for (var t = 0; t < semanticTypes.length; t++) {
+          var eventType = semanticTypes[t];
+
+          // Capture phase: only listeners that were actually registered with capture=true.
+          for (var p = path.length - 1; p >= 0; p--) {
+            var current = path[p];
+            var captureEntries = __cribloCapturedListeners.get(current) || [];
+            for (var i = 0; i < captureEntries.length; i++) {
+              var captureEntry = captureEntries[i];
+              if (captureEntry.type !== eventType || !listenerUsesCapture(captureEntry.options)) continue;
+              var captureEvent = compatibleSemanticEvent(eventType, target, current, x, y, sourceEvent);
+              if (callCapturedListener(captureEntry, current, captureEvent)) {
+                invoked = true;
+                __cribloGeoDiag.capturedCalls++;
+              }
+              if (captureEvent.__cribloImmediate) break;
+              if (captureEvent.__cribloStopped) break;
+            }
+          }
+
+          // Bubble phase: only capture=false listeners, exactly once.
+          for (var b = 0; b < path.length; b++) {
+            var bubbleCurrent = path[b];
+            var bubbleEntries = __cribloCapturedListeners.get(bubbleCurrent) || [];
+            for (var j = 0; j < bubbleEntries.length; j++) {
+              var bubbleEntry = bubbleEntries[j];
+              if (bubbleEntry.type !== eventType || listenerUsesCapture(bubbleEntry.options)) continue;
+              var bubbleEvent = compatibleSemanticEvent(eventType, target, bubbleCurrent, x, y, sourceEvent);
+              if (callCapturedListener(bubbleEntry, bubbleCurrent, bubbleEvent)) {
+                invoked = true;
+                __cribloGeoDiag.capturedCalls++;
+              }
+              if (bubbleEvent.__cribloImmediate) break;
+              if (bubbleEvent.__cribloStopped) break;
             }
           }
         }
-        for (var b = 0; b < path.length; b++) {
-          var bubbleCurrent = path[b];
-          var bubbleEntries = __cribloCapturedListeners.get(bubbleCurrent) || [];
-          for (var j = 0; j < bubbleEntries.length; j++) {
-            if (semanticTypes.indexOf(bubbleEntries[j].type) < 0) continue;
-            var bubbleEvent = compatibleContextEvent(target, bubbleCurrent, x, y, sourceEvent);
-            try {
-              var semanticType = bubbleEntries[j].type;
-              bubbleEvent = new Proxy(bubbleEvent, {
-                get: function (obj, prop) {
-                  if (prop === 'type') return semanticType;
-                  if (prop === 'detail') return { clientX: x, clientY: y, source: 'criblo-ios-real-touch' };
-                  return obj[prop];
-                }
-              });
-            } catch (_) {}
-            if (callCapturedListener(bubbleEntries[j], bubbleCurrent, bubbleEvent)) {
+
+        // Property handlers are not visible through addEventListener interception.
+        // Call each oncontextmenu property at most once along the real target path.
+        for (var k = 0; k < path.length; k++) {
+          try {
+            var propertyTarget = path[k];
+            if (propertyTarget && typeof propertyTarget.oncontextmenu === 'function') {
+              propertyTarget.oncontextmenu(compatibleSemanticEvent('contextmenu', target, propertyTarget, x, y, sourceEvent));
               invoked = true;
-              __cribloGeoDiag.semanticCalls++;
+              __cribloGeoDiag.capturedCalls++;
             }
-          }
+          } catch (_) {}
         }
         return invoked;
       }
@@ -1355,14 +1371,16 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }
 
       function customLongPress(target, x, y) {
-        try {
-          target.dispatchEvent(new CustomEvent('longpress', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            detail: { clientX: x, clientY: y, source: 'criblo-ios' }
-          }));
-        } catch (_) {}
+        ['longpress', 'long-press', 'hold', 'press'].forEach(function (name) {
+          try {
+            target.dispatchEvent(new CustomEvent(name, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              detail: { clientX: x, clientY: y, x: x, y: y, source: 'criblo-ios' }
+            }));
+          } catch (_) {}
+        });
       }
 
       function candidateElements(x, y) {
@@ -1620,6 +1638,48 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return null;
       }
 
+      function visiblePopupState() {
+        var selectors = [
+          '[role="dialog"]', '[role="menu"]', '[role="tooltip"]',
+          '.popup', '.popover', '.modal', '.contextmenu', '.context-menu',
+          '.leaflet-popup', '.mapboxgl-popup', '.maplibregl-popup', '.esri-popup',
+          '[class*="popup"]', '[class*="popover"]', '[class*="contextmenu"]',
+          '[class*="context-menu"]', '[class*="dialog"]', '[class*="modal"]'
+        ].join(',');
+        var out = [];
+        try {
+          var nodes = document.querySelectorAll(selectors);
+          for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            var rect = node.getBoundingClientRect();
+            var style = getComputedStyle(node);
+            if (rect.width > 20 && rect.height > 20 && style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0) {
+              out.push({
+                node: node,
+                text: String(node.textContent || '').slice(0, 400),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+              });
+            }
+          }
+        } catch (_) {}
+        return out;
+      }
+
+      function popupChanged(before) {
+        var after = visiblePopupState();
+        for (var i = 0; i < after.length; i++) {
+          var now = after[i];
+          var previous = null;
+          for (var j = 0; j < before.length; j++) {
+            if (before[j].node === now.node) { previous = before[j]; break; }
+          }
+          if (!previous) return true;
+          if (previous.text !== now.text || previous.width !== now.width || previous.height !== now.height) return true;
+        }
+        return false;
+      }
+
       function fireRealTouchLongPress() {
         realTouchTimer = null;
         if (!realTouchTarget) return;
@@ -1627,38 +1687,60 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         lastRealTouchLongPressAt = Date.now();
         clearSelection();
 
-        var signature = String((realTouchTarget.tagName || '') + '#' + (realTouchTarget.id || '') + '.' + (realTouchTarget.className && (realTouchTarget.className.baseVal || realTouchTarget.className) || ''));
-        __cribloGeoDiag.lastTarget = signature.slice(0, 180);
-
-        // First call GeoReseaux's own registered handler directly. This is the
-        // key difference from previous builds: the page's callback receives a
-        // right-click-like event facade with isTrusted=true rather than a
-        // synthetic event dispatched by WebKit.
-        var handledContext = invokeCapturedContextMenu(realTouchTarget, realTouchX, realTouchY, window.__cribloLastTrustedTouchStart || null);
-        var handledSemantic = invokeCapturedSemanticLongPress(realTouchTarget, realTouchX, realTouchY, window.__cribloLastTrustedTouchStart || null);
-
-        // Always call the registered map engine too. v5 incorrectly skipped this
-        // whenever *any* context listener returned, even when that listener was a
-        // generic shell handler that never opened the GeoReseaux feature popup.
-        var handledEngine = invokeMapEngine(realTouchTarget, realTouchX, realTouchY, window.__cribloLastTrustedTouchStart || null);
-        var handled = handledContext || handledSemantic || handledEngine;
-
-        // DOM event injection remains only as a compatibility fallback.
-        if (!handled) handled = dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
-
-        // Enterprise map shells sometimes stop contextmenu propagation. Try a
-        // short ancestor chain as a compatibility fallback.
-        if (!handled) {
-          var parent = realTouchTarget.parentElement;
-          for (var i = 0; parent && i < 6; i++, parent = parent.parentElement) {
-            if (dispatchToTarget(parent, realTouchX, realTouchY)) {
-              handled = true;
-              break;
-            }
-          }
+        // Keep iOS text selection/callout from stealing a map hold.
+        var styleNode = realTouchTarget;
+        for (var s = 0; styleNode && s < 7; s++, styleNode = styleNode.parentElement) {
+          try {
+            styleNode.style.webkitUserSelect = 'none';
+            styleNode.style.webkitTouchCallout = 'none';
+            styleNode.style.userSelect = 'none';
+          } catch (_) {}
         }
 
-        if (!handled) dispatchAt(realTouchX, realTouchY);
+        var signature = String((realTouchTarget.tagName || '') + '#' + (realTouchTarget.id || '') + '.' + (realTouchTarget.className && (realTouchTarget.className.baseVal || realTouchTarget.className) || ''));
+        __cribloGeoDiag.lastTarget = signature.slice(0, 180);
+        __cribloGeoDiag.lastResult = 'trying';
+
+        var before = visiblePopupState();
+        var trustedTouch = window.__cribloLastTrustedTouchStart || null;
+
+        // Stage 1: call GeoReseaux's own semantic handlers exactly once each.
+        invokeCapturedSemanticHandlers(realTouchTarget, realTouchX, realTouchY, trustedTouch);
+
+        setTimeout(function () {
+          if (popupChanged(before)) {
+            __cribloGeoDiag.lastResult = 'page-handler-popup';
+            return;
+          }
+
+          // Stage 2: map engine API (OpenLayers/Leaflet/Mapbox/ArcGIS).
+          invokeMapEngine(realTouchTarget, realTouchX, realTouchY, trustedTouch);
+
+          setTimeout(function () {
+            if (popupChanged(before)) {
+              __cribloGeoDiag.lastResult = 'map-engine-popup';
+              return;
+            }
+
+            // Stage 3: ordinary DOM contextmenu + semantic custom events.
+            dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
+            var parent = realTouchTarget.parentElement;
+            for (var i = 0; parent && i < 7; i++, parent = parent.parentElement) {
+              dispatchToTarget(parent, realTouchX, realTouchY);
+            }
+
+            setTimeout(function () {
+              if (popupChanged(before)) {
+                __cribloGeoDiag.lastResult = 'dom-popup';
+                return;
+              }
+
+              // Stage 4: emulate Android's held touch for libraries with their own timer.
+              scheduleAndroidTouchFallback(realTouchTarget, realTouchX, realTouchY);
+              __cribloGeoDiag.lastResult = 'android-hold-fallback';
+            }, 140);
+          }, 120);
+        }, 100);
       }
 
       document.addEventListener('touchstart', function (event) {
@@ -1746,6 +1828,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Registered maps: ' + (__cribloGeoDiag.registry.join(', ') || 'none'),
           'Detected engine: ' + __cribloGeoDiag.engine,
           'Engine calls: ' + __cribloGeoDiag.engineCalls,
+          'Registered map instances: ' + __cribloMapRegistry.length,
+          'Last result: ' + __cribloGeoDiag.lastResult,
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
         ].join('\n');
