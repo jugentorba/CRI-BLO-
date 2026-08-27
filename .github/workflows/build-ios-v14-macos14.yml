@@ -51,6 +51,17 @@ jobs:
       - name: Apply CRI-BLO iOS privacy permissions
         run: node scripts/patch-ios-info.mjs
 
+      - name: Resolve iOS Swift packages
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -clonedSourcePackagesDirPath "$PWD/ios-spm"
+
+      - name: Patch ion iOS camera Swift concurrency issue
+        run: node scripts/patch-ion-ios-camera.mjs "$PWD/ios-spm"
+
       - name: Build iOS simulator app
         id: simulator
         continue-on-error: true
@@ -63,6 +74,7 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            -clonedSourcePackagesDirPath "$PWD/ios-spm" \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee xcodebuild-sim.log
 
@@ -100,6 +112,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$PWD/ios-device-build" \
+            -clonedSourcePackagesDirPath "$PWD/ios-spm" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
