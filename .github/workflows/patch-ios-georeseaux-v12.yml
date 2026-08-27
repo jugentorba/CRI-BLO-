@@ -1,0 +1,85 @@
+name: Patch iOS GeoReseaux v12
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+
+      - name: Remove CRI-BLO synthetic long-press competition
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
+          s = p.read_text()
+
+          old = '''        if longPressCompatibility {
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
+            longPress.minimumPressDuration = 0.72
+            longPress.cancelsTouchesInView = false
+            longPress.delegate = self
+            webView.addGestureRecognizer(longPress)
+        }
+'''
+          new = '''        if longPressCompatibility {
+            // GeoReseaux v12: WebKit itself proved it can emit a trusted
+            // contextmenu on the map canvas. Do not race that native gesture
+            // with CRI-BLO's old 720ms synthetic fallback recognizer.
+        }
+'''
+          if s.count(old) != 1:
+              raise SystemExit('native recognizer block mismatch')
+          s = s.replace(old, new, 1)
+
+          old = '''          // Give native WebKit first chance to emit its own trusted contextmenu.
+          // Android does so at ~600ms; fallback only after that window.
+          realTouchTimer = setTimeout(fireRealTouchLongPress, 850);'''
+          new = '''          // GeoReseaux v12 native-only isolation. v11 proved WebKit emits a
+          // genuine trusted contextmenu, while CRI-BLO's synthetic fallback
+          // still fired as well. Leave the gesture completely to WebKit so
+          // the trusted event cannot be preceded or followed by a fake one.
+          realTouchTimer = null;
+          __cribloGeoDiag.lastResult = 'native-only-waiting';'''
+          if s.count(old) != 1:
+              raise SystemExit('JS fallback timer block mismatch')
+          s = s.replace(old, new, 1)
+
+          old = "          'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"
+          new = "          'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),\n          'Native-only long press: true',\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"
+          if s.count(old) != 1:
+              raise SystemExit('diagnostic output block mismatch')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+          git diff --check
+          git diff -- plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          git commit -m "Let trusted WebKit GeoReseaux hold run alone"
+          git push origin HEAD:criblo-master-spec-v1
