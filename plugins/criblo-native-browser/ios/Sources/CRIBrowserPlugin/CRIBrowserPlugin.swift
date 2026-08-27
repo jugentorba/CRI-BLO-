@@ -961,7 +961,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         registry: [],
         lastTarget: '',
         lastResult: 'not-run',
-        eventProperties: {}
+        eventProperties: {},
+        syntheticPointerDowns: 0,
+        contextDispatches: 0
       };
 
       // Register actual map instances at construction time. Frameworks often
@@ -1643,6 +1645,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var realTouchIdentifier = null;
       var realTouchFired = false;
       var lastRealTouchLongPressAt = 0;
+      var lastRealPointerDownAt = 0;
+      var lastRealPointerDownTarget = null;
 
       function clearRealTouchTimer() {
         if (realTouchTimer) {
@@ -1720,9 +1724,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         lastRealTouchLongPressAt = Date.now();
         clearSelection();
 
-        // Keep iOS text selection/callout from stealing a map hold.
         var styleNode = realTouchTarget;
-        for (var s = 0; styleNode && s < 7; s++, styleNode = styleNode.parentElement) {
+        for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
           try {
             styleNode.style.webkitUserSelect = 'none';
             styleNode.style.webkitTouchCallout = 'none';
@@ -1732,49 +1735,41 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
         var signature = String((realTouchTarget.tagName || '') + '#' + (realTouchTarget.id || '') + '.' + (realTouchTarget.className && (realTouchTarget.className.baseVal || realTouchTarget.className) || ''));
         __cribloGeoDiag.lastTarget = signature.slice(0, 180);
-        __cribloGeoDiag.lastResult = 'trying';
+        __cribloGeoDiag.lastResult = 'contextmenu-dispatched';
 
+        // Android trace proves Chromium sends ONE bubbling contextmenu on the
+        // CANVAS about 600ms after pointerdown/touchstart. Do exactly that.
+        // Do not directly call handlers first and do not redispatch to parents:
+        // either approach invokes the same framework listener multiple times.
         var before = visiblePopupState();
-        var trustedTouch = window.__cribloLastTrustedTouchStart || null;
-
-        // Stage 1: call GeoReseaux's own semantic handlers exactly once each.
-        invokeCapturedSemanticHandlers(realTouchTarget, realTouchX, realTouchY, trustedTouch);
+        __cribloGeoDiag.contextDispatches++;
+        dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
 
         setTimeout(function () {
           if (popupChanged(before)) {
-            __cribloGeoDiag.lastResult = 'page-handler-popup';
+            __cribloGeoDiag.lastResult = 'dom-popup';
             return;
           }
 
-          // Stage 2: map engine API (OpenLayers/Leaflet/Mapbox/ArcGIS).
-          invokeMapEngine(realTouchTarget, realTouchX, realTouchY, trustedTouch);
+          // If WebKit's synthetic DOM dispatch was ignored by the framework,
+          // call the captured contextmenu handlers once as a fallback. This is
+          // deliberately after the faithful one-event path, never before it.
+          var trustedTouch = window.__cribloLastTrustedTouchStart || null;
+          invokeCapturedSemanticHandlers(realTouchTarget, realTouchX, realTouchY, trustedTouch);
 
           setTimeout(function () {
-            if (popupChanged(before)) {
-              __cribloGeoDiag.lastResult = 'map-engine-popup';
-              return;
-            }
-
-            // Stage 3: ordinary DOM contextmenu + semantic custom events.
-            dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
-            var parent = realTouchTarget.parentElement;
-            for (var i = 0; parent && i < 7; i++, parent = parent.parentElement) {
-              dispatchToTarget(parent, realTouchX, realTouchY);
-            }
-
-            setTimeout(function () {
-              if (popupChanged(before)) {
-                __cribloGeoDiag.lastResult = 'dom-popup';
-                return;
-              }
-
-              // Stage 4: emulate Android's held touch for libraries with their own timer.
-              scheduleAndroidTouchFallback(realTouchTarget, realTouchX, realTouchY);
-              __cribloGeoDiag.lastResult = 'android-hold-fallback';
-            }, 140);
-          }, 120);
-        }, 100);
+            __cribloGeoDiag.lastResult = popupChanged(before) ? 'page-handler-popup' : 'no-popup';
+          }, 180);
+        }, 180);
       }
+
+      document.addEventListener('pointerdown', function (event) {
+        try {
+          if (!event || String(event.pointerType || '') !== 'touch') return;
+          lastRealPointerDownAt = Date.now();
+          lastRealPointerDownTarget = event.target || null;
+        } catch (_) {}
+      }, true);
 
       document.addEventListener('touchstart', function (event) {
         try {
@@ -1789,6 +1784,25 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           // mutate it; it is used only as the source for the direct handler
           // facade so GeoReseaux can read real touch metadata if needed.
           window.__cribloLastTrustedTouchStart = event;
+
+          // Android emits pointerdown before touchstart. If this WKWebView did
+          // not emit a matching touch PointerEvent, provide exactly one so the
+          // GeoReseaux framework can establish the same gesture state.
+          if (!(lastRealPointerDownTarget === target && (Date.now() - lastRealPointerDownAt) < 80)) {
+            try {
+              if (typeof PointerEvent === 'function') {
+                target.dispatchEvent(new PointerEvent('pointerdown', {
+                  bubbles:true,cancelable:true,composed:true,
+                  clientX:touch.clientX,clientY:touch.clientY,
+                  screenX:touch.screenX,screenY:touch.screenY,
+                  button:0,buttons:1,pointerId:touch.identifier == null ? 1 : touch.identifier,
+                  pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1,view:window
+                }));
+                __cribloGeoDiag.syntheticPointerDowns++;
+              }
+            } catch (_) {}
+          }
+
           realTouchX = touch.clientX;
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
@@ -1820,9 +1834,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         realTouchTarget = null;
         realTouchIdentifier = null;
         realTouchFired = false;
-        if (fired) {
-          try { event.preventDefault(); } catch (_) {}
-        }
+        // Let the real iOS touchend continue normally. Android also releases
+        // the physical touch after contextmenu; blocking the release can leave
+        // framework gesture state inconsistent.
+        void fired;
       }, { capture: true, passive: false });
 
       window.addEventListener('message', function (event) {
@@ -1863,6 +1878,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Engine calls: ' + __cribloGeoDiag.engineCalls,
           'Registered map instances: ' + __cribloMapRegistry.length,
           'Last result: ' + __cribloGeoDiag.lastResult,
+          'Context dispatches: ' + __cribloGeoDiag.contextDispatches,
+          'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
