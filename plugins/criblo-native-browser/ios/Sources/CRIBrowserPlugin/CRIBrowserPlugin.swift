@@ -280,11 +280,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
 
         if longPressCompatibility {
-            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
-            longPress.minimumPressDuration = 0.72
-            longPress.cancelsTouchesInView = false
-            longPress.delegate = self
-            webView.addGestureRecognizer(longPress)
+            // GeoReseaux v12: WebKit proved it emits a trusted contextmenu.
+            // Do not race it with CRI-BLO's old 720ms synthetic recognizer.
         }
 
         view.addSubview(webView)
@@ -1813,9 +1810,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
-          // Give native WebKit first chance to emit its own trusted contextmenu.
-          // Android does so at ~600ms; fallback only after that window.
-          realTouchTimer = setTimeout(fireRealTouchLongPress, 850);
+          // GeoReseaux v12 native-only isolation: do not synthesize a
+          // second contextmenu around WebKit's real trusted long press.
+          realTouchTimer = null;
+          __cribloGeoDiag.lastResult = 'native-only-waiting';
         } catch (_) {}
       }, { capture: true, passive: true });
 
@@ -1890,6 +1888,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
           'Trusted contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
           'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),
+          'Native-only long press: true',
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
