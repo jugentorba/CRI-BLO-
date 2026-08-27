@@ -241,7 +241,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
         if longPressCompatibility {
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
-            longPress.minimumPressDuration = 0.55
+            longPress.minimumPressDuration = 0.48
             longPress.cancelsTouchesInView = false
             longPress.delegate = self
             webView.addGestureRecognizer(longPress)
@@ -725,21 +725,238 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     (function () {
       if (window.__cribloLongPressInstalled) return;
       window.__cribloLongPressInstalled = true;
-      function clamp01(value) { value = Number(value || 0); return Math.max(0, Math.min(1, value)); }
-      function forwardIntoFrame(frame, x, y) {
-        try { if (!frame || !frame.contentWindow) return false; var rect = frame.getBoundingClientRect(); if (!rect || rect.width <= 0 || rect.height <= 0) return false; frame.contentWindow.postMessage({__cribloLongPress:true,rx:clamp01((x-rect.left)/rect.width),ry:clamp01((y-rect.top)/rect.height)}, '*'); return true; } catch (_) { return false; }
+
+      function clamp01(value) {
+        value = Number(value || 0);
+        return Math.max(0, Math.min(1, value));
       }
+
+      function clearSelection() {
+        try {
+          var selection = window.getSelection && window.getSelection();
+          if (selection && selection.removeAllRanges) selection.removeAllRanges();
+        } catch (_) {}
+      }
+
+      function forwardIntoFrame(frame, x, y) {
+        try {
+          if (!frame || !frame.contentWindow) return false;
+          var rect = frame.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+          frame.contentWindow.postMessage({
+            __cribloLongPress: true,
+            rx: clamp01((x - rect.left) / rect.width),
+            ry: clamp01((y - rect.top) / rect.height)
+          }, '*');
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function pointer(target, type, x, y, button, buttons) {
+        if (typeof PointerEvent !== 'function') return false;
+        try {
+          var event = new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            screenX: x,
+            screenY: y,
+            button: button,
+            buttons: buttons,
+            pointerId: 1,
+            pointerType: 'mouse',
+            isPrimary: true,
+            width: 1,
+            height: 1,
+            pressure: buttons ? 0.5 : 0,
+            view: window
+          });
+          return !target.dispatchEvent(event) || event.defaultPrevented;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function mouse(target, type, x, y, button, buttons) {
+        try {
+          var event = new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            screenX: x,
+            screenY: y,
+            button: button,
+            buttons: buttons,
+            view: window
+          });
+          return !target.dispatchEvent(event) || event.defaultPrevented;
+        } catch (_) {
+          try {
+            var legacy = document.createEvent('MouseEvents');
+            legacy.initMouseEvent(type, true, true, window, 1, x, y, x, y,
+              false, false, false, false, button, null);
+            return !target.dispatchEvent(legacy) || legacy.defaultPrevented;
+          } catch (_) {
+            return false;
+          }
+        }
+      }
+
+      function contextMenu(target, x, y) {
+        try {
+          var event;
+          if (typeof PointerEvent === 'function') {
+            event = new PointerEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 2,
+              buttons: 2,
+              pointerId: 1,
+              pointerType: 'mouse',
+              isPrimary: true,
+              width: 1,
+              height: 1,
+              pressure: 0.5,
+              view: window
+            });
+          } else {
+            event = new MouseEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 2,
+              buttons: 2,
+              view: window
+            });
+          }
+          return !target.dispatchEvent(event) || event.defaultPrevented;
+        } catch (_) {
+          return mouse(target, 'contextmenu', x, y, 2, 2);
+        }
+      }
+
+      function jqueryContextMenu(target, x, y) {
+        try {
+          var jq = window.jQuery;
+          if (!jq || !jq.Event) return false;
+          var event = jq.Event('contextmenu', {
+            clientX: x,
+            clientY: y,
+            pageX: x + (window.scrollX || 0),
+            pageY: y + (window.scrollY || 0),
+            button: 2,
+            buttons: 2,
+            which: 3
+          });
+          jq(target).trigger(event);
+          return !!(event.isDefaultPrevented && event.isDefaultPrevented());
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function customLongPress(target, x, y) {
+        try {
+          target.dispatchEvent(new CustomEvent('longpress', {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            detail: { clientX: x, clientY: y, source: 'criblo-ios' }
+          }));
+        } catch (_) {}
+      }
+
+      function candidateElements(x, y) {
+        try {
+          if (document.elementsFromPoint) {
+            var stack = document.elementsFromPoint(x, y) || [];
+            var unique = [];
+            for (var i = 0; i < stack.length; i++) {
+              var el = stack[i];
+              if (!el || unique.indexOf(el) >= 0) continue;
+              unique.push(el);
+              if (unique.length >= 8) break;
+            }
+            if (unique.length) return unique;
+          }
+        } catch (_) {}
+        var single = document.elementFromPoint(x, y);
+        return single ? [single] : [];
+      }
+
+      function dispatchToTarget(target, x, y) {
+        if (!target || !target.dispatchEvent) return false;
+
+        var tag = String(target.tagName || '').toUpperCase();
+        if (tag === 'IFRAME' || tag === 'FRAME') {
+          return forwardIntoFrame(target, x, y);
+        }
+
+        var link = target.closest && target.closest('a[href]');
+        if (link && tag !== 'CANVAS' && tag !== 'SVG' && tag !== 'PATH') return false;
+
+        pointer(target, 'pointerdown', x, y, 2, 2);
+        mouse(target, 'mousedown', x, y, 2, 2);
+
+        var handled = contextMenu(target, x, y);
+        if (!handled) handled = jqueryContextMenu(target, x, y);
+        if (!handled) customLongPress(target, x, y);
+
+        pointer(target, 'pointerup', x, y, 2, 0);
+        mouse(target, 'mouseup', x, y, 2, 0);
+        mouse(target, 'auxclick', x, y, 1, 0);
+        return handled;
+      }
+
       function dispatchAt(x, y) {
-        var target = document.elementFromPoint(x, y); if (!target) return false;
-        if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') return forwardIntoFrame(target, x, y);
-        var link = target.closest && target.closest('a[href]'); if (link) return false;
-        var init = {bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,screenX:x,screenY:y,button:2,buttons:2,view:window};
-        try { target.dispatchEvent(new MouseEvent('contextmenu', init)); } catch (_) { try { var evt=document.createEvent('MouseEvents'); evt.initMouseEvent('contextmenu',true,true,window,1,x,y,x,y,false,false,false,false,2,null); target.dispatchEvent(evt); } catch (_) {} }
-        try { target.dispatchEvent(new CustomEvent('longpress',{bubbles:true,cancelable:true,composed:true,detail:{clientX:x,clientY:y,source:'criblo-ios'}})); } catch (_) {}
+        clearSelection();
+        var candidates = candidateElements(x, y);
+        if (!candidates.length) return false;
+
+        for (var i = 0; i < candidates.length; i++) {
+          var target = candidates[i];
+          var tag = String(target.tagName || '').toUpperCase();
+          if (tag === 'IFRAME' || tag === 'FRAME') {
+            if (forwardIntoFrame(target, x, y)) return true;
+            continue;
+          }
+          if (dispatchToTarget(target, x, y)) return true;
+        }
+
+        customLongPress(candidates[0], x, y);
         return true;
       }
-      window.addEventListener('message', function(event){var data=event&&event.data;if(!data||data.__cribloLongPress!==true)return;dispatchAt(window.innerWidth*clamp01(data.rx),window.innerHeight*clamp01(data.ry));}, false);
-      window.__cribloDispatchLongPress=function(rx,ry){return dispatchAt(window.innerWidth*clamp01(rx),window.innerHeight*clamp01(ry));};
+
+      window.addEventListener('message', function (event) {
+        var data = event && event.data;
+        if (!data || data.__cribloLongPress !== true) return;
+        dispatchAt(
+          window.innerWidth * clamp01(data.rx),
+          window.innerHeight * clamp01(data.ry)
+        );
+      }, false);
+
+      window.__cribloDispatchLongPress = function (rx, ry) {
+        return dispatchAt(
+          window.innerWidth * clamp01(rx),
+          window.innerHeight * clamp01(ry)
+        );
+      };
     })();
     """#
 }
