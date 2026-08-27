@@ -284,7 +284,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             // recognizer that was present when v11 observed a trusted WebKit
             // contextmenu, but do NOT dispatch any synthetic JS context event.
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
-            longPress.minimumPressDuration = 0.72
+            // Android trace: context action begins at about 600 ms.
+            longPress.minimumPressDuration = 0.60
             longPress.cancelsTouchesInView = false
             longPress.delegate = self
             webView.addGestureRecognizer(longPress)
@@ -702,8 +703,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         let ry = max(0, min(1, location.y / webView.bounds.height))
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // v13: record only. Do not manufacture pointer/touch/contextmenu JS.
-        let script = "window.__cribloRecordNativeRecognizer && window.__cribloRecordNativeRecognizer(\(rx), \(ry));"
+        // v14: do not dispatch an untrusted DOM contextmenu. Call the page's
+        // already-registered contextmenu handler directly, with a facade backed
+        // by the genuine trusted iOS touchstart event, at Android's ~600ms timing.
+        let script = "window.__cribloNativeTrustedHandlerLongPress && window.__cribloNativeTrustedHandlerLongPress(\(rx), \(ry));"
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
@@ -962,7 +965,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         contextDispatches: 0,
         trustedContextmenus: 0,
         trustedContextPrevented: false,
-        nativeRecognizerFires: 0
+        nativeRecognizerFires: 0,
+        directTrustedHandlerFires: 0,
+        directSourceTrusted: false,
+        directTarget: 'none'
       };
 
       // Register actual map instances at construction time. Frameworks often
@@ -1883,6 +1889,38 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return true;
       };
 
+      window.__cribloNativeTrustedHandlerLongPress = function (rx, ry) {
+        try {
+          __cribloGeoDiag.nativeRecognizerFires++;
+          var x = window.innerWidth * clamp01(rx);
+          var y = window.innerHeight * clamp01(ry);
+          var candidates = candidateElements(x, y);
+          var target = realTouchTarget || (candidates.length ? candidates[0] : null);
+          if (!target) {
+            __cribloGeoDiag.lastResult = 'direct-no-target';
+            return false;
+          }
+          var source = window.__cribloLastTrustedTouchStart || null;
+          __cribloGeoDiag.directSourceTrusted = !!(source && source.isTrusted);
+          __cribloGeoDiag.directTarget = String((target.tagName || '') + '#' + (target.id || '') + '.' + (target.className && (target.className.baseVal || target.className) || '')).slice(0, 180);
+          __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+          var before = visiblePopupState();
+          var callsBefore = __cribloGeoDiag.capturedCalls;
+          var invoked = invokeCapturedSemanticHandlers(target, x, y, source);
+          var delta = __cribloGeoDiag.capturedCalls - callsBefore;
+          __cribloGeoDiag.directTrustedHandlerFires += delta;
+          __cribloGeoDiag.lastResult = invoked ? 'direct-trusted-handler-called' : 'direct-no-handler';
+          setTimeout(function () {
+            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'direct-handler-popup';
+            else if (invoked) __cribloGeoDiag.lastResult = 'direct-handler-no-popup';
+          }, 220);
+          return invoked;
+        } catch (_) {
+          __cribloGeoDiag.lastResult = 'direct-handler-error';
+          return false;
+        }
+      };
+
       window.__cribloGeoDiagnosticsText = function () {
         var engineHints = [];
         try { if (window.L) engineHints.push('L'); } catch (_) {}
@@ -1905,6 +1943,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Trusted contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
           'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),
           'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,
+          'Direct trusted handler fires: ' + __cribloGeoDiag.directTrustedHandlerFires,
+          'Direct source trusted: ' + String(!!__cribloGeoDiag.directSourceTrusted),
+          'Direct target: ' + (__cribloGeoDiag.directTarget || 'none'),
           'Synthetic context fallback: disabled',
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
