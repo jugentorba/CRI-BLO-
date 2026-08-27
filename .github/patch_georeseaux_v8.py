@@ -8,18 +8,14 @@ text = path.read_text(encoding="utf-8")
 # UA experiment did not unlock the GeoReseaux popup and it also changes the
 # Orange login page away from the Safari path where Apple Password AutoFill is
 # known to work best. Android-style JS compatibility remains scoped to the GIS.
-ua_pattern = re.compile(
-    r"        // Orange/SiteMinder can reject the stripped WKWebView user agent after\n"
-    r"        // authentication even though the same account works in Safari\. Present a\n"
-    r"        // normal mobile Safari identity while retaining WKWebView cookie/session\n"
-    r"        // persistence in the app's default website data store\.\n"
-    r"        let os = UIDevice\.current\.systemVersion\.replacingOccurrences\(of: \"\\\.\", with: \"_\"\)\n"
-    r"        let major = UIDevice\.current\.systemVersion\.split\(separator: \"\\\.\"\)\.first\.map\(String\.init\) \?\? \"18\"\n"
-    r"        if longPressCompatibility \{.*?\n"
-    r"        \}\n\n"
-    r"        if longPressCompatibility \{",
-    re.S,
-)
+ua_start_marker = "        // Orange/SiteMinder can reject the stripped WKWebView user agent after\n"
+ua_end_marker = "        if longPressCompatibility {\n            let longPress = UILongPressGestureRecognizer"
+if text.count(ua_start_marker) != 1:
+    raise SystemExit(f"Expected one iOS UA start marker, found {text.count(ua_start_marker)}")
+if text.count(ua_end_marker) != 1:
+    raise SystemExit(f"Expected one long-press recognizer marker, found {text.count(ua_end_marker)}")
+ua_start = text.index(ua_start_marker)
+ua_end = text.index(ua_end_marker, ua_start)
 ua_replacement = '''        // Keep the actual iPhone/Safari identity for Orange authentication so
         // WebKit and the login page stay on the same path as Safari Password
         // AutoFill. GeoReseaux Android compatibility is injected only inside
@@ -28,10 +24,8 @@ ua_replacement = '''        // Keep the actual iPhone/Safari identity for Orange
         let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \\(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\\(major).0 Mobile/15E148 Safari/604.1"
 
-        if longPressCompatibility {'''
-text, count = ua_pattern.subn(ua_replacement, text, count=1)
-if count != 1:
-    raise SystemExit(f"Expected to replace one iOS user-agent block, replaced {count}")
+'''
+text = text[:ua_start] + ua_replacement + text[ua_end:]
 
 # 2) Do not spoof Android on the Orange credential page. Only the authenticated
 # GIS entry/page gets Android JS platform signals.
