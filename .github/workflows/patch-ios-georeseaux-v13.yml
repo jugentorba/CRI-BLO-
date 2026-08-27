@@ -1,0 +1,68 @@
+name: Patch iOS GeoReseaux v13
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+
+      - name: Restore recognizer without synthetic context dispatch
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift')
+          s = p.read_text()
+
+          old = "        if longPressCompatibility {\n            // GeoReseaux v12: WebKit proved it emits a trusted contextmenu.\n            // Do not race it with CRI-BLO's old 720ms synthetic recognizer.\n        }\n"
+          new = "        if longPressCompatibility {\n            // GeoReseaux v13 isolation: restore the same simultaneous native\n            // recognizer that was present when v11 observed a trusted WebKit\n            // contextmenu, but do NOT dispatch any synthetic JS context event.\n            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))\n            longPress.minimumPressDuration = 0.72\n            longPress.cancelsTouchesInView = false\n            longPress.delegate = self\n            webView.addGestureRecognizer(longPress)\n        }\n"
+          if s.count(old) != 1:
+              raise SystemExit('v12 recognizer placeholder mismatch')
+          s = s.replace(old, new, 1)
+
+          old = "        UIImpactFeedbackGenerator(style: .light).impactOccurred()\n        let script = \"window.__cribloNativeFallbackLongPress && window.__cribloNativeFallbackLongPress(\\(rx), \\(ry));\"\n        webView.evaluateJavaScript(script, completionHandler: nil)"
+          new = "        UIImpactFeedbackGenerator(style: .light).impactOccurred()\n        // v13: record only. Do not manufacture pointer/touch/contextmenu JS.\n        let script = \"window.__cribloRecordNativeRecognizer && window.__cribloRecordNativeRecognizer(\\(rx), \\(ry));\"\n        webView.evaluateJavaScript(script, completionHandler: nil)"
+          if s.count(old) != 1:
+              raise SystemExit('native long-press handler mismatch')
+          s = s.replace(old, new, 1)
+
+          old = "        trustedContextmenus: 0,\n        trustedContextPrevented: false\n      };"
+          new = "        trustedContextmenus: 0,\n        trustedContextPrevented: false,\n        nativeRecognizerFires: 0\n      };"
+          if s.count(old) != 1:
+              raise SystemExit('diagnostic counter block mismatch')
+          s = s.replace(old, new, 1)
+
+          marker = "      window.__cribloNativeFallbackLongPress = function (rx, ry) {\n        if (Date.now() - lastRealTouchLongPressAt < 1200) return true;\n        return window.__cribloDispatchLongPress(rx, ry);\n      };\n\n"
+          insert = marker + "      window.__cribloRecordNativeRecognizer = function () {\n        try {\n          __cribloGeoDiag.nativeRecognizerFires++;\n          __cribloGeoDiag.lastResult = 'native-recognizer-fired';\n        } catch (_) {}\n        return true;\n      };\n\n"
+          if s.count(marker) != 1:
+              raise SystemExit('native fallback marker mismatch')
+          s = s.replace(marker, insert, 1)
+
+          old = "          'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),\n          'Native-only long press: true',\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"
+          new = "          'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),\n          'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,\n          'Synthetic context fallback: disabled',\n          'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),"
+          if s.count(old) != 1:
+              raise SystemExit('diagnostic output mismatch')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          git diff --cached --check
+          git commit -m "Isolate native GeoReseaux long-press recognizer"
+          git push origin HEAD:criblo-master-spec-v1
