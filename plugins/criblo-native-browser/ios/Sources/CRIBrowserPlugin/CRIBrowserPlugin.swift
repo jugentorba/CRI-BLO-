@@ -3,6 +3,12 @@ import Capacitor
 import UIKit
 import WebKit
 
+private struct BrowserRecord: Codable {
+    let url: String
+    let title: String
+    let visitedAt: TimeInterval
+}
+
 @objc(CRIBrowserPlugin)
 public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "CRIBrowserPlugin"
@@ -14,8 +20,13 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
     private weak var activeBrowser: CRIBrowserViewController?
 
     @objc func open(_ call: CAPPluginCall) {
-        guard let rawURL = call.getString("url"),
-              let url = URL(string: rawURL),
+        let requested = call.getString("url") ?? CRIBrowserViewController.pinnedOrangeURL.absoluteString
+        let resumeLast = call.getBool("resumeLast") ?? false
+        let startString = resumeLast
+            ? (UserDefaults.standard.string(forKey: CRIBrowserViewController.lastURLKey) ?? requested)
+            : requested
+
+        guard let url = URL(string: startString),
               let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
             call.reject("Adresse web invalide.")
@@ -46,7 +57,7 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
             browser.onClose = { [weak self] finalURL, title in
                 self?.activeBrowser = nil
                 call.resolve([
-                    "url": finalURL?.absoluteString ?? rawURL,
+                    "url": finalURL?.absoluteString ?? startString,
                     "title": title ?? ""
                 ])
             }
@@ -56,40 +67,34 @@ public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
-private final class CRIBrowserViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate {
+private final class CRIBrowserViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate, UITextFieldDelegate {
+    static let lastURLKey = "criblo.browser.native.lastURL"
+    private static let historyKey = "criblo.browser.native.history"
+    private static let favoritesKey = "criblo.browser.native.favorites"
+    private static let tabsKey = "criblo.browser.native.tabs"
+
+    // Permanent Orange work favorite. The target is the stable authenticated
+    // Orange MOBI2 entry point; SiteMinder will generate a fresh login URL when
+    // a session is not already present.
+    static let pinnedOrangeURL = URL(string: "https://mobi-prod.orange.fr/mobi2/web/home/?codeContexte=MOBI2")!
+
     let startURL: URL
     let longPressCompatibility: Bool
     var onClose: ((URL?, String?) -> Void)?
 
     private var webView: WKWebView!
-    private let toolbar = UIToolbar()
-    private let addressLabel = UILabel()
+    private let chrome = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+    private let addressField = UITextField()
     private var completed = false
+    private var tabURLs: [String] = []
+    private var currentTabIndex = 0
 
-    private lazy var backItem = UIBarButtonItem(
-        image: UIImage(systemName: "chevron.backward"),
-        style: .plain,
-        target: self,
-        action: #selector(goBack)
-    )
-    private lazy var forwardItem = UIBarButtonItem(
-        image: UIImage(systemName: "chevron.forward"),
-        style: .plain,
-        target: self,
-        action: #selector(goForward)
-    )
-    private lazy var refreshItem = UIBarButtonItem(
-        image: UIImage(systemName: "arrow.clockwise"),
-        style: .plain,
-        target: self,
-        action: #selector(refreshPage)
-    )
-    private lazy var closeItem = UIBarButtonItem(
-        image: UIImage(systemName: "xmark"),
-        style: .plain,
-        target: self,
-        action: #selector(closeBrowser)
-    )
+    private lazy var backButton = makeToolbarButton("chevron.backward", action: #selector(goBack))
+    private lazy var forwardButton = makeToolbarButton("chevron.forward", action: #selector(goForward))
+    private lazy var refreshButton = makeToolbarButton("arrow.clockwise", action: #selector(refreshPage))
+    private lazy var favoriteButton = makeToolbarButton("star", action: #selector(showBookmarks))
+    private lazy var tabsButton = makeToolbarButton("square.on.square", action: #selector(showTabs))
+    private lazy var moreButton = makeToolbarButton("ellipsis.circle", action: #selector(showMore))
 
     init(startURL: URL, longPressCompatibility: Bool) {
         self.startURL = startURL
@@ -108,13 +113,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences.preferredContentMode = .recommended
 
-        // WKWebView already participates in iOS Password AutoFill. This script
-        // adds standards-based autocomplete hints only when a website omitted
-        // them, improving iCloud Passwords and third-party credential providers
-        // without CRI-BLO reading or storing the credential itself.
+        // WKWebView participates in iOS Password AutoFill. This script only adds
+        // standards-based autocomplete hints where a login page omitted them;
+        // CRI-BLO never reads, exports or stores the credential itself.
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: Self.autofillCompatibilityScript,
@@ -140,6 +145,14 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.scrollView.keyboardDismissMode = .interactive
         webView.translatesAutoresizingMaskIntoConstraints = false
 
+        // Orange/SiteMinder can reject the stripped WKWebView user agent after
+        // authentication even though the same account works in Safari. Present a
+        // normal mobile Safari identity while retaining WKWebView cookie/session
+        // persistence in the app's default website data store.
+        let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
+        let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
+        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+
         if longPressCompatibility {
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
             longPress.minimumPressDuration = 0.55
@@ -148,41 +161,140 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             webView.addGestureRecognizer(longPress)
         }
 
-        addressLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        addressLabel.textColor = .label
-        addressLabel.textAlignment = .center
-        addressLabel.lineBreakMode = .byTruncatingMiddle
-        addressLabel.frame = CGRect(x: 0, y: 0, width: 180, height: 32)
-
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        let leftSpace = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        let rightSpace = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        toolbar.items = [
-            backItem,
-            forwardItem,
-            refreshItem,
-            leftSpace,
-            UIBarButtonItem(customView: addressLabel),
-            rightSpace,
-            closeItem
-        ]
-
-        view.addSubview(toolbar)
+        configureBottomChrome()
         view.addSubview(webView)
+        view.addSubview(chrome)
 
+        let stack = chrome.contentView.subviews.first!
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 44),
-            webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            webView.bottomAnchor.constraint(equalTo: chrome.topAnchor),
+
+            chrome.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            chrome.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            chrome.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            chrome.topAnchor.constraint(equalTo: stack.topAnchor, constant: -8)
         ])
 
-        updateToolbar()
-        webView.load(URLRequest(url: startURL))
+        loadTabs()
+        updateChrome()
+        loadURL(startURL)
+    }
+
+    private func configureBottomChrome() {
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+
+        addressField.delegate = self
+        addressField.translatesAutoresizingMaskIntoConstraints = false
+        addressField.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.96)
+        addressField.textColor = .label
+        addressField.tintColor = .systemOrange
+        addressField.font = .systemFont(ofSize: 14, weight: .medium)
+        addressField.placeholder = "Rechercher ou saisir une adresse"
+        addressField.autocapitalizationType = .none
+        addressField.autocorrectionType = .no
+        addressField.spellCheckingType = .no
+        addressField.keyboardType = .URL
+        addressField.returnKeyType = .go
+        addressField.clearButtonMode = .whileEditing
+        addressField.layer.cornerRadius = 16
+        addressField.layer.masksToBounds = true
+        addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addressField.heightAnchor.constraint(equalToConstant: 38).isActive = true
+
+        let leftSpacer = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
+        addressField.leftView = leftSpacer
+        addressField.leftViewMode = .always
+
+        let controls = UIStackView(arrangedSubviews: [backButton, forwardButton, refreshButton, favoriteButton, tabsButton, moreButton])
+        controls.axis = .horizontal
+        controls.distribution = .fillEqually
+        controls.alignment = .center
+        controls.spacing = 2
+        controls.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        let stack = UIStackView(arrangedSubviews: [addressField, controls])
+        stack.axis = .vertical
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        chrome.contentView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: chrome.contentView.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: chrome.contentView.trailingAnchor, constant: -10),
+            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -5)
+        ])
+    }
+
+    private func makeToolbarButton(_ symbol: String, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.tintColor = .label
+        button.setImage(UIImage(systemName: symbol), for: .normal)
+        button.addTarget(self, action: action, for: .touchUpInside)
+        button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        return button
+    }
+
+    private func loadTabs() {
+        let stored = UserDefaults.standard.stringArray(forKey: Self.tabsKey) ?? []
+        tabURLs = stored.filter { value in
+            guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
+            return scheme == "https" || scheme == "http" || value == "about:blank"
+        }
+        if tabURLs.isEmpty { tabURLs = [startURL.absoluteString] }
+        if let index = tabURLs.firstIndex(of: startURL.absoluteString) {
+            currentTabIndex = index
+        } else {
+            tabURLs.append(startURL.absoluteString)
+            currentTabIndex = tabURLs.count - 1
+        }
+        persistTabs()
+    }
+
+    private func persistTabs() {
+        UserDefaults.standard.set(tabURLs, forKey: Self.tabsKey)
+    }
+
+    private func loadURL(_ url: URL) {
+        if url.absoluteString == "about:blank" {
+            webView.loadHTMLString(Self.newTabHTML, baseURL: Self.pinnedOrangeURL)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("fr-FR,fr;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+        webView.load(request)
+    }
+
+    private func loadAddress(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let resolved: String
+        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+            resolved = trimmed
+        } else if trimmed.contains(".") && !trimmed.contains(" ") {
+            resolved = "https://\(trimmed)"
+        } else {
+            resolved = "https://www.google.com/search?q=\(trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed)"
+        }
+        guard let url = URL(string: resolved) else { return }
+        loadURL(url)
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        loadAddress(textField.text ?? "")
+        return true
+    }
+
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        textField.text = webView.url?.absoluteString ?? ""
+        DispatchQueue.main.async { textField.selectAll(nil) }
+    }
+
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        updateChrome()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -200,43 +312,216 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     }
 
     @objc private func goBack() {
-        if webView.canGoBack {
-            webView.goBack()
-        }
+        if webView.canGoBack { webView.goBack() }
     }
 
     @objc private func goForward() {
-        if webView.canGoForward {
-            webView.goForward()
-        }
+        if webView.canGoForward { webView.goForward() }
     }
 
     @objc private func refreshPage() {
         webView.reload()
     }
 
-    @objc private func closeBrowser() {
-        dismiss(animated: true) { [weak self] in
-            self?.finishOnce()
+    @objc private func showBookmarks() {
+        let controller = UIAlertController(title: "Favoris", message: nil, preferredStyle: .actionSheet)
+        controller.addAction(UIAlertAction(title: "Orange GeoReseaux", style: .default) { [weak self] _ in
+            self?.loadURL(Self.pinnedOrangeURL)
+        })
+
+        if let current = webView.url, current.scheme?.hasPrefix("http") == true {
+            let favorite = loadRecords(key: Self.favoritesKey).contains { $0.url == current.absoluteString }
+            controller.addAction(UIAlertAction(title: favorite ? "Retirer ce favori" : "Ajouter cette page aux favoris", style: .default) { [weak self] _ in
+                self?.toggleFavorite(current)
+            })
         }
+
+        for record in loadRecords(key: Self.favoritesKey).prefix(12) {
+            controller.addAction(UIAlertAction(title: "★ \(record.title)", style: .default) { [weak self] _ in
+                guard let url = URL(string: record.url) else { return }
+                self?.loadURL(url)
+            })
+        }
+        controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
+        presentActionSheet(controller, source: favoriteButton)
+    }
+
+    @objc private func showTabs() {
+        let controller = UIAlertController(title: "Onglets (\(tabURLs.count))", message: nil, preferredStyle: .actionSheet)
+        for (index, raw) in tabURLs.enumerated() {
+            let title = displayHost(raw)
+            controller.addAction(UIAlertAction(title: index == currentTabIndex ? "✓ \(title)" : title, style: .default) { [weak self] _ in
+                self?.switchToTab(index)
+            })
+        }
+        controller.addAction(UIAlertAction(title: "Nouvel onglet", style: .default) { [weak self] _ in
+            self?.newTab()
+        })
+        controller.addAction(UIAlertAction(title: "Fermer l'onglet actuel", style: .destructive) { [weak self] _ in
+            self?.closeCurrentTab()
+        })
+        controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
+        presentActionSheet(controller, source: tabsButton)
+    }
+
+    @objc private func showMore() {
+        let controller = UIAlertController(title: "CRI-BLO Browser", message: nil, preferredStyle: .actionSheet)
+        controller.addAction(UIAlertAction(title: "Historique", style: .default) { [weak self] _ in
+            self?.showHistory()
+        })
+        controller.addAction(UIAlertAction(title: "Partager", style: .default) { [weak self] _ in
+            self?.shareCurrentPage()
+        })
+        controller.addAction(UIAlertAction(title: "Ouvrir dans Safari", style: .default) { [weak self] _ in
+            guard let url = self?.webView.url else { return }
+            UIApplication.shared.open(url)
+        })
+        controller.addAction(UIAlertAction(title: "Fermer le navigateur", style: .destructive) { [weak self] _ in
+            self?.dismiss(animated: true) { self?.finishOnce() }
+        })
+        controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
+        presentActionSheet(controller, source: moreButton)
+    }
+
+    private func showHistory() {
+        let history = loadRecords(key: Self.historyKey)
+        let controller = UIAlertController(title: "Historique", message: history.isEmpty ? "Aucune page enregistrée." : nil, preferredStyle: .actionSheet)
+        for record in history.prefix(15) {
+            controller.addAction(UIAlertAction(title: record.title, style: .default) { [weak self] _ in
+                guard let url = URL(string: record.url) else { return }
+                self?.loadURL(url)
+            })
+        }
+        if !history.isEmpty {
+            controller.addAction(UIAlertAction(title: "Effacer l'historique", style: .destructive) { _ in
+                UserDefaults.standard.removeObject(forKey: Self.historyKey)
+            })
+        }
+        controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
+        presentActionSheet(controller, source: moreButton)
+    }
+
+    private func shareCurrentPage() {
+        guard let url = webView.url else { return }
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = moreButton
+            popover.sourceRect = moreButton.bounds
+        }
+        present(controller, animated: true)
+    }
+
+    private func presentActionSheet(_ controller: UIAlertController, source: UIView) {
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = source
+            popover.sourceRect = source.bounds
+        }
+        present(controller, animated: true)
+    }
+
+    private func switchToTab(_ index: Int) {
+        guard tabURLs.indices.contains(index) else { return }
+        currentTabIndex = index
+        guard let url = URL(string: tabURLs[index]) else { return }
+        loadURL(url)
+        persistTabs()
+    }
+
+    private func newTab() {
+        tabURLs.append("about:blank")
+        currentTabIndex = tabURLs.count - 1
+        persistTabs()
+        webView.loadHTMLString(Self.newTabHTML, baseURL: Self.pinnedOrangeURL)
+        addressField.text = ""
+        addressField.becomeFirstResponder()
+        updateChrome()
+    }
+
+    private func closeCurrentTab() {
+        if tabURLs.count <= 1 {
+            tabURLs = ["about:blank"]
+            currentTabIndex = 0
+            webView.loadHTMLString(Self.newTabHTML, baseURL: Self.pinnedOrangeURL)
+        } else {
+            tabURLs.remove(at: currentTabIndex)
+            currentTabIndex = min(currentTabIndex, tabURLs.count - 1)
+            if let url = URL(string: tabURLs[currentTabIndex]) { loadURL(url) }
+        }
+        persistTabs()
+        updateChrome()
+    }
+
+    private func toggleFavorite(_ url: URL) {
+        var favorites = loadRecords(key: Self.favoritesKey)
+        if let index = favorites.firstIndex(where: { $0.url == url.absoluteString }) {
+            favorites.remove(at: index)
+        } else {
+            let title = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let record = BrowserRecord(url: url.absoluteString, title: (title?.isEmpty == false ? title! : displayHost(url.absoluteString)), visitedAt: Date().timeIntervalSince1970)
+            favorites.insert(record, at: 0)
+        }
+        saveRecords(favorites, key: Self.favoritesKey)
+        updateChrome()
+    }
+
+    private func recordHistory() {
+        guard let url = webView.url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return }
+        let raw = url.absoluteString
+        let title = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let record = BrowserRecord(url: raw, title: (title?.isEmpty == false ? title! : displayHost(raw)), visitedAt: Date().timeIntervalSince1970)
+        var history = loadRecords(key: Self.historyKey).filter { $0.url != raw }
+        history.insert(record, at: 0)
+        saveRecords(Array(history.prefix(100)), key: Self.historyKey)
+        UserDefaults.standard.set(raw, forKey: Self.lastURLKey)
+
+        if tabURLs.indices.contains(currentTabIndex) {
+            tabURLs[currentTabIndex] = raw
+            persistTabs()
+        }
+    }
+
+    private func loadRecords(key: String) -> [BrowserRecord] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([BrowserRecord].self, from: data)) ?? []
+    }
+
+    private func saveRecords(_ records: [BrowserRecord], key: String) {
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func updateChrome() {
+        guard isViewLoaded else { return }
+        backButton.isEnabled = webView?.canGoBack ?? false
+        forwardButton.isEnabled = webView?.canGoForward ?? false
+        tabsButton.accessibilityLabel = "Onglets, \(tabURLs.count)"
+
+        if !addressField.isFirstResponder {
+            addressField.text = webView?.url.map { displayHost($0.absoluteString) } ?? ""
+        }
+        let current = webView?.url?.absoluteString ?? ""
+        let isFavorite = loadRecords(key: Self.favoritesKey).contains { $0.url == current }
+        favoriteButton.setImage(UIImage(systemName: isFavorite ? "star.fill" : "star"), for: .normal)
+        favoriteButton.tintColor = isFavorite ? .systemOrange : .label
+    }
+
+    private func displayHost(_ raw: String) -> String {
+        if raw == "about:blank" { return "Nouvel onglet" }
+        guard let url = URL(string: raw) else { return raw }
+        return url.host?.replacingOccurrences(of: "www.", with: "") ?? raw
     }
 
     private func finishOnce() {
         guard !completed else { return }
         completed = true
+        if let url = webView?.url, url.scheme?.hasPrefix("http") == true {
+            UserDefaults.standard.set(url.absoluteString, forKey: Self.lastURLKey)
+        }
+        persistTabs()
         onClose?(webView?.url ?? startURL, webView?.title)
         onClose = nil
-    }
-
-    private func updateToolbar() {
-        guard isViewLoaded else { return }
-        backItem.isEnabled = webView?.canGoBack ?? false
-        forwardItem.isEnabled = webView?.canGoForward ?? false
-        if let host = webView?.url?.host, !host.isEmpty {
-            addressLabel.text = host.replacingOccurrences(of: "www.", with: "")
-        } else {
-            addressLabel.text = "CRI-BLO"
-        }
     }
 
     @objc private func handleNativeLongPress(_ recognizer: UILongPressGestureRecognizer) {
@@ -254,19 +539,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        updateToolbar()
+        updateChrome()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        updateToolbar()
+        recordHistory()
+        updateChrome()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        updateToolbar()
+        updateChrome()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        updateToolbar()
+        updateChrome()
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -313,62 +599,36 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
         completionHandler: @escaping (UIContextMenuConfiguration?) -> Void
     ) {
-        // Keep the page in control of long-press behaviour instead of showing
-        // Safari's preview/context menu over interactive field maps.
         completionHandler(nil)
     }
+
+    private static let newTabHTML = #"""
+    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f5f7;color:#111;margin:0;padding:32px 20px;text-align:center}
+    .card{display:block;margin:32px auto 0;max-width:320px;padding:18px;border-radius:18px;background:#fff;color:#111;text-decoration:none;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+    .o{width:48px;height:48px;margin:auto;background:#ff7900;color:#fff;border-radius:12px;display:grid;place-items:center;font-weight:800}
+    </style></head><body><h2>CRI-BLO Browser</h2><p>Favoris</p><a class="card" href="https://mobi-prod.orange.fr/mobi2/web/home/?codeContexte=MOBI2"><div class="o">O</div><strong>Orange GeoReseaux</strong></a></body></html>
+    """#
 
     private static let autofillCompatibilityScript = #"""
     (function () {
       if (window.__cribloAutofillInstalled) return;
       window.__cribloAutofillInstalled = true;
-
       function mark(input) {
         if (!input || input.nodeType !== 1 || input.tagName !== 'INPUT') return;
         var type = String(input.getAttribute('type') || 'text').toLowerCase();
         var current = String(input.getAttribute('autocomplete') || '').trim().toLowerCase();
-        // Respect an explicit site decision. Only repair fields where the site
-        // supplied no meaningful autocomplete metadata.
         if (current && current !== 'on') return;
-        var hint = [
-          input.getAttribute('name'),
-          input.getAttribute('id'),
-          input.getAttribute('placeholder'),
-          input.getAttribute('aria-label')
-        ].filter(Boolean).join(' ').toLowerCase();
-
-        if (type === 'password') {
-          input.setAttribute('autocomplete', /new|create|confirm|nouveau|confirmer|signup|register/.test(hint)
-            ? 'new-password'
-            : 'current-password');
-          return;
-        }
-        if (/user|username|login|email|mail|identifiant|compte|account/.test(hint)) {
-          input.setAttribute('autocomplete', 'username');
-          return;
-        }
-        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) {
-          input.setAttribute('autocomplete', 'one-time-code');
-        }
+        var hint = [input.getAttribute('name'),input.getAttribute('id'),input.getAttribute('placeholder'),input.getAttribute('aria-label')].filter(Boolean).join(' ').toLowerCase();
+        if (type === 'password') { input.setAttribute('autocomplete', /new|create|confirm|nouveau|confirmer|signup|register/.test(hint) ? 'new-password' : 'current-password'); return; }
+        if (/user|username|login|email|mail|identifiant|compte|account/.test(hint)) { input.setAttribute('autocomplete', 'username'); return; }
+        if (/otp|one.?time|verification|vérification|security.?code|code.?securite|code.?sécurité/.test(hint)) input.setAttribute('autocomplete', 'one-time-code');
       }
-
       function scan(root) {
-        try {
-          if (root && root.matches && root.matches('input')) mark(root);
-          var nodes = root && root.querySelectorAll ? root.querySelectorAll('input') : [];
-          for (var i = 0; i < nodes.length; i++) mark(nodes[i]);
-        } catch (_) {}
+        try { if (root && root.matches && root.matches('input')) mark(root); var nodes = root && root.querySelectorAll ? root.querySelectorAll('input') : []; for (var i=0;i<nodes.length;i++) mark(nodes[i]); } catch (_) {}
       }
-
       scan(document);
-      try {
-        new MutationObserver(function (changes) {
-          for (var i = 0; i < changes.length; i++) {
-            var added = changes[i].addedNodes || [];
-            for (var j = 0; j < added.length; j++) scan(added[j]);
-          }
-        }).observe(document.documentElement || document, { childList: true, subtree: true });
-      } catch (_) {}
+      try { new MutationObserver(function(changes){ for(var i=0;i<changes.length;i++){var added=changes[i].addedNodes||[];for(var j=0;j<added.length;j++)scan(added[j]);}}).observe(document.documentElement||document,{childList:true,subtree:true}); } catch (_) {}
     })();
     """#
 
@@ -376,93 +636,21 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     (function () {
       if (window.__cribloLongPressInstalled) return;
       window.__cribloLongPressInstalled = true;
-
-      function clamp01(value) {
-        value = Number(value || 0);
-        return Math.max(0, Math.min(1, value));
-      }
-
+      function clamp01(value) { value = Number(value || 0); return Math.max(0, Math.min(1, value)); }
       function forwardIntoFrame(frame, x, y) {
-        try {
-          if (!frame || !frame.contentWindow) return false;
-          var rect = frame.getBoundingClientRect();
-          if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-          frame.contentWindow.postMessage({
-            __cribloLongPress: true,
-            rx: clamp01((x - rect.left) / rect.width),
-            ry: clamp01((y - rect.top) / rect.height)
-          }, '*');
-          return true;
-        } catch (_) {
-          return false;
-        }
+        try { if (!frame || !frame.contentWindow) return false; var rect = frame.getBoundingClientRect(); if (!rect || rect.width <= 0 || rect.height <= 0) return false; frame.contentWindow.postMessage({__cribloLongPress:true,rx:clamp01((x-rect.left)/rect.width),ry:clamp01((y-rect.top)/rect.height)}, '*'); return true; } catch (_) { return false; }
       }
-
       function dispatchAt(x, y) {
-        var target = document.elementFromPoint(x, y);
-        if (!target) return false;
-
-        // GeoReseaux and similar enterprise mapping pages can host their map in
-        // a same-origin or cross-origin iframe. postMessage is allowed across
-        // origins and this bridge is injected into every WKWebView frame, so
-        // forward normalized coordinates recursively until the map frame gets it.
-        if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') {
-          return forwardIntoFrame(target, x, y);
-        }
-
-        // Normal link navigation remains a normal tap. This compatibility path
-        // exists for map/canvas interactions that iOS WebKit may otherwise eat.
-        var link = target.closest && target.closest('a[href]');
-        if (link) return false;
-
-        var init = {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          clientX: x,
-          clientY: y,
-          screenX: x,
-          screenY: y,
-          button: 2,
-          buttons: 2,
-          view: window
-        };
-
-        try {
-          target.dispatchEvent(new MouseEvent('contextmenu', init));
-        } catch (_) {
-          try {
-            var evt = document.createEvent('MouseEvents');
-            evt.initMouseEvent('contextmenu', true, true, window, 1, x, y, x, y, false, false, false, false, 2, null);
-            target.dispatchEvent(evt);
-          } catch (_) {}
-        }
-
-        try {
-          target.dispatchEvent(new CustomEvent('longpress', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            detail: { clientX: x, clientY: y, source: 'criblo-ios' }
-          }));
-        } catch (_) {}
-
+        var target = document.elementFromPoint(x, y); if (!target) return false;
+        if (target.tagName === 'IFRAME' || target.tagName === 'FRAME') return forwardIntoFrame(target, x, y);
+        var link = target.closest && target.closest('a[href]'); if (link) return false;
+        var init = {bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,screenX:x,screenY:y,button:2,buttons:2,view:window};
+        try { target.dispatchEvent(new MouseEvent('contextmenu', init)); } catch (_) { try { var evt=document.createEvent('MouseEvents'); evt.initMouseEvent('contextmenu',true,true,window,1,x,y,x,y,false,false,false,false,2,null); target.dispatchEvent(evt); } catch (_) {} }
+        try { target.dispatchEvent(new CustomEvent('longpress',{bubbles:true,cancelable:true,composed:true,detail:{clientX:x,clientY:y,source:'criblo-ios'}})); } catch (_) {}
         return true;
       }
-
-      window.addEventListener('message', function (event) {
-        var data = event && event.data;
-        if (!data || data.__cribloLongPress !== true) return;
-        var x = window.innerWidth * clamp01(data.rx);
-        var y = window.innerHeight * clamp01(data.ry);
-        dispatchAt(x, y);
-      }, false);
-
-      window.__cribloDispatchLongPress = function (rx, ry) {
-        var x = window.innerWidth * clamp01(rx);
-        var y = window.innerHeight * clamp01(ry);
-        return dispatchAt(x, y);
-      };
+      window.addEventListener('message', function(event){var data=event&&event.data;if(!data||data.__cribloLongPress!==true)return;dispatchAt(window.innerWidth*clamp01(data.rx),window.innerHeight*clamp01(data.ry));}, false);
+      window.__cribloDispatchLongPress=function(rx,ry){return dispatchAt(window.innerWidth*clamp01(rx),window.innerHeight*clamp01(ry));};
     })();
     """#
 }

@@ -3,6 +3,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 interface NativeBrowserOpenOptions {
   url: string;
   longPressCompatibility?: boolean;
+  resumeLast?: boolean;
 }
 
 interface NativeBrowserOpenResult {
@@ -27,7 +28,7 @@ export function nativeBrowserPlatform(): "ios" | "android" | "web" {
 
 export async function openNativeCriBrowser(
   url: string,
-  options: { longPressCompatibility?: boolean } = {},
+  options: { longPressCompatibility?: boolean; resumeLast?: boolean } = {},
 ): Promise<NativeBrowserOpenResult> {
   if (!hasNativeCriBrowser()) {
     throw new Error("Le navigateur natif CRI-BLO n'est disponible que dans l'application Android/iOS.");
@@ -36,5 +37,6 @@ export async function openNativeCriBrowser(
   return CRIBrowser.open({
     url,
     longPressCompatibility: options.longPressCompatibility ?? true,
+    resumeLast: options.resumeLast ?? false,
   });
 }
