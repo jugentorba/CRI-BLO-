@@ -115,6 +115,9 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
+      - name: Apply CRI-BLO iOS privacy permissions
+        run: node scripts/patch-ios-info.mjs
+
       - name: Build iOS simulator app
         run: |
           xcodebuild \
