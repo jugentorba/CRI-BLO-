@@ -13,6 +13,8 @@ interface NativeBrowserOpenResult {
 
 interface CRIBrowserPlugin {
   open(options: NativeBrowserOpenOptions): Promise<NativeBrowserOpenResult>;
+  getState(): Promise<{ stateJson?: string }>;
+  restoreState(options: { stateJson: string }): Promise<{ applied?: boolean }>;
 }
 
 const CRIBrowser = registerPlugin<CRIBrowserPlugin>("CRIBrowser");
@@ -39,4 +41,16 @@ export async function openNativeCriBrowser(
     longPressCompatibility: options.longPressCompatibility ?? true,
     resumeLast: options.resumeLast ?? false,
   });
+}
+
+export async function getNativeBrowserStateJson(): Promise<string> {
+  if (!hasNativeCriBrowser()) return "";
+  const result = await CRIBrowser.getState();
+  return result.stateJson ?? "";
+}
+
+export async function restoreNativeBrowserState(stateJson: string): Promise<boolean> {
+  if (!hasNativeCriBrowser() || !stateJson.trim()) return false;
+  const result = await CRIBrowser.restoreState({ stateJson });
+  return result.applied ?? false;
 }

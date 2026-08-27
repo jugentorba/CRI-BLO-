@@ -47,6 +47,7 @@ public class CRIBrowserPlugin extends Plugin {
     private static final String KEY_HISTORY = "history";
     private static final String KEY_FAVORITES = "favorites";
     private static final String KEY_TABS = "tabs";
+    private static final String KEY_UPDATED_AT = "updatedAt";
 
     private static final String AUTOFILL_COMPATIBILITY_SCRIPT = """
         (function(){
@@ -75,6 +76,107 @@ public class CRIBrowserPlugin extends Plugin {
     private SharedPreferences prefs;
     private final ArrayList<String> tabUrls = new ArrayList<>();
     private int activeTab = 0;
+
+    @PluginMethod
+    public void getState(PluginCall call) {
+        SharedPreferences storage = getActivity().getSharedPreferences(PREFS, 0);
+        try {
+            JSONObject state = new JSONObject();
+            state.put("version", 1);
+            state.put("updatedAt", storage.getLong(KEY_UPDATED_AT, 0));
+            String last = storage.getString(KEY_LAST_URL, null);
+            if (last != null) state.put("lastURL", last);
+            state.put("tabs", new JSONArray(storage.getString(KEY_TABS, "[]")));
+            state.put("history", exportRecords(storage.getString(KEY_HISTORY, "[]")));
+            state.put("favorites", exportRecords(storage.getString(KEY_FAVORITES, "[]")));
+            JSObject result = new JSObject();
+            result.put("stateJson", state.toString());
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("Impossible de lire l'état navigateur.");
+        }
+    }
+
+    @PluginMethod
+    public void restoreState(PluginCall call) {
+        String raw = call.getString("stateJson");
+        if (raw == null) { call.reject("État navigateur manquant."); return; }
+        SharedPreferences storage = getActivity().getSharedPreferences(PREFS, 0);
+        try {
+            JSONObject state = new JSONObject(raw);
+            if (state.optInt("version", 0) != 1) throw new IllegalArgumentException("version");
+            long remoteUpdatedAt = state.optLong("updatedAt", 0);
+            long localUpdatedAt = storage.getLong(KEY_UPDATED_AT, 0);
+            JSObject result = new JSObject();
+            if (remoteUpdatedAt <= localUpdatedAt) {
+                result.put("applied", false);
+                call.resolve(result);
+                return;
+            }
+
+            JSONArray tabs = state.optJSONArray("tabs");
+            JSONArray validTabs = new JSONArray();
+            if (tabs != null) {
+                for (int i = 0; i < tabs.length(); i++) {
+                    String value = tabs.optString(i);
+                    if (value.equals("about:blank") || value.startsWith("http://") || value.startsWith("https://")) validTabs.put(value);
+                }
+            }
+            if (validTabs.length() == 0) validTabs.put(PINNED_ORANGE_URL);
+
+            SharedPreferences.Editor editor = storage.edit();
+            editor.putString(KEY_TABS, validTabs.toString());
+            String last = state.optString("lastURL", "");
+            if (last.startsWith("http://") || last.startsWith("https://")) editor.putString(KEY_LAST_URL, last);
+            editor.putString(KEY_HISTORY, importRecords(state.optJSONArray("history")).toString());
+            editor.putString(KEY_FAVORITES, importRecords(state.optJSONArray("favorites")).toString());
+            editor.putLong(KEY_UPDATED_AT, remoteUpdatedAt);
+            editor.apply();
+            result.put("applied", true);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("Sauvegarde navigateur invalide.");
+        }
+    }
+
+    private static JSONArray exportRecords(String raw) {
+        JSONArray result = new JSONArray();
+        try {
+            JSONArray local = new JSONArray(raw);
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject source = local.optJSONObject(i);
+                if (source == null) continue;
+                JSONObject item = new JSONObject();
+                item.put("url", source.optString("url"));
+                item.put("title", source.optString("title"));
+                item.put("visitedAt", source.optLong("time", 0));
+                result.put(item);
+            }
+        } catch (Exception ignored) {}
+        return result;
+    }
+
+    private static JSONArray importRecords(JSONArray cloud) {
+        JSONArray result = new JSONArray();
+        if (cloud == null) return result;
+        for (int i = 0; i < Math.min(100, cloud.length()); i++) {
+            JSONObject source = cloud.optJSONObject(i);
+            if (source == null) continue;
+            try {
+                JSONObject item = new JSONObject();
+                item.put("url", source.optString("url"));
+                item.put("title", source.optString("title"));
+                item.put("time", (long) source.optDouble("visitedAt", 0));
+                result.put(item);
+            } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    private void touchState() {
+        SharedPreferences storage = prefs != null ? prefs : getActivity().getSharedPreferences(PREFS, 0);
+        storage.edit().putLong(KEY_UPDATED_AT, System.currentTimeMillis()).apply();
+    }
 
     @PluginMethod
     public void open(PluginCall call) {
@@ -322,6 +424,7 @@ public class CRIBrowserPlugin extends Plugin {
         JSONArray arr = new JSONArray();
         for (String url : tabUrls) arr.put(url);
         prefs.edit().putString(KEY_TABS, arr.toString()).apply();
+        touchState();
     }
 
     private void showTabs() {
@@ -420,7 +523,7 @@ public class CRIBrowserPlugin extends Plugin {
         new AlertDialog.Builder(getActivity())
             .setTitle("History")
             .setItems(labels, (dialog, which) -> loadUrl(history.get(which).url))
-            .setNeutralButton(history.isEmpty() ? "" : "Clear history", (dialog, which) -> prefs.edit().remove(KEY_HISTORY).apply())
+            .setNeutralButton(history.isEmpty() ? "" : "Clear history", (dialog, which) -> { prefs.edit().remove(KEY_HISTORY).apply(); touchState(); })
             .setNegativeButton("Cancel", null)
             .show();
     }
@@ -472,6 +575,7 @@ public class CRIBrowserPlugin extends Plugin {
             try { o.put("url", record.url); o.put("title", record.title); o.put("time", record.time); arr.put(o); } catch (Exception ignored) {}
         }
         prefs.edit().putString(key, arr.toString()).apply();
+        touchState();
     }
 
     private String displayHost(String rawUrl) {

@@ -38,6 +38,7 @@ import {
   type DownloadRecord,
 } from "@/lib/browser/downloads";
 import { hasNativeCriBrowser, openNativeCriBrowser } from "@/lib/browser/native";
+import { backupNativeBrowserToCloud, syncNativeBrowserBeforeOpen } from "@/lib/browser/sync";
 
 export const Route = createFileRoute("/navigateur")({
   head: () => ({
@@ -129,6 +130,7 @@ function NativeNavigator() {
     setClosed(false);
     setError(null);
     try {
+      await syncNativeBrowserBeforeOpen().catch(() => "disabled" as const);
       const result = await openNativeCriBrowser(PINNED_ORANGE_URL, {
         longPressCompatibility: true,
         resumeLast: true,
@@ -140,6 +142,7 @@ function NativeNavigator() {
           // native browser has its own persistent last-url store
         }
       }
+      await backupNativeBrowserToCloud().catch(() => false);
       if (mountedRef.current) setClosed(true);
     } catch (cause) {
       if (mountedRef.current) {

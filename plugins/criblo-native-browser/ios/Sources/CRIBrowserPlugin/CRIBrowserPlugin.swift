@@ -9,15 +9,43 @@ private struct BrowserRecord: Codable {
     let visitedAt: TimeInterval
 }
 
+private struct BrowserBackup: Codable {
+    let version: Int
+    let updatedAt: TimeInterval
+    let lastURL: String?
+    let tabs: [String]
+    let history: [BrowserRecord]
+    let favorites: [BrowserRecord]
+}
+
 @objc(CRIBrowserPlugin)
 public class CRIBrowserPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "CRIBrowserPlugin"
     public let jsName = "CRIBrowser"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "restoreState", returnType: CAPPluginReturnPromise)
     ]
 
     private weak var activeBrowser: CRIBrowserViewController?
+
+    @objc func getState(_ call: CAPPluginCall) {
+        call.resolve(["stateJson": CRIBrowserViewController.exportPersistentState()])
+    }
+
+    @objc func restoreState(_ call: CAPPluginCall) {
+        guard let raw = call.getString("stateJson") else {
+            call.reject("État navigateur manquant.")
+            return
+        }
+        do {
+            let applied = try CRIBrowserViewController.restorePersistentState(raw)
+            call.resolve(["applied": applied])
+        } catch {
+            call.reject("Sauvegarde navigateur invalide.")
+        }
+    }
 
     @objc func open(_ call: CAPPluginCall) {
         let requested = call.getString("url") ?? CRIBrowserViewController.pinnedOrangeURL.absoluteString
@@ -72,11 +100,69 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     private static let historyKey = "criblo.browser.native.history"
     private static let favoritesKey = "criblo.browser.native.favorites"
     private static let tabsKey = "criblo.browser.native.tabs"
+    private static let stateUpdatedAtKey = "criblo.browser.native.updatedAt"
 
     // Permanent Orange work favorite. The target is the stable authenticated
     // Orange MOBI2 entry point; SiteMinder will generate a fresh login URL when
     // a session is not already present.
     static let pinnedOrangeURL = URL(string: "https://mobi-prod.orange.fr/mobi2/web/home/?codeContexte=MOBI2")!
+
+    static func exportPersistentState() -> String {
+        let defaults = UserDefaults.standard
+        func records(_ key: String) -> [BrowserRecord] {
+            guard let data = defaults.data(forKey: key) else { return [] }
+            return (try? JSONDecoder().decode([BrowserRecord].self, from: data)) ?? []
+        }
+        let backup = BrowserBackup(
+            version: 1,
+            updatedAt: defaults.double(forKey: stateUpdatedAtKey),
+            lastURL: defaults.string(forKey: lastURLKey),
+            tabs: defaults.stringArray(forKey: tabsKey) ?? [],
+            history: records(historyKey),
+            favorites: records(favoritesKey)
+        )
+        guard let data = try? JSONEncoder().encode(backup) else { return "{}" }
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    static func restorePersistentState(_ raw: String) throws -> Bool {
+        guard let data = raw.data(using: .utf8) else { throw NSError(domain: "CRIBrowser", code: 1) }
+        let backup = try JSONDecoder().decode(BrowserBackup.self, from: data)
+        guard backup.version == 1 else { throw NSError(domain: "CRIBrowser", code: 2) }
+        let defaults = UserDefaults.standard
+        let localUpdatedAt = defaults.double(forKey: stateUpdatedAtKey)
+        guard backup.updatedAt > localUpdatedAt else { return false }
+
+        let validTabs = backup.tabs.filter { value in
+            if value == "about:blank" { return true }
+            guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
+            return scheme == "http" || scheme == "https"
+        }
+        defaults.set(validTabs.isEmpty ? [pinnedOrangeURL.absoluteString] : validTabs, forKey: tabsKey)
+
+        if let last = backup.lastURL,
+           let url = URL(string: last),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            defaults.set(last, forKey: lastURLKey)
+        }
+        if let historyData = try? JSONEncoder().encode(Array(backup.history.prefix(100))) {
+            defaults.set(historyData, forKey: historyKey)
+        }
+        if let favoriteData = try? JSONEncoder().encode(Array(backup.favorites.prefix(100))) {
+            defaults.set(favoriteData, forKey: favoritesKey)
+        }
+        defaults.set(backup.updatedAt, forKey: stateUpdatedAtKey)
+        return true
+    }
+
+    private static func touchPersistentState() {
+        defaultsSetUpdatedAt(Date().timeIntervalSince1970 * 1000)
+    }
+
+    private static func defaultsSetUpdatedAt(_ value: TimeInterval) {
+        UserDefaults.standard.set(value, forKey: stateUpdatedAtKey)
+    }
 
     let startURL: URL
     let longPressCompatibility: Bool
@@ -255,6 +341,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
     private func persistTabs() {
         UserDefaults.standard.set(tabURLs, forKey: Self.tabsKey)
+        Self.touchPersistentState()
     }
 
     private func loadURL(_ url: URL) {
@@ -395,6 +482,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         if !history.isEmpty {
             controller.addAction(UIAlertAction(title: "Effacer l'historique", style: .destructive) { _ in
                 UserDefaults.standard.removeObject(forKey: Self.historyKey)
+                Self.touchPersistentState()
             })
         }
         controller.addAction(UIAlertAction(title: "Annuler", style: .cancel))
@@ -490,6 +578,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     private func saveRecords(_ records: [BrowserRecord], key: String) {
         guard let data = try? JSONEncoder().encode(records) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        Self.touchPersistentState()
     }
 
     private func updateChrome() {
