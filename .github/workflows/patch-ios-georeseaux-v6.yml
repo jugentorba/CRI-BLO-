@@ -1,0 +1,28 @@
+name: Patch iOS GeoReseaux v6
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-ios-georeseaux-v6.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Apply GeoReseaux v6 patch
+        run: python3 scripts/patch-ios-georeseaux-v6.py
+      - name: Commit GeoReseaux v6 source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          git commit -m 'Make iOS GeoReseaux long press adaptive'
+          git push origin HEAD:criblo-master-spec-v1
