@@ -1091,7 +1091,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               clientY: y,
               screenX: x,
               screenY: y,
-              button: 0,
+              button: -1,
               buttons: 0,
               pointerId: pointerId,
               pointerType: 'touch',
@@ -1110,7 +1110,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               clientY: y,
               screenX: x,
               screenY: y,
-              button: 0,
+              button: isContext ? -1 : 0,
               buttons: isContext ? 0 : 1,
               view: window
             });
@@ -1148,9 +1148,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           srcElement: target,
           currentTarget: currentTarget,
           eventPhase: currentTarget === target ? 2 : 3,
-          button: 0,
+          button: isContext ? -1 : 0,
           buttons: isContext ? 0 : 1,
-          which: 1,
+          which: isContext ? 0 : 1,
           clientX: x,
           clientY: y,
           x: x,
@@ -1172,9 +1172,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           detail: isContext ? 0 : 1,
           sourceCapabilities: { firesTouchEvents: true },
           isTrusted: !!(sourceEvent && sourceEvent.isTrusted),
-          touches: [touchPoint],
-          targetTouches: [touchPoint],
-          changedTouches: [touchPoint],
+          touches: isContext ? undefined : [touchPoint],
+          targetTouches: isContext ? undefined : [touchPoint],
+          changedTouches: isContext ? undefined : [touchPoint],
           originalEvent: sourceEvent || raw,
           nativeEvent: sourceEvent || raw,
           srcEvent: sourceEvent || raw,
@@ -1230,7 +1230,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         path.push(window);
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
 
-        var semanticTypes = ['contextmenu', 'longpress', 'long-press', 'hold', 'press'];
+        var semanticTypes = ['contextmenu'];
         var invoked = false;
 
         for (var t = 0; t < semanticTypes.length; t++) {
@@ -1369,26 +1369,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }
 
       function contextMenu(target, x, y) {
-        // iOS map libraries are more compatible with a real MouseEvent here
-        // than with PointerEvent('contextmenu'). This mirrors the established
-        // Leaflet/OpenLayers iOS long-touch workaround.
+        // Android Chromium's real long-touch trace is a touch PointerEvent
+        // contextmenu with button=-1/buttons=0 while the finger is still down.
         try {
-          var event = new MouseEvent('contextmenu', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            clientX: x,
-            clientY: y,
-            screenX: x,
-            screenY: y,
-            button: 2,
-            buttons: 2,
-            view: window
-          });
-          return !target.dispatchEvent(event) || event.defaultPrevented;
-        } catch (_) {
-          return mouse(target, 'contextmenu', x, y, 2, 2);
-        }
+          if (typeof PointerEvent === 'function') {
+            var event = new PointerEvent('contextmenu', {
+              bubbles: true, cancelable: true, composed: true,
+              clientX: x, clientY: y, screenX: x, screenY: y,
+              button: -1, buttons: 0, pointerId: 1, pointerType: 'touch',
+              isPrimary: true, width: 9, height: 9, pressure: 0, view: window
+            });
+            return !target.dispatchEvent(event) || event.defaultPrevented;
+          }
+        } catch (_) {}
+        return mouse(target, 'contextmenu', x, y, -1, 0);
       }
 
       function jqueryContextMenu(target, x, y) {
@@ -1400,9 +1394,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             clientY: y,
             pageX: x + (window.scrollX || 0),
             pageY: y + (window.scrollY || 0),
-            button: 2,
-            buttons: 2,
-            which: 3
+            button: -1,
+            buttons: 0,
+            which: 0
           });
           jq(target).trigger(event);
           return !!(event.isDefaultPrevented && event.isDefaultPrevented());
@@ -1554,16 +1548,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var link = target.closest && target.closest('a[href]');
         if (link && tag !== 'CANVAS' && tag !== 'SVG' && tag !== 'PATH') return false;
 
-        pointer(target, 'pointerdown', x, y, 2, 2);
-        mouse(target, 'mousedown', x, y, 2, 2);
-
+        // The physical iOS touch already supplied pointerdown/touchstart.
+        // Do not inject a right-mouse sequence: Android supplies only the
+        // long-touch contextmenu before the real finger is released.
         var handled = contextMenu(target, x, y);
         if (!handled) handled = jqueryContextMenu(target, x, y);
-        if (!handled) customLongPress(target, x, y);
-
-        pointer(target, 'pointerup', x, y, 2, 0);
-        mouse(target, 'mouseup', x, y, 2, 0);
-        mouse(target, 'auxclick', x, y, 2, 0);
         return handled;
       }
 
@@ -1596,29 +1585,32 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
 
         setTimeout(function () {
-          // Give GeoReseaux's own Android long-hold timer time to run before
-          // ending the synthetic touch. Also deliver semantic fallbacks.
+          // Match the measured Chromium hold: contextmenu arrives about 600 ms
+          // after pointerdown/touchstart, with the finger still held.
           contextMenu(target, x, y);
           jqueryContextMenu(target, x, y);
-          customLongPress(target, x, y);
-          try {
-            if (syntheticTouch && typeof TouchEvent === 'function') {
-              target.dispatchEvent(new TouchEvent('touchend', {
-                bubbles:true,cancelable:true,composed:true,
-                touches:[],targetTouches:[],changedTouches:[syntheticTouch]
-              }));
-            }
-          } catch (_) {}
-          try {
-            if (typeof PointerEvent === 'function') {
-              target.dispatchEvent(new PointerEvent('pointerup', {
-                bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
-                screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
-                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
-              }));
-            }
-          } catch (_) {}
-        }, 560);
+          setTimeout(function () {
+            // The Android trace releases pointer first, then touch roughly
+            // 180 ms after contextmenu. Keep that order in the last-resort path.
+            try {
+              if (typeof PointerEvent === 'function') {
+                target.dispatchEvent(new PointerEvent('pointerup', {
+                  bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+                  screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
+                  pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
+                }));
+              }
+            } catch (_) {}
+            try {
+              if (syntheticTouch && typeof TouchEvent === 'function') {
+                target.dispatchEvent(new TouchEvent('touchend', {
+                  bubbles:true,cancelable:true,composed:true,
+                  touches:[],targetTouches:[],changedTouches:[syntheticTouch]
+                }));
+              }
+            } catch (_) {}
+          }, 180);
+        }, 600);
       }
 
       function dispatchAt(x, y) {
@@ -1801,7 +1793,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
-          realTouchTimer = setTimeout(fireRealTouchLongPress, 560);
+          realTouchTimer = setTimeout(fireRealTouchLongPress, 600);
         } catch (_) {}
       }, { capture: true, passive: true });
 
