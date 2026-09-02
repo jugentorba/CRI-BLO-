@@ -1122,6 +1122,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       // all page listeners, but still before browser compatibility-mouse defaults.
       var __cribloHeldPointerDown = null;
       var __cribloHeldPointerUp = null;
+      var __cribloHeldPointerDownFallback = null;
+      var __cribloHeldPointerUpFallback = null;
       var __cribloObservedPhysicalPointers = new WeakSet();
 
       function afterTouchPropagation(eventType, callback) {
@@ -1153,7 +1155,15 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var isDown = kind === 'down';
         var source = isDown ? __cribloHeldPointerDown : __cribloHeldPointerUp;
         if (!source) return false;
-        if (isDown) __cribloHeldPointerDown = null; else __cribloHeldPointerUp = null;
+        var fallback = isDown ? __cribloHeldPointerDownFallback : __cribloHeldPointerUpFallback;
+        if (fallback) { try { clearTimeout(fallback); } catch (_) {} }
+        if (isDown) {
+          __cribloHeldPointerDown = null;
+          __cribloHeldPointerDownFallback = null;
+        } else {
+          __cribloHeldPointerUp = null;
+          __cribloHeldPointerUpFallback = null;
+        }
         var target = source.target;
         if (!target || !target.dispatchEvent) return false;
         try {
@@ -1192,7 +1202,22 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             lastRealPointerUpTarget = event.target || null;
           }
           if (window.__cribloGeoReseauxAndroidCompat && mapLikeTarget(event.target)) {
-            if (isDown) __cribloHeldPointerDown = event; else __cribloHeldPointerUp = event;
+            if (isDown) {
+              __cribloHeldPointerDown = event;
+              if (__cribloHeldPointerDownFallback) clearTimeout(__cribloHeldPointerDownFallback);
+              __cribloHeldPointerDownFallback = setTimeout(function () {
+                // Pointer Events can exist without a matching TouchEvent. Never
+                // swallow such input permanently; replay unchanged after a short
+                // window if no touchstart consumed the held pointer.
+                if (__cribloHeldPointerDown === event) dispatchHeldAndroidPointer('down');
+              }, 55);
+            } else {
+              __cribloHeldPointerUp = event;
+              if (__cribloHeldPointerUpFallback) clearTimeout(__cribloHeldPointerUpFallback);
+              __cribloHeldPointerUpFallback = setTimeout(function () {
+                if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');
+              }, 55);
+            }
             // Suppress propagation only. Never preventDefault: WebKit must still
             // generate the genuine TouchEvent and its normal default behavior.
             event.stopImmediatePropagation();
