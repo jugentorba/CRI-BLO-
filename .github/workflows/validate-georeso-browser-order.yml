@@ -5,64 +5,28 @@ on:
     branches:
       - criblo-master-spec-v1
     paths:
-      - scripts/patch-georeso-global-capture-order.mjs
+      - plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+      - scripts/test-ios-longpress-bridge.mjs
+      - scripts/test-ios-georeseaux-ua-parity.mjs
       - .github/workflows/validate-georeso-browser-order.yml
   workflow_dispatch:
 
-permissions:
-  contents: write
-
-env:
-  TARGET_BRANCH: criblo-master-spec-v1
-
 jobs:
-  patch:
-    runs-on: ubuntu-24.04
-    outputs:
-      source_sha: ${{ steps.out.outputs.source_sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: criblo-master-spec-v1
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Apply browser-level event-order conversion
-        run: |
-          set -euxo pipefail
-          node scripts/patch-georeso-global-capture-order.mjs
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift scripts/test-ios-longpress-bridge.mjs
-          git diff --cached --check
-          git diff --cached --quiet && { echo "Expected browser-order source diff is missing"; exit 1; }
-          git commit -m "Reorder GeoReseaux pointer delivery at browser boundary"
-          git push origin HEAD:${TARGET_BRANCH}
-      - id: out
-        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
   regression:
-    needs: patch
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.patch.outputs.source_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
       - run: npm run build
-      - run: npm run lint
-      - name: Require measured Android lifecycle in bridge regression
+      - name: Require measured Android lifecycle
         run: npm run test:ios-longpress-bridge
-      - name: Keep Orange HTTP/JS Android identity parity
+      - name: Require Orange HTTP/JS Android identity parity
         run: npm run test:ios-georeseaux-ua-parity
 
   openlayers-browser:
-    needs: patch
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -70,12 +34,10 @@ jobs:
         ol: ['6.15.1', '7.2.2', '10.6.1']
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.patch.outputs.source_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Prepare production-bridge OpenLayers fixture
+      - name: Prepare production bridge fixture
         env:
           OL_VERSION: ${{ matrix.ol }}
         run: |
@@ -102,9 +64,7 @@ jobs:
           viewport.addEventListener('contextmenu',e=>{window.__contextCalls++;e.preventDefault();const p=document.createElement('div');p.className='geo-popup';p.textContent='GEORESEAUX_POPUP_OPEN';document.body.appendChild(p);});
           window.__ready=true;
           JS
-      - name: Real touch must expose Android order and open DOM popup
-        env:
-          OL_VERSION: ${{ matrix.ol }}
+      - name: Real touch must expose measured Android order and open popup
         run: |
           set -euxo pipefail
           cd /tmp/geo-final
@@ -141,13 +101,11 @@ jobs:
           CHROME_PATH="$CHROME" node verify.cjs
 
   ios-build:
-    needs: [patch, regression, openlayers-browser]
+    needs: [regression, openlayers-browser]
     runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.patch.outputs.source_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
