@@ -1117,19 +1117,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       // WebKit physically sends touch pointerdown before touchstart (and
       // pointerup before touchend), while the measured working Android WebView
       // exposes the reverse order to GeoReseaux. Intercept the genuine pointer
-      // event once at the top of the DOM path, preserve it as the trusted source,
-      // then replay the pointer semantics immediately after the matching genuine
-      // TouchEvent. We never preventDefault(), so WebKit's native touch/default
-      // processing remains intact.
+      // once at the top of the DOM path and retain it only as the trusted source.
+      // Replay its pointer semantics in the NEXT TASK after the corresponding
+      // genuine TouchEvent. A microtask is not sufficient here: browsers may run
+      // a microtask checkpoint between capture and target listeners.
       var __cribloHeldPointerDown = null;
       var __cribloHeldPointerUp = null;
       var __cribloObservedPhysicalPointers = new WeakSet();
 
       function runAfterCurrentEvent(callback) {
-        try {
-          if (typeof queueMicrotask === 'function') { queueMicrotask(callback); return; }
-          if (typeof Promise === 'function') { Promise.resolve().then(callback); return; }
-        } catch (_) {}
+        // A task boundary guarantees the current touch event has completed its
+        // full capture -> target -> bubble propagation before pointer replay.
         setTimeout(callback, 0);
       }
 
@@ -1177,6 +1175,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           }
           if (window.__cribloGeoReseauxAndroidCompat && mapLikeTarget(event.target)) {
             if (isDown) __cribloHeldPointerDown = event; else __cribloHeldPointerUp = event;
+            // Stop propagation only. Never preventDefault: WebKit must continue
+            // producing the genuine touch/default stream.
             event.stopImmediatePropagation();
             return;
           }
@@ -1184,10 +1184,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
       }
 
-      // Register before page scripts. Window capture blocks the premature WebKit
-      // pointer event before any later GeoReseaux/OpenLayers listener can see it.
-      // Document registration is a fallback for embedded/test DOMs without a full
-      // Window propagation path. Marked replay events are explicitly ignored.
+      // Installed before page scripts. Window capture prevents a later
+      // GeoReseaux/OpenLayers capture listener seeing WebKit's premature pointer.
       __cribloOriginalAddEventListener.call(window, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
       __cribloOriginalAddEventListener.call(window, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
       __cribloOriginalAddEventListener.call(document, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
