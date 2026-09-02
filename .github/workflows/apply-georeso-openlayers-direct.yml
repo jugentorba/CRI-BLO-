@@ -1,0 +1,191 @@
+name: Validate direct hidden OpenLayers GeoReseaux bridge
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - scripts/patch-georeso-openlayers-direct.mjs
+      - .github/workflows/apply-georeso-openlayers-direct.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: criblo-master-spec-v1
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.sha.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply direct OpenLayers bridge and clean research files
+        run: |
+          set -euxo pipefail
+          node scripts/patch-georeso-openlayers-direct.mjs
+          rm -f scripts/patch-georeso-openlayers-direct.mjs
+          rm -f .github/workflows/apply-georeso-openlayers-direct.yml
+          rm -f .github/workflows/inspect-georeso-public.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Drive hidden OpenLayers map directly on iOS hold"
+          git push origin HEAD:${TARGET_BRANCH}
+      - id: sha
+        name: Export final source SHA
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  real-openlayers-browser:
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        ol_version: ['6.15.1', '7.2.2', '10.6.1']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.patch.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare real OpenLayers fixture
+        env:
+          OL_VERSION: ${{ matrix.ol_version }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/ol-fixture
+          cd /tmp/ol-fixture
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "ol@${OL_VERSION}" vite@5 playwright-core@1.55.0
+          node - "$GITHUB_WORKSPACE" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.argv[2];
+          const swift = fs.readFileSync(path.join(root, 'plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift'), 'utf8');
+          const match = swift.match(/private static let longPressBridgeScript = #\"\"\"([\s\S]*?)\"\"\"#/);
+          if (!match) throw new Error('bridge not found');
+          fs.writeFileSync('/tmp/ol-fixture/bridge.js', match[1]);
+          NODE
+          cat > index.html <<'HTML'
+          <!doctype html><html><head><meta charset="utf-8"><style>
+          html,body{margin:0;width:100%;height:100%} #map{position:absolute;left:20px;top:20px;width:600px;height:400px}
+          .fixture-popup{position:absolute;left:200px;top:150px;width:180px;height:90px;background:white;border:1px solid black;z-index:9999}
+          </style></head><body><div id="map"></div><script src="/bridge.js"></script><script type="module" src="/main.js"></script></body></html>
+          HTML
+          cat > main.js <<'JS'
+          import Map from 'ol/Map.js';
+          import View from 'ol/View.js';
+          const map = new Map({target:'map', layers:[], view:new View({center:[0,0], zoom:2})});
+          map.on('contextmenu', (event) => {
+            const popup = document.createElement('div');
+            popup.className = 'fixture-popup';
+            popup.textContent = 'OPENLAYERS_CONTEXT_OPENED';
+            document.body.appendChild(popup);
+            document.body.dataset.openlayersContext = 'yes';
+            event.preventDefault();
+          });
+          window.__fixtureMap = map;
+          window.__fixtureReady = true;
+          JS
+      - name: Verify hidden modular Map is recovered and its real browser-event path opens popup
+        env:
+          OL_VERSION: ${{ matrix.ol_version }}
+        run: |
+          set -euxo pipefail
+          cd /tmp/ol-fixture
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          npx vite --host 127.0.0.1 --port 4173 > /tmp/vite.log 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER || true; cat /tmp/vite.log || true' EXIT
+          for i in {1..40}; do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep .25; done
+          cat > verify.cjs <<'JS'
+          const { chromium } = require('playwright-core');
+          (async () => {
+            const executablePath = process.env.CHROME_PATH;
+            const browser = await chromium.launch({executablePath, headless:true, args:['--no-sandbox','--disable-dev-shm-usage']});
+            const page = await browser.newPage({viewport:{width:800,height:600}});
+            await page.goto('http://127.0.0.1:4173/', {waitUntil:'networkidle'});
+            await page.waitForFunction(() => window.__fixtureReady === true);
+            const before = await page.evaluate(() => window.__cribloGeoDiagnosticsText());
+            const result = await page.evaluate(async () => {
+              window.__cribloNativeWrappedContextLongPress(0.4, 0.35);
+              await new Promise(r => setTimeout(r, 180));
+              return {
+                opened: document.body.dataset.openlayersContext || '',
+                popup: document.querySelector('.fixture-popup')?.textContent || '',
+                diagnostics: window.__cribloGeoDiagnosticsText(),
+                globalOl: typeof window.ol,
+              };
+            });
+            console.log('OL_VERSION=' + process.env.OL_VERSION);
+            console.log('BEFORE\n' + before);
+            console.log('AFTER\n' + result.diagnostics);
+            console.log(JSON.stringify(result));
+            if (result.globalOl !== 'undefined') throw new Error('fixture unexpectedly exposed window.ol');
+            if (result.opened !== 'yes' || result.popup !== 'OPENLAYERS_CONTEXT_OPENED') throw new Error('direct OpenLayers context path did not open popup');
+            if (!/Engine: OpenLayers \/ instances: 1 \/ calls: 1/.test(result.diagnostics)) throw new Error('real OpenLayers map not recovered/called exactly once');
+            if (!/OpenLayers direct: 1 \/ feature hits: 0 \/ recovery: OpenLayers-bound/.test(result.diagnostics)) throw new Error('direct recovery diagnostic mismatch');
+            if (!/Context events: 0 \/ observed: 0/.test(result.diagnostics)) throw new Error('fixture fell back to synthetic DOM contextmenu');
+            await browser.close();
+          })().catch(e => { console.error(e); process.exit(1); });
+          JS
+          CHROME_PATH="$CHROME" OL_VERSION="$OL_VERSION" node verify.cjs
+
+  ios-build:
+    needs: [patch, real-openlayers-browser]
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.patch.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build and lint
+        run: |
+          npm run build
+          npm run lint
+      - name: Run iOS long-press regression
+        run: npm run test:ios-longpress-bridge
+      - name: Generate and sync iOS project
+        run: |
+          npx cap add ios
+          npx cap sync ios
+          node scripts/patch-ios-info.mjs
+      - name: Build simulator
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$PWD/ios-device-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package and verify IPA
+        run: |
+          rm -rf Payload CRI-BLO-iOS-openlayers-direct.ipa
+          mkdir -p Payload
+          cp -R ios-device-build/Build/Products/Debug-iphoneos/App.app Payload/App.app
+          zip -qry CRI-BLO-iOS-openlayers-direct.ipa Payload
+          unzip -t CRI-BLO-iOS-openlayers-direct.ipa
+          unzip -l CRI-BLO-iOS-openlayers-direct.ipa | grep -F 'Payload/App.app/Info.plist'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-iOS-openlayers-direct
+          path: CRI-BLO-iOS-openlayers-direct.ipa
+          if-no-files-found: error
