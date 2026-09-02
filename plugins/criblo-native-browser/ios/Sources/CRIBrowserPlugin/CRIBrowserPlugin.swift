@@ -1951,53 +1951,34 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         }
       }
 
-      function completeAndroidLongPress(request) {
+      function completeAndroidLongPress(request, reason) {
         if (!request || pendingNativeLongPress !== request || !request.armed) return false;
         pendingNativeLongPress = null;
-        var target = request.target;
-        var x = request.x;
-        var y = request.y;
+        var target = request.tailTarget || request.target;
+        var x = request.tailX == null ? request.x : request.tailX;
+        var y = request.tailY == null ? request.y : request.tailY;
         if (!target || !target.dispatchEvent) {
-          __cribloGeoDiag.lastResult = 'android-trace-release-no-target';
+          __cribloGeoDiag.lastResult = 'trusted-tail-no-target';
           return false;
         }
 
-        var releasedAt = request.releasedAt || Date.now();
-        if (!(lastRealPointerUpTarget === target && lastRealPointerUpAt >= releasedAt)) {
-          try {
-            if (typeof PointerEvent === 'function') {
-              target.dispatchEvent(new PointerEvent('pointerup', {
-                bubbles:true,cancelable:true,composed:true,
-                clientX:x,clientY:y,screenX:x,screenY:y,
-                button:0,buttons:0,pointerId:request.pointerId == null ? 1 : request.pointerId,
-                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0,view:window
-              }));
-              __cribloGeoDiag.syntheticPointerUps++;
-              traceAndroidEvent('pointerup', false);
-            }
-          } catch (_) {}
-        }
-        if (!(lastRealMouseUpTarget === target && lastRealMouseUpAt >= releasedAt)) {
-          mouse(target, 'mouseup', x, y, 0, 0);
-          __cribloGeoDiag.syntheticMouseUps++;
-          traceAndroidEvent('mouseup', false);
-        }
-        if (!(lastRealClickTarget === target && lastRealClickAt >= releasedAt)) {
-          mouse(target, 'click', x, y, 0, 0);
-          __cribloGeoDiag.syntheticClicks++;
-          traceAndroidEvent('click', false);
-        }
-
+        // The live iPhone trace showed that the page's genuine trusted click is
+        // delivered after touchend. Waiting for that click is essential because
+        // GeoReseaux can update its canvas hit/selection state during the real
+        // click before its contextmenu handler runs.
         var before = visiblePopupState();
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        var dispatched = contextMenu(target, x, y, request.sourceEvent || request.releaseEvent || null);
+        var source = request.sourceEvent || request.releaseEvent || request.tailEvent || null;
+        var dispatched = contextMenu(target, x, y, source);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
-        __cribloGeoDiag.lastResult = dispatched ? 'android-trace-release-dispatched' : 'android-trace-release-error';
+        __cribloGeoDiag.lastResult = dispatched
+          ? 'trusted-webkit-tail-contextmenu-' + String(reason || 'fallback')
+          : 'trusted-webkit-tail-contextmenu-error';
         setTimeout(function () {
-          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'android-trace-popup';
-          else if (dispatched) __cribloGeoDiag.lastResult = 'android-trace-no-popup';
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-no-popup';
         }, 220);
         return dispatched;
       }
@@ -2027,8 +2008,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
         lastRealTouchLongPressAt = Date.now();
 
-        ensureAndroidPressStart(request.target, request.x, request.y, request.touchStartedAt);
-        __cribloGeoDiag.lastResult = 'android-trace-armed-waiting-release';
+        __cribloGeoDiag.lastResult = 'trusted-webkit-tail-armed-waiting-release';
         return true;
       }
 
@@ -2139,6 +2119,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           lastRealClickAt = Date.now();
           lastRealClickTarget = event.target || null;
           traceAndroidEvent('click', true);
+
+          var request = pendingNativeLongPress;
+          if (request && request.armed && request.releasedAt && !request.tailCompletionScheduled) {
+            request.tailCompletionScheduled = true;
+            request.tailEvent = event;
+            request.tailTarget = event.target || request.target;
+            if (Number.isFinite(event.clientX)) request.tailX = event.clientX;
+            if (Number.isFinite(event.clientY)) request.tailY = event.clientY;
+            // We are in capture phase. Run in the next task so GeoReseaux's own
+            // trusted click handlers finish first, then contextmenu is truly last.
+            setTimeout(function () {
+              completeAndroidLongPress(request, 'trusted-click');
+            }, 0);
+          }
         } catch (_) {}
       }, true);
 
@@ -2187,12 +2181,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
           realTouchTimer = null;
-
-          setTimeout(function () {
-            if (realTouchTarget === target && lastRealTouchStartAt === touchStartNow) {
-              ensureAndroidPressStart(target, realTouchX, realTouchY, touchStartNow);
-            }
-          }, 0);
 
           // WKWebView can hold DOM touch delivery until the simultaneous native
           // recognizer has already begun. If that happened, let this touchstart
@@ -2248,11 +2236,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             request.releaseEvent = event || null;
             request.releasedAt = releaseAt;
             __cribloGeoDiag.contextAfterTouchMs = lastRealTouchStartAt ? Math.max(0, releaseAt - lastRealTouchStartAt) : -1;
-            __cribloGeoDiag.lastResult = 'android-trace-touchend-waiting-tail';
-            // Let WebKit deliver its genuine pointerup/mouseup/click first. The
-            // zero-delay task then fills only missing tail events and emits the
-            // contextmenu LAST, matching the Android trace exactly.
-            setTimeout(function () { completeAndroidLongPress(request); }, 0);
+            __cribloGeoDiag.lastResult = 'trusted-webkit-tail-touchend-waiting-click';
+            // The live iPhone diagnostic proves mousedown/mouseup/click arrive
+            // after touchend. Do not race them with setTimeout(0). Give WebKit
+            // time to deliver its real click; the click capture listener above
+            // will schedule contextmenu after the click has fully propagated.
+            setTimeout(function () {
+              if (pendingNativeLongPress === request && request.armed && !request.tailCompletionScheduled) {
+                request.tailCompletionScheduled = true;
+                completeAndroidLongPress(request, 'no-trusted-click-fallback');
+              }
+            }, 320);
           }
         } catch (_) {}
 
