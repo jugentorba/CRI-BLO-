@@ -1,0 +1,132 @@
+name: Final GeoReseaux mouse-tail validation
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - scripts/finalize-georeso-mouse-tail.mjs
+      - .github/workflows/validate-georeso-mouse-tail-final.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: criblo-master-spec-v1
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.out.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Align regression timing with production watchdog
+        run: |
+          set -euxo pipefail
+          node scripts/finalize-georeso-mouse-tail.mjs
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/test-ios-longpress-bridge.mjs
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "Validate delayed GeoReseaux pointer release tail"
+            git push origin HEAD:${TARGET_BRANCH}
+          fi
+      - id: out
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  regression:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm run test:ios-longpress-bridge
+      - run: npm run test:ios-georeseaux-ua-parity
+
+  openlayers:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ol: ['6.15.1', '7.2.2', '10.6.1']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build real OpenLayers fixture
+        env:
+          OL_VERSION: ${{ matrix.ol }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/geo-final-tail && cd /tmp/geo-final-tail
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "ol@${OL_VERSION}" vite@5 playwright-core@1.55.0
+          node - "$GITHUB_WORKSPACE" <<'NODE'
+          const fs=require('fs'),path=require('path'),root=process.argv[2];
+          const swift=fs.readFileSync(path.join(root,'plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift'),'utf8');
+          const m=swift.match(/private static let longPressBridgeScript = #\"\"\"([\s\S]*?)\"\"\"#/); if(!m) throw new Error('bridge missing');
+          fs.writeFileSync('/tmp/geo-final-tail/bridge.js',m[1]);
+          NODE
+          cat > index.html <<'HTML'
+          <!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;touch-action:none}#map{position:absolute;left:20px;top:20px;width:600px;height:400px;touch-action:none}.popup{position:absolute;left:200px;top:150px;width:220px;height:90px;background:#fff;border:1px solid #000;z-index:9999}</style></head><body><div id="map"></div><script>window.__cribloGeoReseauxAndroidCompat=true;window.__cribloGeoHTTPAndroid=true;</script><script src="/bridge.js"></script><script type="module" src="/main.js"></script></body></html>
+          HTML
+          cat > main.js <<'JS'
+          import Map from 'ol/Map.js'; import View from 'ol/View.js';
+          const map=new Map({target:'map',layers:[],view:new View({center:[0,0],zoom:2})});
+          const v=map.getViewport(); window.__events=[]; window.__contextCalls=0;
+          for(const t of ['pointerdown','touchstart','mousedown','touchend','pointerup','mouseup','click','contextmenu']) v.addEventListener(t,e=>window.__events.push(t+(e.isTrusted?'*':'')));
+          v.addEventListener('contextmenu',e=>{window.__contextCalls++;e.preventDefault();const p=document.createElement('div');p.className='popup';p.textContent='OPEN';document.body.appendChild(p);});
+          window.__ready=true;
+          JS
+      - name: Verify exact Android lifecycle and popup
+        run: |
+          set -euxo pipefail
+          cd /tmp/geo-final-tail
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"; test -n "$CHROME"
+          npx vite --host 127.0.0.1 --port 4181 >/tmp/geo-final-tail.log 2>&1 & SERVER=$!
+          trap 'kill $SERVER || true; cat /tmp/geo-final-tail.log || true' EXIT
+          for i in {1..40}; do curl -fsS http://127.0.0.1:4181/ >/dev/null && break; sleep .25; done
+          cat > verify.cjs <<'JS'
+          const {chromium}=require('playwright-core');
+          (async()=>{const b=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});const c=await b.newContext({viewport:{width:800,height:600},isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 Chrome/139.0.0.0 Mobile Safari/537.36'});const p=await c.newPage();const d=await c.newCDPSession(p);await p.goto('http://127.0.0.1:4181/',{waitUntil:'networkidle'});await p.waitForFunction(()=>window.__ready===true);const x=260,y=180;await d.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,radiusX:4,radiusY:4,force:1,id:1}]});await new Promise(r=>setTimeout(r,720));await d.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await p.waitForFunction(()=>document.querySelector('.popup')?.textContent==='OPEN',null,{timeout:3000});await new Promise(r=>setTimeout(r,150));const r=await p.evaluate(()=>({events:window.__events.slice(),calls:window.__contextCalls,diag:window.__cribloGeoDiagnosticsText()}));console.log(JSON.stringify(r));const wanted=['touchstart','pointerdown','mousedown','touchend','pointerup','mouseup','click','contextmenu'];const clean=r.events.map(x=>x.replace(/\*$/,''));if(clean.join(',')!==wanted.join(','))throw new Error('sequence='+r.events.join(' > '));for(const n of wanted)if(clean.filter(x=>x===n).length!==1)throw new Error('duplicate/missing '+n);if(r.calls!==1)throw new Error('context calls='+r.calls);if(!/OpenLayers direct: 0/.test(r.diag))throw new Error('DOM-first bypassed\n'+r.diag);if(!/Android mode \(JS\/HTTP\): true\/true/.test(r.diag))throw new Error('identity mismatch\n'+r.diag);await b.close();})().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          CHROME_PATH="$CHROME" node verify.cjs
+
+  ios-build:
+    needs: [prepare, regression, openlayers]
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npx cap add ios
+      - run: npx cap sync ios
+      - run: node scripts/patch-ios-info.mjs
+      - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$PWD/ios-device-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
