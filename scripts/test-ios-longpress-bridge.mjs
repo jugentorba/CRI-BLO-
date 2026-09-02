@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const swiftPath = new URL(
-  "../plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift",
-  import.meta.url,
-);
+const swiftPath = new URL("../plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift", import.meta.url);
 const swift = readFileSync(swiftPath, "utf8");
 const match = swift.match(/private static let longPressBridgeScript = #\"\"\"([\s\S]*?)\"\"\"#/);
 if (!match) throw new Error("iOS long-press bridge script was not found");
@@ -17,15 +14,9 @@ class TestPointerEvent extends Event {
     }
   }
 }
-
 globalThis.PointerEvent = TestPointerEvent;
 globalThis.MouseEvent = TestPointerEvent;
-globalThis.CustomEvent = class extends Event {
-  constructor(type, init = {}) {
-    super(type, init);
-    this.detail = init.detail;
-  }
-};
+globalThis.CustomEvent = class extends Event { constructor(type, init = {}) { super(type, init); this.detail = init.detail; } };
 globalThis.setInterval = () => 1;
 globalThis.clearInterval = () => {};
 globalThis.getComputedStyle = () => ({ display: "block", visibility: "visible", opacity: "1" });
@@ -41,7 +32,6 @@ documentTarget.id = "";
 documentTarget.className = "";
 documentTarget.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100 });
 documentTarget.closest = () => null;
-
 const windowTarget = new EventTarget();
 windowTarget.window = windowTarget;
 windowTarget.document = documentTarget;
@@ -52,23 +42,28 @@ windowTarget.scrollY = 0;
 windowTarget.frames = [];
 windowTarget.location = { href: "https://sigreseaux.orange.fr/ger/" };
 windowTarget.getSelection = () => ({ removeAllRanges() {} });
-
 const canvas = documentTarget;
 documentTarget.elementsFromPoint = () => [canvas];
 documentTarget.elementFromPoint = () => canvas;
 globalThis.window = windowTarget;
 globalThis.document = documentTarget;
 globalThis.location = windowTarget.location;
-
 new Function(match[1])();
 
-let received = null;
-let pageOrder = [];
-
-function pageContextHandler(event) {
+const order = [];
+const lifecycle = [];
+let context = null;
+function record(name) {
+  return function (event) {
+    order.push(name);
+    lifecycle.push({ name, trusted: event.isTrusted, touchSource: Boolean(event.sourceCapabilities?.firesTouchEvents), which: event.which });
+  };
+}
+for (const type of ["pointerdown", "touchstart", "mousedown", "pointerup", "touchend", "mouseup", "click"]) canvas.addEventListener(type, record(type));
+canvas.addEventListener("contextmenu", (event) => {
   event.preventDefault();
-  pageOrder.push("contextmenu");
-  received = {
+  order.push("contextmenu");
+  context = {
     trusted: event.isTrusted,
     prevented: event.defaultPrevented,
     target: event.target === canvas,
@@ -79,164 +74,69 @@ function pageContextHandler(event) {
     button: event.button,
     buttons: event.buttons,
     pointerType: event.pointerType,
+    originalTrusted: Boolean(event.originalEvent?.isTrusted),
   };
-}
+});
 
-function trustedEvent(event) {
-  Object.defineProperty(event, "isTrusted", { configurable: true, value: true });
-  return event;
-}
-
+function trusted(event) { Object.defineProperty(event, "isTrusted", { configurable: true, value: true }); return event; }
 function pointer(type, x, y, buttons) {
-  canvas.dispatchEvent(trustedEvent(new TestPointerEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: y,
-    screenX: x,
-    screenY: y,
-    pointerId: 9,
-    pointerType: "touch",
-    isPrimary: true,
-    button: 0,
-    buttons,
-    pressure: buttons ? 1 : 0,
-  })));
+  canvas.dispatchEvent(trusted(new TestPointerEvent(type, { bubbles:true, cancelable:true, clientX:x, clientY:y, screenX:x, screenY:y, pointerId:9, pointerType:"touch", isPrimary:true, button:0, buttons, pressure:buttons ? 1 : 0 })));
 }
-
-function mouse(type, x, y, buttons) {
-  canvas.dispatchEvent(trustedEvent(new TestPointerEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: y,
-    screenX: x,
-    screenY: y,
-    button: 0,
-    buttons,
-  })));
-}
-
 function touch(type, x, y) {
-  const event = trustedEvent(new Event(type, { bubbles: true, cancelable: true }));
-  const point = {
-    identifier: 9,
-    target: canvas,
-    clientX: x,
-    clientY: y,
-    pageX: x,
-    pageY: y,
-    screenX: x,
-    screenY: y,
-  };
+  const event = trusted(new Event(type, { bubbles:true, cancelable:true }));
+  const point = { identifier:9, target:canvas, clientX:x, clientY:y, pageX:x, pageY:y, screenX:x, screenY:y };
   const active = type === "touchstart" ? [point] : [];
-  Object.defineProperties(event, {
-    touches: { value: active },
-    targetTouches: { value: active },
-    changedTouches: { value: [point] },
-  });
+  Object.defineProperties(event, { touches:{value:active}, targetTouches:{value:active}, changedTouches:{value:[point]} });
   canvas.dispatchEvent(event);
 }
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const wait = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
-for (const type of ["pointerdown", "touchstart", "pointerup", "touchend", "mousedown", "mouseup", "click"]) {
-  canvas.addEventListener(type, () => pageOrder.push(type));
-}
-canvas.addEventListener("contextmenu", pageContextHandler);
-
-// The trusted in-page touch timer must ARM at 600 ms while the finger is down,
-// but contextmenu must wait for the real release/click tail and be LAST.
+// Real iPhone long-hold sequence from the user's diagnostic: trusted pointerdown
+// arrives before trusted touchstart, and WKWebView supplies no mouseup/click tail.
 pointer("pointerdown", 82, 31, 1);
 touch("touchstart", 82, 31);
-await wait(650);
-if (received !== null) {
-  throw new Error("contextmenu fired before release: " + pageOrder.join(","));
-}
-if (!pageOrder.includes("mousedown")) {
-  throw new Error("Android press-start state was not prepared: " + pageOrder.join(","));
-}
+await wait(25);
+if (order.join(",") !== "pointerdown,touchstart,mousedown") throw new Error("Android mousedown was not prepared near touchstart: " + order.join(","));
+const md = lifecycle.find((entry) => entry.name === "mousedown");
+if (!md || !md.trusted || !md.touchSource || md.which !== 1) throw new Error("mousedown trusted facade mismatch: " + JSON.stringify(md));
+await wait(625);
+if (context !== null) throw new Error("contextmenu fired while finger was still down: " + order.join(","));
 
 pointer("pointerup", 82, 31, 0);
 touch("touchend", 82, 31);
-// Simulate the real-device late native callback observed in the user's trace.
-if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
-  throw new Error("late native hold was not safely suppressed");
+// Simulate the delayed native callback observed on the real iPhone. It must not
+// replace the already armed trusted-JS request.
+windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
+await wait(35);
+const expected = "pointerdown,touchstart,mousedown,pointerup,touchend,mouseup,click,contextmenu";
+if (order.join(",") !== expected) throw new Error("real-iPhone -> Android lifecycle mismatch: " + order.join(","));
+for (const name of ["mousedown", "mouseup", "click"]) {
+  const event = lifecycle.find((entry) => entry.name === name);
+  if (!event || !event.trusted || !event.touchSource || event.which !== 1) throw new Error(name + " facade mismatch: " + JSON.stringify(event));
 }
-await wait(5);
-mouse("mousedown", 82, 31, 1);
-mouse("mouseup", 82, 31, 0);
-mouse("click", 82, 31, 0);
-await wait(30);
-if (!received) {
-  throw new Error("contextmenu did not complete after trusted click: " + pageOrder.join(","));
-}
-if (![received.trusted, received.prevented, received.target, received.pointerEvent, received.touchSource].every(Boolean)) {
-  throw new Error("trusted-tail facade is wrong: " + JSON.stringify(received));
-}
-if (received.clientX !== 82 || received.clientY !== 31) {
-  throw new Error("trusted-tail coordinates changed: " + JSON.stringify(received));
-}
-if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
-  throw new Error("trusted-tail context shape is wrong: " + JSON.stringify(received));
-}
-if (pageOrder[pageOrder.length - 1] !== "contextmenu") {
-  throw new Error("contextmenu is not last: " + pageOrder.join(","));
-}
-if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
-  throw new Error("contextmenu duplicated: " + pageOrder.join(","));
-}
-
-// A short tap must never arm or create contextmenu.
-received = null;
-pageOrder = [];
-pointer("pointerdown", 70, 26, 1);
-touch("touchstart", 70, 26);
-await wait(80);
-pointer("pointerup", 70, 26, 0);
-touch("touchend", 70, 26);
-mouse("mousedown", 70, 26, 1);
-mouse("mouseup", 70, 26, 0);
-mouse("click", 70, 26, 0);
-await wait(620);
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error("short tap incorrectly became a hold: " + pageOrder.join(","));
-}
+if (!context || !context.trusted || !context.prevented || !context.target || !context.pointerEvent || !context.touchSource || !context.originalTrusted) throw new Error("context facade mismatch: " + JSON.stringify(context));
+if (context.clientX !== 82 || context.clientY !== 31 || context.button !== 0 || context.buttons !== 0 || context.pointerType !== "touch") throw new Error("context shape mismatch: " + JSON.stringify(context));
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
-if (!diagnostics.includes("JS trusted hold arms: 1")) {
-  throw new Error("trusted JS hold was not armed: " + diagnostics);
-}
-if (!diagnostics.includes("Late native bridge suppressed: 1")) {
-  throw new Error("late native callback was not suppressed: " + diagnostics);
-}
-if (!diagnostics.includes("Release completions: 1")) {
-  throw new Error("trusted release/click tail did not complete: " + diagnostics);
-}
-if (!diagnostics.includes("pu=0 mu=0 click=0")) {
-  throw new Error("bridge fabricated the release/click tail: " + diagnostics);
-}
-if (!diagnostics.includes("contextmenu*")) {
-  throw new Error("trusted-source contextmenu trace missing: " + diagnostics);
-}
-if (!diagnostics.includes("Trusted touch source: true")) {
-  throw new Error("trusted touch source was lost: " + diagnostics);
-}
+if (!diagnostics.includes("JS trusted hold arms: 1")) throw new Error("trusted JS hold did not arm: " + diagnostics);
+if (!diagnostics.includes("Late native bridge suppressed: 1")) throw new Error("late native callback not suppressed: " + diagnostics);
+if (!diagnostics.includes("Synthetic press/release: pd=0 md=1 pu=0 mu=1 click=1")) throw new Error("compatibility tail counters wrong: " + diagnostics);
+if (!diagnostics.includes("Release completions: 1")) throw new Error("release completion missing: " + diagnostics);
+if (!diagnostics.includes("Lifecycle facade calls: 3")) throw new Error("lifecycle facade handlers were not exercised: " + diagnostics);
+if (!diagnostics.includes("contextmenu*")) throw new Error("trusted-source contextmenu missing: " + diagnostics);
 
-// Listener removal by original identity must still work on the timer path.
-canvas.removeEventListener("contextmenu", pageContextHandler);
-received = null;
-pageOrder = [];
-pointer("pointerdown", 60, 20, 1);
-touch("touchstart", 60, 20);
-await wait(650);
-pointer("pointerup", 60, 20, 0);
-touch("touchend", 60, 20);
-mouse("mousedown", 60, 20, 1);
-mouse("mouseup", 60, 20, 0);
-mouse("click", 60, 20, 0);
-await wait(30);
-if (received !== null) {
-  throw new Error("wrapped listener removal identity is broken");
-}
+// A short tap must never become a hold. Its synthetic Android mousedown is
+// balanced with mouseup so GeoReseaux cannot be left in a pressed state.
+order.length = 0;
+lifecycle.length = 0;
+context = null;
+pointer("pointerdown", 70, 26, 1);
+touch("touchstart", 70, 26);
+await wait(25);
+pointer("pointerup", 70, 26, 0);
+touch("touchend", 70, 26);
+await wait(120);
+if (order.includes("contextmenu")) throw new Error("short tap became a long hold: " + order.join(","));
+if (!order.includes("mousedown") || !order.includes("mouseup")) throw new Error("short-tap compatibility press was not balanced: " + order.join(","));
 
-console.log("iOS GeoReseaux trusted-touch arm/release bridge test passed");
+console.log("iOS GeoReseaux real-iPhone to exact-Android lifecycle test passed");
