@@ -139,4 +139,42 @@ await wait(120);
 if (order.includes("contextmenu")) throw new Error("short tap became a long hold: " + order.join(","));
 if (!order.includes("mousedown") || !order.includes("mouseup")) throw new Error("short-tap compatibility press was not balanced: " + order.join(","));
 
-console.log("iOS GeoReseaux real-iPhone to exact-Android lifecycle test passed");
+// GeoReseaux's Angular bundle can hide OpenLayers from window. Reproduce that
+// shape: the Map is only local, and its handleBrowserEvent.bind(map) is the
+// constructor signature our document-start hook must recover.
+let directMapCalls = 0;
+let directMapEvent = null;
+const hiddenMap = {
+  getViewport() { return canvas; },
+  getView() { return {}; },
+  getCoordinateFromPixel(pixel) { return [pixel[0] * 10, pixel[1] * 10]; },
+  forEachFeatureAtPixel(pixel, callback) { return callback({ id: 'fixture-feature' }); },
+  handleBrowserEvent(event, type) {
+    directMapCalls += 1;
+    directMapEvent = { type, x: event.clientX, y: event.clientY, trusted: event.isTrusted };
+  },
+};
+const hiddenBound = hiddenMap.handleBrowserEvent.bind(hiddenMap);
+if (typeof hiddenBound !== 'function') throw new Error('hidden OpenLayers bind fixture failed');
+
+const contextBefore = Number((windowTarget.__cribloGeoDiagnosticsText().match(/Context events: (\d+)/) || [])[1] || 0);
+order.length = 0;
+lifecycle.length = 0;
+context = null;
+pointer("pointerdown", 91, 42, 1);
+touch("touchstart", 91, 42);
+await wait(650);
+pointer("pointerup", 91, 42, 0);
+touch("touchend", 91, 42);
+await wait(40);
+if (directMapCalls !== 1) throw new Error('hidden OpenLayers map was not called exactly once: ' + directMapCalls);
+if (!directMapEvent || directMapEvent.type !== 'contextmenu' || directMapEvent.x !== 91 || directMapEvent.y !== 42 || !directMapEvent.trusted) {
+  throw new Error('direct OpenLayers event mismatch: ' + JSON.stringify(directMapEvent));
+}
+const directDiagnostics = windowTarget.__cribloGeoDiagnosticsText();
+if (!directDiagnostics.includes('Engine: OpenLayers / instances: 1 / calls: 1')) throw new Error('hidden OpenLayers map was not recovered: ' + directDiagnostics);
+if (!directDiagnostics.includes('OpenLayers direct: 1 / feature hits: 1 / recovery: OpenLayers-bound')) throw new Error('direct OpenLayers diagnostics mismatch: ' + directDiagnostics);
+const contextAfter = Number((directDiagnostics.match(/Context events: (\d+)/) || [])[1] || 0);
+if (contextAfter !== contextBefore) throw new Error('direct OpenLayers path fell back to DOM contextmenu: ' + directDiagnostics);
+
+console.log("iOS GeoReseaux exact lifecycle + hidden OpenLayers direct bridge test passed");

@@ -1112,6 +1112,55 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var __cribloOriginalAddEventListener = EventTarget.prototype.addEventListener;
       var __cribloOriginalRemoveEventListener = EventTarget.prototype.removeEventListener;
 
+      // GeoReseaux is bundled, so the OpenLayers Map constructor is not exposed
+      // as window.ol.Map. OpenLayers binds Map.handleBrowserEvent to the real Map
+      // instance while constructing the viewport. Capture that one bind at
+      // document-start, register the hidden Map, then restore bind immediately.
+      var __cribloOriginalBind = Function.prototype.bind;
+      var __cribloPatchedBind = null;
+      var __cribloBindHookTimer = null;
+
+      function looksLikeOpenLayersMap(value) {
+        try {
+          return !!value
+            && typeof value.getViewport === 'function'
+            && typeof value.getView === 'function'
+            && typeof value.getCoordinateFromPixel === 'function'
+            && typeof value.handleBrowserEvent === 'function';
+        } catch (_) { return false; }
+      }
+
+      function restoreOpenLayersBindHook() {
+        try {
+          if (__cribloPatchedBind && Function.prototype.bind === __cribloPatchedBind) {
+            Function.prototype.bind = __cribloOriginalBind;
+          }
+          if (__cribloBindHookTimer) clearTimeout(__cribloBindHookTimer);
+        } catch (_) {}
+        __cribloBindHookTimer = null;
+      }
+
+      function installOpenLayersBindHook() {
+        try {
+          if (__cribloPatchedBind) return;
+          __cribloPatchedBind = function () {
+            var bound = __cribloOriginalBind.apply(this, arguments);
+            try {
+              var thisArg = arguments.length ? arguments[0] : null;
+              if (looksLikeOpenLayersMap(thisArg) && this === thisArg.handleBrowserEvent) {
+                registerMapInstance(thisArg, 'OpenLayers-bound');
+                restoreOpenLayersBindHook();
+              }
+            } catch (_) {}
+            return bound;
+          };
+          Function.prototype.bind = __cribloPatchedBind;
+          __cribloBindHookTimer = setTimeout(restoreOpenLayersBindHook, 30000);
+        } catch (_) {}
+      }
+
+      installOpenLayersBindHook();
+
       function captureOption(options) {
         try {
           if (options === true) return true;
@@ -1225,6 +1274,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         capturedListeners: 0,
         engine: 'none',
         engineCalls: 0,
+        mapDirectCalls: 0,
+        mapFeatureHits: 0,
+        mapRecovery: 'none',
         registry: [],
         lastTarget: '',
         lastResult: 'not-run',
@@ -1273,6 +1325,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (!map || __cribloMapRegistry.some(function (entry) { return entry.map === map; })) return map;
           __cribloMapRegistry.push({ map: map, engine: engine });
           __cribloGeoDiag.registry = __cribloMapRegistry.map(function (entry) { return entry.engine; });
+          __cribloGeoDiag.mapRecovery = String(engine || 'unknown');
         } catch (_) {}
         return map;
       }
@@ -1809,18 +1862,38 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         for (var i = 0; i < values.length; i++) {
           var map = values[i];
           try {
-            // OpenLayers Map
-            if (map && typeof map.getViewport === 'function' && typeof map.getCoordinateFromPixel === 'function' && typeof map.dispatchEvent === 'function') {
+            // OpenLayers Map. Call the real OpenLayers browser-event entry
+            // point instead of dispatching another synthetic DOM contextmenu.
+            // This lets OpenLayers create its own MapBrowserEvent, pixel and
+            // coordinate exactly as its viewport contextmenu listener does.
+            if (map && typeof map.getViewport === 'function' && typeof map.getCoordinateFromPixel === 'function') {
               var viewport = map.getViewport();
               if (!viewport || !(viewport === target || (viewport.contains && viewport.contains(target)))) continue;
               var pixel = viewportPoint(viewport, x, y);
-              var coordinate = map.getCoordinateFromPixel(pixel);
               var original = compatibleContextEvent(target, viewport, x, y, sourceEvent);
-              var payload = { type: 'contextmenu', map: map, pixel: pixel, coordinate: coordinate, dragging: false, originalEvent: original };
-              map.dispatchEvent(payload);
-              try { map.dispatchEvent({ type: 'longpress', map: map, pixel: pixel, coordinate: coordinate, dragging: false, originalEvent: original }); } catch (_) {}
-              try { map.dispatchEvent({ type: 'hold', map: map, pixel: pixel, coordinate: coordinate, dragging: false, originalEvent: original }); } catch (_) {}
-              __cribloGeoDiag.engine = 'OpenLayers'; __cribloGeoDiag.engineCalls++; return true;
+              try {
+                var hit = null;
+                if (typeof map.forEachFeatureAtPixel === 'function') {
+                  hit = map.forEachFeatureAtPixel(pixel, function (feature) { return feature || true; });
+                } else if (typeof map.getFeaturesAtPixel === 'function') {
+                  var hits = map.getFeaturesAtPixel(pixel);
+                  hit = hits && hits.length ? hits[0] : null;
+                }
+                if (hit) __cribloGeoDiag.mapFeatureHits++;
+              } catch (_) {}
+
+              if (typeof map.handleBrowserEvent === 'function') {
+                map.handleBrowserEvent(original, 'contextmenu');
+              } else if (typeof map.dispatchEvent === 'function') {
+                var coordinate = map.getCoordinateFromPixel(pixel);
+                map.dispatchEvent({ type: 'contextmenu', map: map, pixel: pixel, coordinate: coordinate, dragging: false, originalEvent: original });
+              } else {
+                continue;
+              }
+              __cribloGeoDiag.engine = 'OpenLayers';
+              __cribloGeoDiag.engineCalls++;
+              __cribloGeoDiag.mapDirectCalls++;
+              return true;
             }
 
             // Leaflet Map
@@ -2169,7 +2242,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // iOS long-presses do not emit Chrome's mouseup/click compatibility
         // tail. Rebuild only the missing tail, then contextmenu is last.
         finishAndroidCompatibilityMouse(request, true);
-        var dispatched = contextMenu(target, x, y, source);
+        var dispatched = invokeMapEngine(target, x, y, source);
+        if (!dispatched) dispatched = contextMenu(target, x, y, source);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
@@ -2243,7 +2317,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.lastResult = 'touchstart-timeout-contextmenu-at-hold';
         var before = visiblePopupState();
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        var dispatched = contextMenu(target, x, y, null);
+        var dispatched = invokeMapEngine(target, x, y, null);
+        if (!dispatched) dispatched = contextMenu(target, x, y, null);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         setTimeout(function () {
@@ -2607,6 +2682,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Context handlers: ' + __cribloGeoDiag.capturedListeners + ' / calls: ' + __cribloGeoDiag.wrappedContextCalls,
           'Hold handlers called: ' + __cribloGeoDiag.semanticCalls,
           'Engine: ' + __cribloGeoDiag.engine + ' / instances: ' + __cribloMapRegistry.length + ' / calls: ' + __cribloGeoDiag.engineCalls,
+          'OpenLayers direct: ' + __cribloGeoDiag.mapDirectCalls + ' / feature hits: ' + __cribloGeoDiag.mapFeatureHits + ' / recovery: ' + __cribloGeoDiag.mapRecovery,
           'Last result: ' + __cribloGeoDiag.lastResult,
           'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,
           'Native waits for touchstart: ' + __cribloGeoDiag.nativeWaitsForTouchStart,
