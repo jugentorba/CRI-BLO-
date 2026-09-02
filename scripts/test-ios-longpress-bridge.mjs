@@ -195,7 +195,9 @@ touch("touchstart", 91, 42);
 await wait(650);
 pointer("pointerup", 91, 42, 0);
 touch("touchend", 91, 42);
-await wait(40);
+// Same 90 ms pointer-release watchdog applies to the hidden OpenLayers/DOM
+// fixture. Wait beyond it before judging whether contextmenu reached the app.
+await wait(130);
 if (geoDomCalls !== 1 || !geoDomTrusted) throw new Error('GeoReseaux DOM context handler was bypassed or untrusted: calls=' + geoDomCalls + ' trusted=' + geoDomTrusted);
 if (directMapCalls !== 1) throw new Error('OpenLayers viewport listener was not called exactly once through DOM: ' + directMapCalls);
 if (!directMapEvent || directMapEvent.type !== 'contextmenu' || directMapEvent.x !== 91 || directMapEvent.y !== 42 || !directMapEvent.trusted) {
