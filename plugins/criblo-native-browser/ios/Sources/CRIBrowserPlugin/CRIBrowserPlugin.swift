@@ -851,9 +851,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         let ry = max(0, min(1, location.y / webView.bounds.height))
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // The native recognizer only arms the long press. JavaScript waits for
-        // the genuine WKWebView release/mouse/click tail, then emits exactly one
-        // contextmenu last, matching the measured Android event order.
+        // Native provides immediate haptic feedback and a backup arm signal.
+        // The page-side trusted touchstart timer is the primary 600 ms arm path;
+        // this avoids WKWebView evaluateJavaScript delivery latency.
         let script = "window.__cribloNativeWrappedContextLongPress && window.__cribloNativeWrappedContextLongPress(\(rx), \(ry));"
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
@@ -1239,6 +1239,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         wrappedContextCalls: 0,
         nativeRecognizerFires: 0,
         nativeWaitsForTouchStart: 0,
+        jsHoldArms: 0,
+        nativeLateSuppressed: 0,
         touchToNativeMs: -1,
         nativeToTouchMs: -1,
         contextAfterTouchMs: -1,
@@ -2055,7 +2057,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // The Android trace has pointerdown/mousedown AFTER touchstart. Only
         // synthesize a missing event when WebKit did not provide a trusted one
         // after this touchstart.
-        if (!(lastRealPointerDownTarget === target && lastRealPointerDownAt >= touchStartedAt)) {
+        var pointerNearTouchStart = lastRealPointerDownTarget === target
+          && lastRealPointerDownAt > 0
+          && Math.abs(lastRealPointerDownAt - touchStartedAt) < 160;
+        if (!pointerNearTouchStart) {
           try {
             if (typeof PointerEvent === 'function') {
               target.dispatchEvent(new PointerEvent('pointerdown', {
@@ -2101,6 +2106,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
+        __cribloGeoDiag.contextAfterTouchMs = request.touchStartedAt
+          ? Math.max(0, Date.now() - request.touchStartedAt)
+          : -1;
         __cribloGeoDiag.lastResult = dispatched
           ? 'trusted-webkit-tail-contextmenu-' + String(reason || 'fallback')
           : 'trusted-webkit-tail-contextmenu-error';
@@ -2128,37 +2136,22 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         request.sourceEvent = window.__cribloLastTrustedTouchStart || null;
         request.armed = true;
 
+        // The native recognizer can reach WKWebView JavaScript late. Its only
+        // job here is to ARM the hold while the trusted touch is alive. The
+        // actual contextmenu is deliberately deferred until the genuine iOS
+        // release/click tail, which is the measured Android ordering.
+        ensureAndroidPressStart(request.target, request.x, request.y, request.touchStartedAt);
+        clearRealTouchTimer();
+        realTouchFired = true;
+        lastRealTouchLongPressAt = Date.now();
         __cribloGeoDiag.directSourceTrusted = !!(request.sourceEvent && request.sourceEvent.isTrusted);
         __cribloGeoDiag.contextAfterTouchMs = -1;
         __cribloGeoDiag.coordinateDelta = String(Math.round(estimatedX - request.x)) + ',' + String(Math.round(estimatedY - request.y));
         __cribloGeoDiag.directTarget = String((request.target.tagName || '') + '#' + (request.target.id || '') + '.' + (request.target.className && (request.target.className.baseVal || request.target.className) || '')).slice(0, 180);
         __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
-        lastRealTouchLongPressAt = Date.now();
-
-        // The working Android diagnostic shows contextmenu at ~600 ms while
-        // the finger is STILL DOWN, before pointerup/touchend. The previous iOS
-        // bridge waited until physical release (often >1.5 s), which is too late
-        // for GeoReseaux's internal feature-selection state. Dispatch the one
-        // missing contextmenu now, at native recognition time, and clear the
-        // request so release can never emit a duplicate.
-        var before = visiblePopupState();
-        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        var dispatched = contextMenu(request.target, request.x, request.y, request.sourceEvent);
-        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        __cribloGeoDiag.directTrustedHandlerFires += delta;
-        __cribloGeoDiag.contextAfterTouchMs = lastRealTouchStartAt
-          ? Math.max(0, Date.now() - lastRealTouchStartAt)
-          : -1;
-        pendingNativeLongPress = null;
-        __cribloGeoDiag.lastResult = dispatched
-          ? 'native-hold-contextmenu'
-          : 'native-hold-contextmenu-error';
-        setTimeout(function () {
-          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'native-hold-popup';
-          else if (dispatched) __cribloGeoDiag.lastResult = 'native-hold-no-popup';
-        }, 220);
-        return dispatched;
+        __cribloGeoDiag.lastResult = 'native-hold-armed-waiting-release';
+        return true;
       }
 
       function fallbackNativeLongPressRequest(request) {
@@ -2195,12 +2188,42 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       function fireRealTouchLongPress() {
         realTouchTimer = null;
-        if (!realTouchTarget) return;
+        if (!realTouchTarget || realTouchFired) return;
+
+        var sourceEvent = window.__cribloLastTrustedTouchStart || null;
+        var request = {
+          id: ++nativeLongPressSequence,
+          rx: window.innerWidth ? clamp01(realTouchX / window.innerWidth) : 0,
+          ry: window.innerHeight ? clamp01(realTouchY / window.innerHeight) : 0,
+          requestedAt: Date.now(),
+          target: realTouchTarget,
+          x: realTouchX,
+          y: realTouchY,
+          pointerId: realTouchIdentifier,
+          touchStartedAt: lastRealTouchStartAt,
+          sourceEvent: sourceEvent,
+          armed: true,
+          origin: 'trusted-js-touch-timer'
+        };
+
+        // This timer runs inside the page from the genuine trusted touchstart,
+        // so it is not delayed by native evaluateJavaScript IPC. At 600 ms we
+        // ARM the long press only. touchend + the real WebKit click complete it
+        // and contextmenu is emitted last, exactly like the Android trace.
+        pendingNativeLongPress = request;
         realTouchFired = true;
         lastRealTouchLongPressAt = Date.now();
-        clearSelection();
+        ensureAndroidPressStart(request.target, request.x, request.y, request.touchStartedAt);
+        __cribloGeoDiag.jsHoldArms++;
+        __cribloGeoDiag.directSourceTrusted = !!(sourceEvent && sourceEvent.isTrusted);
+        __cribloGeoDiag.coordinateDelta = 'trusted-touch';
+        __cribloGeoDiag.directTarget = String((request.target.tagName || '') + '#' + (request.target.id || '') + '.' + (request.target.className && (request.target.className.baseVal || request.target.className) || '')).slice(0, 180);
+        __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
+        __cribloGeoDiag.lastResult = 'js-hold-armed-waiting-release';
 
-        var styleNode = realTouchTarget;
+        clearSelection();
+        var styleNode = request.target;
         for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
           try {
             styleNode.style.webkitUserSelect = 'none';
@@ -2208,34 +2231,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             styleNode.style.userSelect = 'none';
           } catch (_) {}
         }
-
-        var signature = String((realTouchTarget.tagName || '') + '#' + (realTouchTarget.id || '') + '.' + (realTouchTarget.className && (realTouchTarget.className.baseVal || realTouchTarget.className) || ''));
-        __cribloGeoDiag.lastTarget = signature.slice(0, 180);
-        __cribloGeoDiag.lastResult = 'contextmenu-dispatched';
-
-        // Android trace proves Chromium sends ONE bubbling contextmenu on the
-        // CANVAS about 600ms after pointerdown/touchstart. Do exactly that.
-        // Do not directly call handlers first and do not redispatch to parents:
-        // either approach invokes the same framework listener multiple times.
-        var before = visiblePopupState();
-        dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
-
-        setTimeout(function () {
-          if (popupChanged(before)) {
-            __cribloGeoDiag.lastResult = 'dom-popup';
-            return;
-          }
-
-          // If WebKit's synthetic DOM dispatch was ignored by the framework,
-          // call the captured contextmenu handlers once as a fallback. This is
-          // deliberately after the faithful one-event path, never before it.
-          var trustedTouch = window.__cribloLastTrustedTouchStart || null;
-          invokeCapturedSemanticHandlers(realTouchTarget, realTouchX, realTouchY, trustedTouch);
-
-          setTimeout(function () {
-            __cribloGeoDiag.lastResult = popupChanged(before) ? 'page-handler-popup' : 'no-popup';
-          }, 180);
-        }, 180);
       }
 
       document.addEventListener('pointerdown', function (event) {
@@ -2339,6 +2334,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
           realTouchTimer = null;
+          if (event.isTrusted) {
+            realTouchTimer = setTimeout(function () {
+              fireRealTouchLongPress();
+            }, 600);
+          }
 
           // WKWebView can hold DOM touch delivery until the simultaneous native
           // recognizer has already begun. If that happened, let this touchstart
@@ -2364,7 +2364,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (!touch) { clearRealTouchTimer(); return; }
           var dx = touch.clientX - realTouchX;
           var dy = touch.clientY - realTouchY;
-          if ((dx * dx + dy * dy) > 144) clearRealTouchTimer();
+          if ((dx * dx + dy * dy) > 784) clearRealTouchTimer();
         } catch (_) { clearRealTouchTimer(); }
       }, { capture: true, passive: true });
 
@@ -2449,6 +2449,16 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         try {
           __cribloGeoDiag.nativeRecognizerFires++;
           var now = Date.now();
+          // On real iPhone WKWebView the native callback can be delivered only
+          // after touchend or even around the compatibility click. Never let a
+          // late native callback overwrite the request already armed by the
+          // trusted in-page 600 ms timer.
+          if ((pendingNativeLongPress && pendingNativeLongPress.armed)
+              || (lastRealTouchLongPressAt && now - lastRealTouchLongPressAt < 1800)) {
+            __cribloGeoDiag.nativeLateSuppressed++;
+            __cribloGeoDiag.lastResult = 'native-late-suppressed-js-hold';
+            return true;
+          }
           var request = {
             id: ++nativeLongPressSequence,
             rx: clamp01(rx),
@@ -2499,6 +2509,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Last result: ' + __cribloGeoDiag.lastResult,
           'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,
           'Native waits for touchstart: ' + __cribloGeoDiag.nativeWaitsForTouchStart,
+          'JS trusted hold arms: ' + __cribloGeoDiag.jsHoldArms,
+          'Late native bridge suppressed: ' + __cribloGeoDiag.nativeLateSuppressed,
           'Touch -> native: ' + __cribloGeoDiag.touchToNativeMs + ' ms',
           'Native -> touch: ' + __cribloGeoDiag.nativeToTouchMs + ' ms',
           'Context after touch: ' + __cribloGeoDiag.contextAfterTouchMs + ' ms',

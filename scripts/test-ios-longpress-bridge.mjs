@@ -144,97 +144,99 @@ for (const type of ["pointerdown", "touchstart", "pointerup", "touchend", "mouse
 }
 canvas.addEventListener("contextmenu", pageContextHandler);
 
-// Working Android behavior: contextmenu happens around the hold threshold while
-// the finger is still down, before pointerup/touchend.
+// The trusted in-page touch timer must ARM at 600 ms while the finger is down,
+// but contextmenu must wait for the real release/click tail and be LAST.
 pointer("pointerdown", 82, 31, 1);
 touch("touchstart", 82, 31);
-await wait(1);
-if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
-  throw new Error("native hold request was rejected");
+await wait(650);
+if (received !== null) {
+  throw new Error("contextmenu fired before release: " + pageOrder.join(","));
 }
-await wait(20);
-if (!received) {
-  throw new Error("contextmenu did not fire at native hold: " + pageOrder.join(","));
-}
-if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
-  throw new Error("hold-time order is wrong: " + pageOrder.join(","));
-}
-if (![received.trusted, received.prevented, received.target, received.pointerEvent, received.touchSource].every(Boolean)) {
-  throw new Error("hold facade is wrong: " + JSON.stringify(received));
-}
-if (received.clientX !== 82 || received.clientY !== 31) {
-  throw new Error("hold coordinates changed: " + JSON.stringify(received));
-}
-if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
-  throw new Error("contextmenu shape is wrong: " + JSON.stringify(received));
+if (!pageOrder.includes("mousedown")) {
+  throw new Error("Android press-start state was not prepared: " + pageOrder.join(","));
 }
 
-// The later physical release and compatibility mouse tail must never duplicate
-// the menu that already fired at hold time.
 pointer("pointerup", 82, 31, 0);
 touch("touchend", 82, 31);
+// Simulate the real-device late native callback observed in the user's trace.
+if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
+  throw new Error("late native hold was not safely suppressed");
+}
+await wait(5);
 mouse("mousedown", 82, 31, 1);
 mouse("mouseup", 82, 31, 0);
 mouse("click", 82, 31, 0);
 await wait(30);
-if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
-  throw new Error("release duplicated contextmenu: " + pageOrder.join(","));
+if (!received) {
+  throw new Error("contextmenu did not complete after trusted click: " + pageOrder.join(","));
 }
-const expected = "pointerdown,touchstart,contextmenu,pointerup,touchend,mousedown,mouseup,click";
-if (pageOrder.join(",") !== expected) {
-  throw new Error("full event order is wrong: " + pageOrder.join(","));
+if (![received.trusted, received.prevented, received.target, received.pointerEvent, received.touchSource].every(Boolean)) {
+  throw new Error("trusted-tail facade is wrong: " + JSON.stringify(received));
+}
+if (received.clientX !== 82 || received.clientY !== 31) {
+  throw new Error("trusted-tail coordinates changed: " + JSON.stringify(received));
+}
+if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
+  throw new Error("trusted-tail context shape is wrong: " + JSON.stringify(received));
+}
+if (pageOrder[pageOrder.length - 1] !== "contextmenu") {
+  throw new Error("contextmenu is not last: " + pageOrder.join(","));
+}
+if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
+  throw new Error("contextmenu duplicated: " + pageOrder.join(","));
 }
 
-// WKWebView can occasionally deliver the native recognition just before DOM
-// touchstart. The first real touchstart must bind the true target/point and then
-// fire immediately, not wait for finger release.
+// A short tap must never arm or create contextmenu.
 received = null;
 pageOrder = [];
-windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
-await wait(5);
-pointer("pointerdown", 73, 27, 1);
-touch("touchstart", 73, 27);
-await wait(20);
-if (!received || received.clientX !== 73 || received.clientY !== 27) {
-  throw new Error("delayed touch binding failed: " + JSON.stringify(received));
-}
-if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
-  throw new Error("delayed hold order is wrong: " + pageOrder.join(","));
-}
-pointer("pointerup", 73, 27, 0);
-touch("touchend", 73, 27);
-await wait(20);
-if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
-  throw new Error("delayed release duplicated contextmenu: " + pageOrder.join(","));
+pointer("pointerdown", 70, 26, 1);
+touch("touchstart", 70, 26);
+await wait(80);
+pointer("pointerup", 70, 26, 0);
+touch("touchend", 70, 26);
+mouse("mousedown", 70, 26, 1);
+mouse("mouseup", 70, 26, 0);
+mouse("click", 70, 26, 0);
+await wait(620);
+if (received !== null || pageOrder.includes("contextmenu")) {
+  throw new Error("short tap incorrectly became a hold: " + pageOrder.join(","));
 }
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
-if (!diagnostics.includes("Native waits for touchstart: 1")) {
-  throw new Error("native wait was not recorded: " + diagnostics);
+if (!diagnostics.includes("JS trusted hold arms: 1")) {
+  throw new Error("trusted JS hold was not armed: " + diagnostics);
 }
-if (!diagnostics.includes("Native/touch coordinate delta: 27,23")) {
-  throw new Error("coordinate correction was not recorded: " + diagnostics);
+if (!diagnostics.includes("Late native bridge suppressed: 1")) {
+  throw new Error("late native callback was not suppressed: " + diagnostics);
 }
-if (!diagnostics.includes("Release completions: 0")) {
-  throw new Error("bridge still waits for release: " + diagnostics);
+if (!diagnostics.includes("Release completions: 1")) {
+  throw new Error("trusted release/click tail did not complete: " + diagnostics);
 }
-if (!diagnostics.includes("Synthetic press/release: pd=0 md=0 pu=0 mu=0 click=0")) {
-  throw new Error("bridge fabricated low-level events: " + diagnostics);
+if (!diagnostics.includes("pu=0 mu=0 click=0")) {
+  throw new Error("bridge fabricated the release/click tail: " + diagnostics);
 }
 if (!diagnostics.includes("contextmenu*")) {
   throw new Error("trusted-source contextmenu trace missing: " + diagnostics);
 }
+if (!diagnostics.includes("Trusted touch source: true")) {
+  throw new Error("trusted touch source was lost: " + diagnostics);
+}
 
+// Listener removal by original identity must still work on the timer path.
 canvas.removeEventListener("contextmenu", pageContextHandler);
 received = null;
 pageOrder = [];
 pointer("pointerdown", 60, 20, 1);
 touch("touchstart", 60, 20);
-await wait(1);
-windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
-await wait(20);
+await wait(650);
+pointer("pointerup", 60, 20, 0);
+touch("touchend", 60, 20);
+mouse("mousedown", 60, 20, 1);
+mouse("mouseup", 60, 20, 0);
+mouse("click", 60, 20, 0);
+await wait(30);
 if (received !== null) {
   throw new Error("wrapped listener removal identity is broken");
 }
 
-console.log("iOS GeoReseaux Android-timed hold bridge test passed");
+console.log("iOS GeoReseaux trusted-touch arm/release bridge test passed");
