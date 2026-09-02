@@ -161,11 +161,11 @@ function wait(ms = 15) {
 
 function installOrderListeners() {
   for (const type of [
-    "touchstart",
     "pointerdown",
-    "mousedown",
-    "touchend",
+    "touchstart",
     "pointerup",
+    "touchend",
+    "mousedown",
     "mouseup",
     "click",
   ]) {
@@ -173,29 +173,33 @@ function installOrderListeners() {
   }
 }
 
-function androidPressStart(x, y) {
-  // Exact order measured on the working Android CRI-BLO WebView.
-  realTouchEvent("touchstart", x, y);
+// This is the order measured on the user's real iPhone WKWebView diagnostic:
+// trusted pointerdown can arrive before touchstart, while the trusted mouse
+// compatibility tail is delayed until after touchend.
+function iosPressStart(x, y) {
   realPointerEvent("pointerdown", x, y, 1);
-  realMouseEvent("mousedown", x, y, 1);
+  realTouchEvent("touchstart", x, y);
 }
 
-function androidReleaseTail(x, y) {
-  // Exact release tail measured on Android. contextmenu is emitted by the
-  // iOS bridge after this tail, so it must not be manually dispatched here.
-  realTouchEvent("touchend", x, y);
+function iosReleaseBeforeMouseTail(x, y) {
   realPointerEvent("pointerup", x, y, 0);
+  realTouchEvent("touchend", x, y);
+}
+
+function iosTrustedMouseTail(x, y, clickX = x, clickY = y) {
+  realMouseEvent("mousedown", x, y, 1);
   realMouseEvent("mouseup", x, y, 0);
-  realMouseEvent("click", x, y, 0);
+  realMouseEvent("click", clickX, clickY, 0);
 }
 
 canvas.addEventListener("contextmenu", pageContextHandler);
 installOrderListeners();
 
-// Normal WKWebView path: the page sees the physical touch first. The native
-// 600 ms recognizer only ARMS the compatibility gesture. It must not dispatch
-// contextmenu until the user releases and the Android-style release tail ends.
-androidPressStart(82, 31);
+// Normal real-iPhone path. The native hold only arms the bridge. After
+// touchend, contextmenu MUST remain pending until WebKit sends its genuine
+// trusted mouse/click tail. The delayed click is only a readiness signal; the
+// contextmenu must retain the original physical touch coordinates.
+iosPressStart(82, 31);
 await wait(1);
 
 if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
@@ -207,7 +211,16 @@ if (received !== null || pageOrder.includes("contextmenu")) {
   throw new Error(`contextmenu fired before release: ${pageOrder.join(",")}`);
 }
 
-androidReleaseTail(82, 31);
+iosReleaseBeforeMouseTail(82, 31);
+await wait(25);
+
+if (received !== null || pageOrder.includes("contextmenu")) {
+  throw new Error(`contextmenu raced touchend before trusted click: ${pageOrder.join(",")}`);
+}
+
+// Deliberately give the delayed trusted click DIFFERENT coordinates. The
+// bridge must still dispatch contextmenu at the original long-press point.
+iosTrustedMouseTail(82, 31, 7, 9);
 await wait();
 
 const normalFlags = received && [
@@ -221,40 +234,45 @@ if (!received || normalFlags.some((value) => value !== true)) {
   throw new Error(`trusted browser-path facade failed: ${JSON.stringify(received)}`);
 }
 if (received.clientX !== 82 || received.clientY !== 31) {
-  throw new Error(`native estimate replaced real touch coordinates: ${JSON.stringify(received)}`);
+  throw new Error(`delayed click replaced real touch coordinates: ${JSON.stringify(received)}`);
 }
 if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
   throw new Error(`contextmenu shape does not match Android: ${JSON.stringify(received)}`);
 }
 
 const expectedOrder =
-  "touchstart,pointerdown,mousedown,touchend,pointerup,mouseup,click,contextmenu";
+  "pointerdown,touchstart,pointerup,touchend,mousedown,mouseup,click,contextmenu";
 if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`normal Android event order is wrong: ${pageOrder.join(",")}`);
+  throw new Error(`real-iPhone trusted-tail order is wrong: ${pageOrder.join(",")}`);
 }
 
-// Delayed WKWebView path observed on-device: the native recognizer can arrive
-// before DOM touchstart. It must wait, arm once touchstart arrives, and still
-// hold contextmenu until the release tail has completed.
+// Delayed WKWebView path: native recognition can arrive before DOM touchstart.
+// It must wait for touchstart, then still wait through touchend for the genuine
+// trusted click tail instead of creating pointer/mouse events itself.
 received = null;
 pageOrder = [];
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await wait(5);
-androidPressStart(73, 27);
+iosPressStart(73, 27);
 await wait();
 
 if (received !== null || pageOrder.includes("contextmenu")) {
   throw new Error(`delayed path fired contextmenu before release: ${pageOrder.join(",")}`);
 }
 
-androidReleaseTail(73, 27);
+iosReleaseBeforeMouseTail(73, 27);
+await wait(25);
+if (received !== null || pageOrder.includes("contextmenu")) {
+  throw new Error(`delayed path raced touchend before trusted click: ${pageOrder.join(",")}`);
+}
+iosTrustedMouseTail(73, 27, 1, 1);
 await wait();
 
 if (!received || received.clientX !== 73 || received.clientY !== 27) {
   throw new Error(`delayed touch coordinates were not preserved: ${JSON.stringify(received)}`);
 }
 if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`delayed Android event order is wrong: ${pageOrder.join(",")}`);
+  throw new Error(`delayed real-iPhone event order is wrong: ${pageOrder.join(",")}`);
 }
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
@@ -267,23 +285,28 @@ if (!diagnostics.includes("Native/touch coordinate delta: 27,23")) {
 if (!diagnostics.includes("Release completions: 2")) {
   throw new Error(`release completion count is wrong: ${diagnostics}`);
 }
+if (!diagnostics.includes("Synthetic press/release: pd=0 md=0 pu=0 mu=0 click=0")) {
+  throw new Error(`real iPhone path still fabricated pointer/mouse events: ${diagnostics}`);
+}
 if (!diagnostics.includes("contextmenu*")) {
   throw new Error(`trusted-source contextmenu was not recorded: ${diagnostics}`);
 }
 
-// Listener removal must still preserve the page's original listener identity.
+// Listener removal must preserve the page's original listener identity.
 canvas.removeEventListener("contextmenu", pageContextHandler);
 received = null;
 pageOrder = [];
-androidPressStart(60, 20);
+iosPressStart(60, 20);
 await wait(1);
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await wait();
-androidReleaseTail(60, 20);
+iosReleaseBeforeMouseTail(60, 20);
+await wait(25);
+iosTrustedMouseTail(60, 20, 2, 2);
 await wait();
 
 if (received !== null) {
   throw new Error("wrapped context listener was not removed by its original identity");
 }
 
-console.log("iOS GeoReseaux Android-order long-press bridge test passed");
+console.log("iOS GeoReseaux real-WebKit trusted-tail long-press bridge test passed");
