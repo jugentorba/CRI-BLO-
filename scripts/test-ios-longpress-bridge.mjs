@@ -6,7 +6,6 @@ const swiftPath = new URL(
 );
 const swift = readFileSync(swiftPath, "utf8");
 const match = swift.match(/private static let longPressBridgeScript = #\"\"\"([\s\S]*?)\"\"\"#/);
-
 if (!match) throw new Error("iOS long-press bridge script was not found");
 
 class TestPointerEvent extends Event {
@@ -29,11 +28,7 @@ globalThis.CustomEvent = class extends Event {
 };
 globalThis.setInterval = () => 1;
 globalThis.clearInterval = () => {};
-globalThis.getComputedStyle = () => ({
-  display: "block",
-  visibility: "visible",
-  opacity: "1",
-});
+globalThis.getComputedStyle = () => ({ display: "block", visibility: "visible", opacity: "1" });
 
 const documentTarget = new EventTarget();
 documentTarget.querySelectorAll = () => [];
@@ -44,12 +39,7 @@ documentTarget.nodeType = 1;
 documentTarget.tagName = "CANVAS";
 documentTarget.id = "";
 documentTarget.className = "";
-documentTarget.getBoundingClientRect = () => ({
-  left: 0,
-  top: 0,
-  width: 200,
-  height: 100,
-});
+documentTarget.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100 });
 documentTarget.closest = () => null;
 
 const windowTarget = new EventTarget();
@@ -64,8 +54,8 @@ windowTarget.location = { href: "https://sigreseaux.orange.fr/ger/" };
 windowTarget.getSelection = () => ({ removeAllRanges() {} });
 
 const canvas = documentTarget;
-documentTarget.elementsFromPoint = () => [documentTarget];
-documentTarget.elementFromPoint = () => documentTarget;
+documentTarget.elementsFromPoint = () => [canvas];
+documentTarget.elementFromPoint = () => canvas;
 globalThis.window = windowTarget;
 globalThis.document = documentTarget;
 globalThis.location = windowTarget.location;
@@ -82,7 +72,6 @@ function pageContextHandler(event) {
     trusted: event.isTrusted,
     prevented: event.defaultPrevented,
     target: event.target === canvas,
-    currentTarget: event.currentTarget === canvas,
     pointerEvent: event instanceof TestPointerEvent,
     touchSource: Boolean(event.sourceCapabilities?.firesTouchEvents),
     clientX: event.clientX,
@@ -98,45 +87,39 @@ function trustedEvent(event) {
   return event;
 }
 
-function realPointerEvent(type, x, y, buttons) {
-  const event = trustedEvent(
-    new TestPointerEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      clientX: x,
-      clientY: y,
-      screenX: x,
-      screenY: y,
-      pointerId: 9,
-      pointerType: "touch",
-      isPrimary: true,
-      button: 0,
-      buttons,
-      pressure: buttons ? 1 : 0,
-    }),
-  );
-  canvas.dispatchEvent(event);
+function pointer(type, x, y, buttons) {
+  canvas.dispatchEvent(trustedEvent(new TestPointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    pointerId: 9,
+    pointerType: "touch",
+    isPrimary: true,
+    button: 0,
+    buttons,
+    pressure: buttons ? 1 : 0,
+  })));
 }
 
-function realMouseEvent(type, x, y, buttons) {
-  const event = trustedEvent(
-    new TestPointerEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      clientX: x,
-      clientY: y,
-      screenX: x,
-      screenY: y,
-      button: 0,
-      buttons,
-    }),
-  );
-  canvas.dispatchEvent(event);
+function mouse(type, x, y, buttons) {
+  canvas.dispatchEvent(trustedEvent(new TestPointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    button: 0,
+    buttons,
+  })));
 }
 
-function realTouchEvent(type, x, y) {
+function touch(type, x, y) {
   const event = trustedEvent(new Event(type, { bubbles: true, cancelable: true }));
-  const touch = {
+  const point = {
     identifier: 9,
     target: canvas,
     clientX: x,
@@ -146,167 +129,112 @@ function realTouchEvent(type, x, y) {
     screenX: x,
     screenY: y,
   };
-  const active = type === "touchstart" ? [touch] : [];
+  const active = type === "touchstart" ? [point] : [];
   Object.defineProperties(event, {
     touches: { value: active },
     targetTouches: { value: active },
-    changedTouches: { value: [touch] },
+    changedTouches: { value: [point] },
   });
   canvas.dispatchEvent(event);
 }
 
-function wait(ms = 15) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
+for (const type of ["pointerdown", "touchstart", "pointerup", "touchend", "mousedown", "mouseup", "click"]) {
+  canvas.addEventListener(type, () => pageOrder.push(type));
 }
-
-function installOrderListeners() {
-  for (const type of [
-    "pointerdown",
-    "touchstart",
-    "pointerup",
-    "touchend",
-    "mousedown",
-    "mouseup",
-    "click",
-  ]) {
-    canvas.addEventListener(type, () => pageOrder.push(type));
-  }
-}
-
-// This is the order measured on the user's real iPhone WKWebView diagnostic:
-// trusted pointerdown can arrive before touchstart, while the trusted mouse
-// compatibility tail is delayed until after touchend.
-function iosPressStart(x, y) {
-  realPointerEvent("pointerdown", x, y, 1);
-  realTouchEvent("touchstart", x, y);
-}
-
-function iosReleaseBeforeMouseTail(x, y) {
-  realPointerEvent("pointerup", x, y, 0);
-  realTouchEvent("touchend", x, y);
-}
-
-function iosTrustedMouseTail(x, y, clickX = x, clickY = y) {
-  realMouseEvent("mousedown", x, y, 1);
-  realMouseEvent("mouseup", x, y, 0);
-  realMouseEvent("click", clickX, clickY, 0);
-}
-
 canvas.addEventListener("contextmenu", pageContextHandler);
-installOrderListeners();
 
-// Normal real-iPhone path. The native hold only arms the bridge. After
-// touchend, contextmenu MUST remain pending until WebKit sends its genuine
-// trusted mouse/click tail. The delayed click is only a readiness signal; the
-// contextmenu must retain the original physical touch coordinates.
-iosPressStart(82, 31);
+// Working Android behavior: contextmenu happens around the hold threshold while
+// the finger is still down, before pointerup/touchend.
+pointer("pointerdown", 82, 31, 1);
+touch("touchstart", 82, 31);
 await wait(1);
-
 if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
-  throw new Error("native long-press bridge did not accept the hold request");
+  throw new Error("native hold request was rejected");
 }
-await wait();
-
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`contextmenu fired before release: ${pageOrder.join(",")}`);
+await wait(20);
+if (!received) {
+  throw new Error("contextmenu did not fire at native hold: " + pageOrder.join(","));
 }
-
-iosReleaseBeforeMouseTail(82, 31);
-await wait(25);
-
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`contextmenu raced touchend before trusted click: ${pageOrder.join(",")}`);
+if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
+  throw new Error("hold-time order is wrong: " + pageOrder.join(","));
 }
-
-// Deliberately give the delayed trusted click DIFFERENT coordinates. The
-// bridge must still dispatch contextmenu at the original long-press point.
-iosTrustedMouseTail(82, 31, 7, 9);
-await wait();
-
-const normalFlags = received && [
-  received.trusted,
-  received.prevented,
-  received.target,
-  received.pointerEvent,
-  received.touchSource,
-];
-if (!received || normalFlags.some((value) => value !== true)) {
-  throw new Error(`trusted browser-path facade failed: ${JSON.stringify(received)}`);
+if (![received.trusted, received.prevented, received.target, received.pointerEvent, received.touchSource].every(Boolean)) {
+  throw new Error("hold facade is wrong: " + JSON.stringify(received));
 }
 if (received.clientX !== 82 || received.clientY !== 31) {
-  throw new Error(`delayed click replaced real touch coordinates: ${JSON.stringify(received)}`);
+  throw new Error("hold coordinates changed: " + JSON.stringify(received));
 }
 if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
-  throw new Error(`contextmenu shape does not match Android: ${JSON.stringify(received)}`);
+  throw new Error("contextmenu shape is wrong: " + JSON.stringify(received));
 }
 
-const expectedOrder =
-  "pointerdown,touchstart,pointerup,touchend,mousedown,mouseup,click,contextmenu";
-if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`real-iPhone trusted-tail order is wrong: ${pageOrder.join(",")}`);
+// The later physical release and compatibility mouse tail must never duplicate
+// the menu that already fired at hold time.
+pointer("pointerup", 82, 31, 0);
+touch("touchend", 82, 31);
+mouse("mousedown", 82, 31, 1);
+mouse("mouseup", 82, 31, 0);
+mouse("click", 82, 31, 0);
+await wait(30);
+if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
+  throw new Error("release duplicated contextmenu: " + pageOrder.join(","));
+}
+const expected = "pointerdown,touchstart,contextmenu,pointerup,touchend,mousedown,mouseup,click";
+if (pageOrder.join(",") !== expected) {
+  throw new Error("full event order is wrong: " + pageOrder.join(","));
 }
 
-// Delayed WKWebView path: native recognition can arrive before DOM touchstart.
-// It must wait for touchstart, then still wait through touchend for the genuine
-// trusted click tail instead of creating pointer/mouse events itself.
+// WKWebView can occasionally deliver the native recognition just before DOM
+// touchstart. The first real touchstart must bind the true target/point and then
+// fire immediately, not wait for finger release.
 received = null;
 pageOrder = [];
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await wait(5);
-iosPressStart(73, 27);
-await wait();
-
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`delayed path fired contextmenu before release: ${pageOrder.join(",")}`);
-}
-
-iosReleaseBeforeMouseTail(73, 27);
-await wait(25);
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`delayed path raced touchend before trusted click: ${pageOrder.join(",")}`);
-}
-iosTrustedMouseTail(73, 27, 1, 1);
-await wait();
-
+pointer("pointerdown", 73, 27, 1);
+touch("touchstart", 73, 27);
+await wait(20);
 if (!received || received.clientX !== 73 || received.clientY !== 27) {
-  throw new Error(`delayed touch coordinates were not preserved: ${JSON.stringify(received)}`);
+  throw new Error("delayed touch binding failed: " + JSON.stringify(received));
 }
-if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`delayed real-iPhone event order is wrong: ${pageOrder.join(",")}`);
+if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
+  throw new Error("delayed hold order is wrong: " + pageOrder.join(","));
+}
+pointer("pointerup", 73, 27, 0);
+touch("touchend", 73, 27);
+await wait(20);
+if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
+  throw new Error("delayed release duplicated contextmenu: " + pageOrder.join(","));
 }
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
 if (!diagnostics.includes("Native waits for touchstart: 1")) {
-  throw new Error(`delayed native wait was not recorded: ${diagnostics}`);
+  throw new Error("native wait was not recorded: " + diagnostics);
 }
 if (!diagnostics.includes("Native/touch coordinate delta: 27,23")) {
-  throw new Error(`touch coordinate correction was not recorded: ${diagnostics}`);
+  throw new Error("coordinate correction was not recorded: " + diagnostics);
 }
-if (!diagnostics.includes("Release completions: 2")) {
-  throw new Error(`release completion count is wrong: ${diagnostics}`);
+if (!diagnostics.includes("Release completions: 0")) {
+  throw new Error("bridge still waits for release: " + diagnostics);
 }
 if (!diagnostics.includes("Synthetic press/release: pd=0 md=0 pu=0 mu=0 click=0")) {
-  throw new Error(`real iPhone path still fabricated pointer/mouse events: ${diagnostics}`);
+  throw new Error("bridge fabricated low-level events: " + diagnostics);
 }
 if (!diagnostics.includes("contextmenu*")) {
-  throw new Error(`trusted-source contextmenu was not recorded: ${diagnostics}`);
+  throw new Error("trusted-source contextmenu trace missing: " + diagnostics);
 }
 
-// Listener removal must preserve the page's original listener identity.
 canvas.removeEventListener("contextmenu", pageContextHandler);
 received = null;
 pageOrder = [];
-iosPressStart(60, 20);
+pointer("pointerdown", 60, 20, 1);
+touch("touchstart", 60, 20);
 await wait(1);
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
-await wait();
-iosReleaseBeforeMouseTail(60, 20);
-await wait(25);
-iosTrustedMouseTail(60, 20, 2, 2);
-await wait();
-
+await wait(20);
 if (received !== null) {
-  throw new Error("wrapped context listener was not removed by its original identity");
+  throw new Error("wrapped listener removal identity is broken");
 }
 
-console.log("iOS GeoReseaux real-WebKit trusted-tail long-press bridge test passed");
+console.log("iOS GeoReseaux Android-timed hold bridge test passed");
