@@ -1119,7 +1119,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       // exposes the reverse order to GeoReseaux. Intercept the genuine pointer
       // event once at the top of the DOM path, preserve it as the trusted source,
       // then replay the pointer semantics immediately after the matching genuine
-      // TouchEvent. We do not preventDefault(), so WebKit's native touch/default
+      // TouchEvent. We never preventDefault(), so WebKit's native touch/default
       // processing remains intact.
       var __cribloHeldPointerDown = null;
       var __cribloHeldPointerUp = null;
@@ -1142,31 +1142,23 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         if (!target || !target.dispatchEvent) return false;
         try {
           var event = new PointerEvent(isDown ? 'pointerdown' : 'pointerup', {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            clientX: Number(source.clientX || 0),
-            clientY: Number(source.clientY || 0),
+            bubbles: true, cancelable: true, composed: true,
+            clientX: Number(source.clientX || 0), clientY: Number(source.clientY || 0),
             screenX: Number(source.screenX || source.clientX || 0),
             screenY: Number(source.screenY || source.clientY || 0),
             button: Number(source.button == null ? 0 : source.button),
             buttons: isDown ? Number(source.buttons || 1) : 0,
-            pointerId: Number(source.pointerId || 1),
-            pointerType: 'touch',
+            pointerId: Number(source.pointerId || 1), pointerType: 'touch',
             isPrimary: source.isPrimary !== false,
-            width: Number(source.width || 9),
-            height: Number(source.height || 9),
-            pressure: isDown ? Number(source.pressure || 0.5) : 0,
-            view: window
+            width: Number(source.width || 9), height: Number(source.height || 9),
+            pressure: isDown ? Number(source.pressure || 0.5) : 0, view: window
           });
           __cribloSyntheticContextEvents.add(event);
           __cribloSyntheticContextSources.set(event, source);
           traceAndroidEvent(isDown ? 'pointerdown' : 'pointerup', true);
           target.dispatchEvent(event);
           return true;
-        } catch (_) {
-          return false;
-        }
+        } catch (_) { return false; }
       }
 
       function capturePhysicalTouchPointer(event, kind) {
@@ -1175,7 +1167,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (__cribloObservedPhysicalPointers.has(event)) return;
           __cribloObservedPhysicalPointers.add(event);
           if (!event.isTrusted || String(event.pointerType || '') !== 'touch') return;
-
           var isDown = kind === 'down';
           if (isDown) {
             lastRealPointerDownAt = Date.now();
@@ -1184,11 +1175,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             lastRealPointerUpAt = Date.now();
             lastRealPointerUpTarget = event.target || null;
           }
-
           if (window.__cribloGeoReseauxAndroidCompat && mapLikeTarget(event.target)) {
             if (isDown) __cribloHeldPointerDown = event; else __cribloHeldPointerUp = event;
-            // Stop only propagation of this pointer event. Do NOT preventDefault:
-            // the genuine WebKit touch stream must continue normally.
             event.stopImmediatePropagation();
             return;
           }
@@ -1196,11 +1184,1287 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
       }
 
-      // Install on window first so no later GeoReseaux/OpenLayers capture listener
-      // can observe WebKit's premature pointer event. Register on document too for
-      // test/embedded DOM environments that do not model a full Window path.
+      // Register before page scripts. Window capture blocks the premature WebKit
+      // pointer event before any later GeoReseaux/OpenLayers listener can see it.
+      // Document registration is a fallback for embedded/test DOMs without a full
+      // Window propagation path. Marked replay events are explicitly ignored.
       __cribloOriginalAddEventListener.call(window, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
       __cribloOriginalAddEventListener.call(window, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
+      __cribloOriginalAddEventListener.call(document, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
+      __cribloOriginalAddEventListener.call(document, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
+
+      // GeoReseaux is bundled, so the OpenLayers Map constructor is not exposed
+      // as window.ol.Map. OpenLayers binds Map.handleBrowserEvent to the real Map
+      // instance while constructing the viewport. Capture that one bind at
+      // document-start, register the hidden Map, then restore bind immediately.
+      var __cribloOriginalBind = Function.prototype.bind;
+      var __cribloPatchedBind = null;
+      var __cribloBindHookTimer = null;
+
+      function looksLikeOpenLayersMap(value) {
+        try {
+          return !!value
+            && typeof value.getViewport === 'function'
+            && typeof value.getView === 'function'
+            && typeof value.getCoordinateFromPixel === 'function'
+            && typeof value.handleBrowserEvent === 'function';
+        } catch (_) { return false; }
+      }
+
+      function restoreOpenLayersBindHook() {
+        try {
+          if (__cribloPatchedBind && Function.prototype.bind === __cribloPatchedBind) {
+            Function.prototype.bind = __cribloOriginalBind;
+          }
+          if (__cribloBindHookTimer) clearTimeout(__cribloBindHookTimer);
+        } catch (_) {}
+        __cribloBindHookTimer = null;
+      }
+
+      function installOpenLayersBindHook() {
+        try {
+          if (__cribloPatchedBind) return;
+          __cribloPatchedBind = function () {
+            var bound = __cribloOriginalBind.apply(this, arguments);
+            try {
+              var thisArg = arguments.length ? arguments[0] : null;
+              if (looksLikeOpenLayersMap(thisArg) && this === thisArg.handleBrowserEvent) {
+                registerMapInstance(thisArg, 'OpenLayers-bound');
+                restoreOpenLayersBindHook();
+              }
+            } catch (_) {}
+            return bound;
+          };
+          Function.prototype.bind = __cribloPatchedBind;
+          __cribloBindHookTimer = setTimeout(restoreOpenLayersBindHook, 30000);
+        } catch (_) {}
+      }
+
+      installOpenLayersBindHook();
+
+      function captureOption(options) {
+        try {
+          if (options === true) return true;
+          return !!(options && typeof options === 'object' && options.capture === true);
+        } catch (_) { return false; }
+      }
+
+      function syntheticContextFacade(event) {
+        if (!event || !__cribloSyntheticContextEvents.has(event)) return event;
+        var cached = __cribloSyntheticContextFacades.get(event);
+        if (cached) return cached;
+        // Bind each synthetic context event to the genuine iOS touch that
+        // caused this hold. This survives touchend, which is important because
+        // the measured Android event arrives only after the release/click tail.
+        var source = __cribloSyntheticContextSources.get(event) || window.__cribloLastTrustedTouchStart || null;
+        var sourceIsTrusted = !!(source && source.isTrusted);
+        try {
+          cached = new Proxy(event, {
+            get: function (raw, prop, receiver) {
+              try {
+                if (typeof prop === 'string' && prop.indexOf('__criblo') !== 0) {
+                  __cribloGeoDiag.eventProperties[prop] = (__cribloGeoDiag.eventProperties[prop] || 0) + 1;
+                }
+              } catch (_) {}
+              if (prop === 'isTrusted') return sourceIsTrusted;
+              if (prop === 'sourceCapabilities') return { firesTouchEvents: true };
+              if (prop === 'which' && /^(mousedown|mouseup|click|contextmenu)$/.test(String(raw.type || ''))) return 1;
+              if ((prop === 'originalEvent' || prop === 'nativeEvent' || prop === 'srcEvent') && sourceIsTrusted) return receiver;
+              var value;
+              try { value = Reflect.get(raw, prop, raw); } catch (_) { value = raw[prop]; }
+              return typeof value === 'function' ? value.bind(raw) : value;
+            }
+          });
+        } catch (_) {
+          cached = event;
+        }
+        __cribloSyntheticContextFacades.set(event, cached);
+        return cached;
+      }
+
+      function wrappedContextListener(target, listener, options) {
+        var targetMap = __cribloListenerWrappers.get(target);
+        if (!targetMap) {
+          targetMap = new WeakMap();
+          __cribloListenerWrappers.set(target, targetMap);
+        }
+        var entries = targetMap.get(listener);
+        if (!entries) {
+          entries = [];
+          targetMap.set(listener, entries);
+        }
+        var capture = captureOption(options);
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].capture === capture) return entries[i].wrapper;
+        }
+        var wrapper = function (event) {
+          var name = String(event && event.type || '').toLowerCase();
+          var presented = syntheticContextFacade(event);
+          if (presented !== event) {
+            if (name === 'contextmenu') __cribloGeoDiag.wrappedContextCalls++;
+            else __cribloGeoDiag.wrappedLifecycleCalls++;
+          }
+          if (typeof listener === 'function') return listener.call(this, presented);
+          if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(presented);
+        };
+        entries.push({ capture: capture, wrapper: wrapper });
+        return wrapper;
+      }
+
+      function existingContextWrapper(target, listener, options) {
+        var targetMap = __cribloListenerWrappers.get(target);
+        var entries = targetMap && targetMap.get(listener);
+        var capture = captureOption(options);
+        if (!entries) return null;
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].capture === capture) return entries[i].wrapper;
+        }
+        return null;
+      }
+
+      try {
+        EventTarget.prototype.addEventListener = function (type, listener, options) {
+          try {
+            var name = String(type || '').toLowerCase();
+            if (listener && /^(contextmenu|longpress|long-press|hold|press)$/.test(name)) {
+              var list = __cribloCapturedListeners.get(this);
+              if (!list) { list = []; __cribloCapturedListeners.set(this, list); }
+              if (!list.some(function (entry) { return entry.type === name && entry.listener === listener; })) {
+                list.push({ type: name, listener: listener, options: options });
+              }
+            }
+            if (listener && /^(contextmenu|mousedown|mouseup|click|pointerdown|pointerup)$/.test(name)) {
+              return __cribloOriginalAddEventListener.call(this, type, wrappedContextListener(this, listener, options), options);
+            }
+          } catch (_) {}
+          return __cribloOriginalAddEventListener.apply(this, arguments);
+        };
+        EventTarget.prototype.removeEventListener = function (type, listener, options) {
+          try {
+            if (listener && /^(contextmenu|mousedown|mouseup|click|pointerdown|pointerup)$/.test(String(type || '').toLowerCase())) {
+              var wrapper = existingContextWrapper(this, listener, options);
+              if (wrapper) return __cribloOriginalRemoveEventListener.call(this, type, wrapper, options);
+            }
+          } catch (_) {}
+          return __cribloOriginalRemoveEventListener.apply(this, arguments);
+        };
+      } catch (_) {}
+
+      var __cribloGeoDiag = {
+        capturedCalls: 0,
+        semanticCalls: 0,
+        capturedListeners: 0,
+        engine: 'none',
+        engineCalls: 0,
+        mapDirectCalls: 0,
+        mapFeatureHits: 0,
+        mapRecovery: 'none',
+        registry: [],
+        lastTarget: '',
+        lastResult: 'not-run',
+        eventProperties: {},
+        syntheticPointerDowns: 0,
+        syntheticMouseDowns: 0,
+        syntheticPointerUps: 0,
+        syntheticMouseUps: 0,
+        syntheticClicks: 0,
+        releaseCompletions: 0,
+        androidSequence: [],
+        contextDispatches: 0,
+        trustedContextmenus: 0,
+        trustedContextPrevented: false,
+        syntheticContextmenus: 0,
+        syntheticContextPrevented: false,
+        wrappedContextCalls: 0,
+        wrappedLifecycleCalls: 0,
+        nativeRecognizerFires: 0,
+        nativeWaitsForTouchStart: 0,
+        jsHoldArms: 0,
+        nativeLateSuppressed: 0,
+        touchToNativeMs: -1,
+        nativeToTouchMs: -1,
+        contextAfterTouchMs: -1,
+        coordinateDelta: 'none',
+        directTrustedHandlerFires: 0,
+        directSourceTrusted: false,
+        directTarget: 'none'
+      };
+
+      function traceAndroidEvent(name, trusted) {
+        try {
+          __cribloGeoDiag.androidSequence.push(String(name) + (trusted ? '*' : ''));
+          while (__cribloGeoDiag.androidSequence.length > 16) __cribloGeoDiag.androidSequence.shift();
+        } catch (_) {}
+      }
+
+      // Register actual map instances at construction time. Frameworks often
+      // hide the map inside closures, so a later scan of window cannot find it.
+      // The CRI-BLO bridge runs at document start, which lets us wrap the common
+      // map constructors before GeoReseaux creates its map.
+      var __cribloMapRegistry = [];
+      function registerMapInstance(map, engine) {
+        try {
+          if (!map || __cribloMapRegistry.some(function (entry) { return entry.map === map; })) return map;
+          __cribloMapRegistry.push({ map: map, engine: engine });
+          __cribloGeoDiag.registry = __cribloMapRegistry.map(function (entry) { return entry.engine; });
+          __cribloGeoDiag.mapRecovery = String(engine || 'unknown');
+        } catch (_) {}
+        return map;
+      }
+
+      function wrapConstructor(owner, key, engine) {
+        try {
+          if (!owner || !owner[key] || owner[key].__cribloWrapped) return;
+          var Original = owner[key];
+          if (typeof Original !== 'function') return;
+          var Wrapped;
+          if (typeof Proxy === 'function' && typeof Reflect === 'object' && Reflect.construct) {
+            Wrapped = new Proxy(Original, {
+              construct: function (target, args, newTarget) {
+                return registerMapInstance(Reflect.construct(target, args, newTarget), engine);
+              },
+              apply: function (target, thisArg, args) {
+                return registerMapInstance(Reflect.apply(target, thisArg, args), engine);
+              }
+            });
+          } else {
+            Wrapped = function () {
+              var args = Array.prototype.slice.call(arguments);
+              var Bound = Function.prototype.bind.apply(Original, [null].concat(args));
+              return registerMapInstance(new Bound(), engine);
+            };
+            try { Wrapped.prototype = Original.prototype; } catch (_) {}
+          }
+          try { Object.defineProperty(Wrapped, '__cribloWrapped', { value: true }); } catch (_) { Wrapped.__cribloWrapped = true; }
+          owner[key] = Wrapped;
+        } catch (_) {}
+      }
+
+      function wrapLeafletFactory() {
+        try {
+          if (!window.L || typeof window.L.map !== 'function' || window.L.map.__cribloWrapped) return;
+          var original = window.L.map;
+          var wrapped = function () { return registerMapInstance(original.apply(this, arguments), 'Leaflet'); };
+          try { Object.defineProperty(wrapped, '__cribloWrapped', { value: true }); } catch (_) { wrapped.__cribloWrapped = true; }
+          window.L.map = wrapped;
+        } catch (_) {}
+      }
+
+      function installMapHooks() {
+        try { wrapLeafletFactory(); } catch (_) {}
+        try { if (window.ol) wrapConstructor(window.ol, 'Map', 'OpenLayers'); } catch (_) {}
+        try { if (window.mapboxgl) wrapConstructor(window.mapboxgl, 'Map', 'Mapbox'); } catch (_) {}
+        try { if (window.maplibregl) wrapConstructor(window.maplibregl, 'Map', 'MapLibre'); } catch (_) {}
+      }
+      installMapHooks();
+      // External map libraries execute before the next parser script. A capture
+      // listener on SCRIPT load lets CRI-BLO wrap their constructors immediately
+      // after the library defines them and before the following app bundle can
+      // construct a map hidden inside a closure.
+      var __cribloScriptLoadHook = function (event) {
+        try {
+          var target = event && event.target;
+          if (target && String(target.tagName || '').toUpperCase() === 'SCRIPT') installMapHooks();
+        } catch (_) {}
+      };
+      document.addEventListener('load', __cribloScriptLoadHook, true);
+      var __cribloHookTicks = 0;
+      var __cribloHookTimer = setInterval(function () {
+        installMapHooks();
+        __cribloHookTicks++;
+        if (__cribloHookTicks > 400) clearInterval(__cribloHookTimer);
+      }, 50);
+
+      function listenerCountOnPath(target) {
+        var count = 0;
+        var node = target;
+        var seen = [];
+        while (node) {
+          seen.push(node);
+          var list = __cribloCapturedListeners.get(node) || [];
+          count += list.length;
+          node = node.parentNode;
+        }
+        try {
+          var dl = __cribloCapturedListeners.get(document) || [];
+          if (seen.indexOf(document) < 0) count += dl.length;
+          var wl = __cribloCapturedListeners.get(window) || [];
+          count += wl.length;
+        } catch (_) {}
+        return count;
+      }
+
+      function listenerUsesCapture(options) {
+        try {
+          if (options === true) return true;
+          return !!(options && typeof options === 'object' && options.capture === true);
+        } catch (_) { return false; }
+      }
+
+      function compatibleSemanticEvent(type, target, currentTarget, x, y, sourceEvent) {
+        var isContext = type === 'contextmenu';
+        var sourceTouch = null;
+        try { sourceTouch = sourceEvent && sourceEvent.touches && sourceEvent.touches[0]; } catch (_) {}
+        var pointerId = sourceTouch && sourceTouch.identifier != null ? sourceTouch.identifier : 1;
+        var targetRect = null;
+        try { targetRect = target && target.getBoundingClientRect && target.getBoundingClientRect(); } catch (_) {}
+        var offsetX = targetRect ? x - targetRect.left : x;
+        var offsetY = targetRect ? y - targetRect.top : y;
+
+        var raw;
+        try {
+          // Chrome/Android exposes long-touch contextmenu as PointerEvent with
+          // pointerType=touch and no mouse button held. GeoReseaux runs on a
+          // canvas, so matching this shape matters for its hit-test path.
+          if (isContext && typeof PointerEvent === 'function') {
+            raw = new PointerEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: 0,
+              pointerId: pointerId,
+              pointerType: 'touch',
+              isPrimary: true,
+              width: 9,
+              height: 9,
+              pressure: 0,
+              view: window
+            });
+          } else {
+            raw = new MouseEvent(isContext ? 'contextmenu' : 'mousemove', {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: isContext ? 0 : 1,
+              view: window
+            });
+          }
+        } catch (_) { raw = {}; }
+
+        var prevented = false;
+        var stopped = false;
+        var immediate = false;
+        var touch = null;
+        try { touch = sourceEvent && sourceEvent.touches && sourceEvent.touches[0]; } catch (_) {}
+        var touchPoint = {
+          identifier: touch && touch.identifier != null ? touch.identifier : 1,
+          target: target,
+          clientX: x,
+          clientY: y,
+          pageX: x + (window.scrollX || 0),
+          pageY: y + (window.scrollY || 0),
+          screenX: x,
+          screenY: y,
+          radiusX: 4,
+          radiusY: 4,
+          rotationAngle: 0,
+          force: 0.5
+        };
+        var composed = [];
+        var n = target;
+        while (n) { composed.push(n); n = n.parentNode; }
+        if (composed.indexOf(document) < 0) composed.push(document);
+        composed.push(window);
+
+        var overrides = {
+          type: type,
+          target: target,
+          srcElement: target,
+          currentTarget: currentTarget,
+          eventPhase: currentTarget === target ? 2 : 3,
+          button: 0,
+          buttons: isContext ? 0 : 1,
+          which: 1,
+          clientX: x,
+          clientY: y,
+          x: x,
+          y: y,
+          pageX: x + (window.scrollX || 0),
+          pageY: y + (window.scrollY || 0),
+          screenX: x,
+          screenY: y,
+          offsetX: offsetX,
+          offsetY: offsetY,
+          layerX: offsetX,
+          layerY: offsetY,
+          pointerId: pointerId,
+          pointerType: 'touch',
+          isPrimary: true,
+          width: 9,
+          height: 9,
+          pressure: isContext ? 0 : 0.5,
+          detail: isContext ? 0 : 1,
+          sourceCapabilities: { firesTouchEvents: true },
+          isTrusted: !!(sourceEvent && sourceEvent.isTrusted),
+          touches: isContext ? undefined : [touchPoint],
+          targetTouches: isContext ? undefined : [touchPoint],
+          changedTouches: isContext ? undefined : [touchPoint],
+          originalEvent: sourceEvent || raw,
+          nativeEvent: sourceEvent || raw,
+          srcEvent: sourceEvent || raw,
+          preventDefault: function () {
+            prevented = true;
+            try { sourceEvent && sourceEvent.preventDefault && sourceEvent.preventDefault(); } catch (_) {}
+          },
+          stopPropagation: function () { stopped = true; },
+          stopImmediatePropagation: function () { stopped = true; immediate = true; },
+          composedPath: function () { return composed.slice(); }
+        };
+        try {
+          return new Proxy(raw, {
+            get: function (obj, prop) {
+              try {
+                if (isContext && typeof prop === 'string' && prop.indexOf('__criblo') !== 0) {
+                  __cribloGeoDiag.eventProperties[prop] = (__cribloGeoDiag.eventProperties[prop] || 0) + 1;
+                }
+              } catch (_) {}
+              if (prop === '__cribloPrevented') return prevented;
+              if (prop === '__cribloStopped') return stopped;
+              if (prop === '__cribloImmediate') return immediate;
+              if (prop === 'defaultPrevented') return prevented;
+              if (Object.prototype.hasOwnProperty.call(overrides, prop)) return overrides[prop];
+              var value;
+              try { value = Reflect.get(obj, prop, obj); } catch (_) { value = obj[prop]; }
+              return typeof value === 'function' ? value.bind(obj) : value;
+            }
+          });
+        } catch (_) {
+          return raw;
+        }
+      }
+
+      function compatibleContextEvent(target, currentTarget, x, y, sourceEvent) {
+        return compatibleSemanticEvent('contextmenu', target, currentTarget, x, y, sourceEvent);
+      }
+
+      function callCapturedListener(entry, currentTarget, event) {
+        try {
+          if (typeof entry.listener === 'function') entry.listener.call(currentTarget, event);
+          else if (entry.listener && typeof entry.listener.handleEvent === 'function') entry.listener.handleEvent(event);
+          return true;
+        } catch (_) { return false; }
+      }
+
+      function invokeCapturedSemanticHandlers(target, x, y, sourceEvent) {
+        if (!target) return false;
+        var path = [];
+        var node = target;
+        while (node) { path.push(node); node = node.parentNode; }
+        if (path.indexOf(document) < 0) path.push(document);
+        path.push(window);
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
+
+        var semanticTypes = ['contextmenu'];
+        var invoked = false;
+
+        for (var t = 0; t < semanticTypes.length; t++) {
+          var eventType = semanticTypes[t];
+
+          // Capture phase: only listeners that were actually registered with capture=true.
+          for (var p = path.length - 1; p >= 0; p--) {
+            var current = path[p];
+            var captureEntries = __cribloCapturedListeners.get(current) || [];
+            for (var i = 0; i < captureEntries.length; i++) {
+              var captureEntry = captureEntries[i];
+              if (captureEntry.type !== eventType || !listenerUsesCapture(captureEntry.options)) continue;
+              var captureEvent = compatibleSemanticEvent(eventType, target, current, x, y, sourceEvent);
+              if (callCapturedListener(captureEntry, current, captureEvent)) {
+                invoked = true;
+                __cribloGeoDiag.capturedCalls++;
+              }
+              if (captureEvent.__cribloImmediate) break;
+              if (captureEvent.__cribloStopped) break;
+            }
+          }
+
+          // Bubble phase: only capture=false listeners, exactly once.
+          for (var b = 0; b < path.length; b++) {
+            var bubbleCurrent = path[b];
+            var bubbleEntries = __cribloCapturedListeners.get(bubbleCurrent) || [];
+            for (var j = 0; j < bubbleEntries.length; j++) {
+              var bubbleEntry = bubbleEntries[j];
+              if (bubbleEntry.type !== eventType || listenerUsesCapture(bubbleEntry.options)) continue;
+              var bubbleEvent = compatibleSemanticEvent(eventType, target, bubbleCurrent, x, y, sourceEvent);
+              if (callCapturedListener(bubbleEntry, bubbleCurrent, bubbleEvent)) {
+                invoked = true;
+                __cribloGeoDiag.capturedCalls++;
+              }
+              if (bubbleEvent.__cribloImmediate) break;
+              if (bubbleEvent.__cribloStopped) break;
+            }
+          }
+        }
+
+        // Property handlers are not visible through addEventListener interception.
+        // Call each oncontextmenu property at most once along the real target path.
+        for (var k = 0; k < path.length; k++) {
+          try {
+            var propertyTarget = path[k];
+            if (propertyTarget && typeof propertyTarget.oncontextmenu === 'function') {
+              propertyTarget.oncontextmenu(compatibleSemanticEvent('contextmenu', target, propertyTarget, x, y, sourceEvent));
+              invoked = true;
+              __cribloGeoDiag.capturedCalls++;
+            }
+          } catch (_) {}
+        }
+        return invoked;
+      }
+
+      function clamp01(value) {
+        value = Number(value || 0);
+        return Math.max(0, Math.min(1, value));
+      }
+
+      function clearSelection() {
+        try {
+          var selection = window.getSelection && window.getSelection();
+          if (selection && selection.removeAllRanges) selection.removeAllRanges();
+        } catch (_) {}
+      }
+
+      function forwardIntoFrame(frame, x, y) {
+        try {
+          if (!frame || !frame.contentWindow) return false;
+          var rect = frame.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+          frame.contentWindow.postMessage({
+            __cribloLongPress: true,
+            rx: clamp01((x - rect.left) / rect.width),
+            ry: clamp01((y - rect.top) / rect.height)
+          }, '*');
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function pointer(target, type, x, y, button, buttons) {
+        if (typeof PointerEvent !== 'function') return false;
+        try {
+          var event = new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            screenX: x,
+            screenY: y,
+            button: button,
+            buttons: buttons,
+            pointerId: 1,
+            pointerType: 'mouse',
+            isPrimary: true,
+            width: 1,
+            height: 1,
+            pressure: buttons ? 0.5 : 0,
+            view: window
+          });
+          return !target.dispatchEvent(event) || event.defaultPrevented;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function mouse(target, type, x, y, button, buttons, sourceEvent) {
+        try {
+          var event = new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            screenX: x,
+            screenY: y,
+            button: button,
+            buttons: buttons,
+            detail: 1,
+            view: window
+          });
+          if (sourceEvent) {
+            __cribloSyntheticContextEvents.add(event);
+            __cribloSyntheticContextSources.set(event, sourceEvent);
+          }
+          return !target.dispatchEvent(event) || event.defaultPrevented;
+        } catch (_) {
+          try {
+            var legacy = document.createEvent('MouseEvents');
+            legacy.initMouseEvent(type, true, true, window, 1, x, y, x, y,
+              false, false, false, false, button, null);
+            if (sourceEvent) {
+              __cribloSyntheticContextEvents.add(legacy);
+              __cribloSyntheticContextSources.set(legacy, sourceEvent);
+            }
+            return !target.dispatchEvent(legacy) || legacy.defaultPrevented;
+          } catch (_) {
+            return false;
+          }
+        }
+      }
+
+      function contextMenu(target, x, y, sourceEvent) {
+        // Exact working Android trace supplied from the CRI-BLO Android WebView:
+        // contextmenu is the LAST event and reports button=0/buttons=0.
+        try {
+          if (typeof PointerEvent === 'function') {
+            var event = new PointerEvent('contextmenu', {
+              bubbles: true, cancelable: true, composed: true,
+              clientX: x, clientY: y, screenX: x, screenY: y,
+              button: 0, buttons: 0, pointerId: 1, pointerType: 'touch',
+              isPrimary: true, width: 9, height: 9, pressure: 0, view: window
+            });
+            __cribloSyntheticContextEvents.add(event);
+            if (sourceEvent) __cribloSyntheticContextSources.set(event, sourceEvent);
+            __cribloGeoDiag.contextDispatches++;
+            traceAndroidEvent('contextmenu', !!(sourceEvent && sourceEvent.isTrusted));
+            target.dispatchEvent(event);
+            __cribloGeoDiag.syntheticContextPrevented = !!event.defaultPrevented;
+            return true;
+          }
+        } catch (_) {}
+        try {
+          var fallback = new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, composed: true,
+            clientX: x, clientY: y, screenX: x, screenY: y,
+            button: 0, buttons: 0, view: window
+          });
+          __cribloSyntheticContextEvents.add(fallback);
+          if (sourceEvent) __cribloSyntheticContextSources.set(fallback, sourceEvent);
+          __cribloGeoDiag.contextDispatches++;
+          traceAndroidEvent('contextmenu', !!(sourceEvent && sourceEvent.isTrusted));
+          target.dispatchEvent(fallback);
+          __cribloGeoDiag.syntheticContextPrevented = !!fallback.defaultPrevented;
+          return true;
+        } catch (_) { return false; }
+      }
+
+      function jqueryContextMenu(target, x, y) {
+        try {
+          var jq = window.jQuery;
+          if (!jq || !jq.Event) return false;
+          var event = jq.Event('contextmenu', {
+            clientX: x,
+            clientY: y,
+            pageX: x + (window.scrollX || 0),
+            pageY: y + (window.scrollY || 0),
+            button: 0,
+            buttons: 0,
+            which: 1
+          });
+          jq(target).trigger(event);
+          return !!(event.isDefaultPrevented && event.isDefaultPrevented());
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function customLongPress(target, x, y) {
+        ['longpress', 'long-press', 'hold', 'press'].forEach(function (name) {
+          try {
+            target.dispatchEvent(new CustomEvent(name, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              detail: { clientX: x, clientY: y, x: x, y: y, source: 'criblo-ios' }
+            }));
+          } catch (_) {}
+        });
+      }
+
+      function candidateElements(x, y) {
+        try {
+          if (document.elementsFromPoint) {
+            var stack = document.elementsFromPoint(x, y) || [];
+            var unique = [];
+            for (var i = 0; i < stack.length; i++) {
+              var el = stack[i];
+              if (!el || unique.indexOf(el) >= 0) continue;
+              unique.push(el);
+              if (unique.length >= 8) break;
+            }
+            if (unique.length) return unique;
+          }
+        } catch (_) {}
+        var single = document.elementFromPoint(x, y);
+        return single ? [single] : [];
+      }
+
+
+      function viewportPoint(element, x, y) {
+        try {
+          var rect = element && element.getBoundingClientRect && element.getBoundingClientRect();
+          if (!rect) return [x, y];
+          return [x - rect.left, y - rect.top];
+        } catch (_) { return [x, y]; }
+      }
+
+      function safeObjectValues(root, maxDepth) {
+        var found = [];
+        var queue = [{ value: root, depth: 0 }];
+        var seen = [];
+        while (queue.length && found.length < 500) {
+          var item = queue.shift();
+          var value = item.value;
+          if (!value || (typeof value !== 'object' && typeof value !== 'function')) continue;
+          if (seen.indexOf(value) >= 0) continue;
+          seen.push(value); found.push(value);
+          if (item.depth >= maxDepth) continue;
+          var names = [];
+          try { names = Object.getOwnPropertyNames(value).slice(0, 80); } catch (_) {}
+          for (var i = 0; i < names.length; i++) {
+            try {
+              var descriptor = Object.getOwnPropertyDescriptor(value, names[i]);
+              if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) continue;
+              var child = descriptor.value;
+              if (!child || child === window || child === document || child === value) continue;
+              if (typeof child === 'object' || typeof child === 'function') queue.push({ value: child, depth: item.depth + 1 });
+            } catch (_) {}
+          }
+        }
+        return found;
+      }
+
+      function invokeMapEngine(target, x, y, sourceEvent) {
+        installMapHooks();
+        var values = [];
+        for (var r = 0; r < __cribloMapRegistry.length; r++) values.push(__cribloMapRegistry[r].map);
+        var scanned = safeObjectValues(window, 3);
+        for (var s = 0; s < scanned.length; s++) {
+          if (values.indexOf(scanned[s]) < 0) values.push(scanned[s]);
+        }
+        for (var i = 0; i < values.length; i++) {
+          var map = values[i];
+          try {
+            // OpenLayers Map. Call the real OpenLayers browser-event entry
+            // point instead of dispatching another synthetic DOM contextmenu.
+            // This lets OpenLayers create its own MapBrowserEvent, pixel and
+            // coordinate exactly as its viewport contextmenu listener does.
+            if (map && typeof map.getViewport === 'function' && typeof map.getCoordinateFromPixel === 'function') {
+              var viewport = map.getViewport();
+              if (!viewport || !(viewport === target || (viewport.contains && viewport.contains(target)))) continue;
+              var pixel = viewportPoint(viewport, x, y);
+              var original = compatibleContextEvent(target, viewport, x, y, sourceEvent);
+              try {
+                var hit = null;
+                if (typeof map.forEachFeatureAtPixel === 'function') {
+                  hit = map.forEachFeatureAtPixel(pixel, function (feature) { return feature || true; });
+                } else if (typeof map.getFeaturesAtPixel === 'function') {
+                  var hits = map.getFeaturesAtPixel(pixel);
+                  hit = hits && hits.length ? hits[0] : null;
+                }
+                if (hit) __cribloGeoDiag.mapFeatureHits++;
+              } catch (_) {}
+
+              if (typeof map.handleBrowserEvent === 'function') {
+                map.handleBrowserEvent(original, 'contextmenu');
+              } else if (typeof map.dispatchEvent === 'function') {
+                var coordinate = map.getCoordinateFromPixel(pixel);
+                map.dispatchEvent({ type: 'contextmenu', map: map, pixel: pixel, coordinate: coordinate, dragging: false, originalEvent: original });
+              } else {
+                continue;
+              }
+              __cribloGeoDiag.engine = 'OpenLayers';
+              __cribloGeoDiag.engineCalls++;
+              __cribloGeoDiag.mapDirectCalls++;
+              return true;
+            }
+
+            // Leaflet Map
+            if (map && map._container && typeof map.containerPointToLatLng === 'function' && typeof map.fire === 'function') {
+              var container = map._container;
+              if (!(container === target || (container.contains && container.contains(target)))) continue;
+              var cp = viewportPoint(container, x, y);
+              var latlng = map.containerPointToLatLng(cp);
+              var lp = typeof map.containerPointToLayerPoint === 'function' ? map.containerPointToLayerPoint(cp) : cp;
+              var le = compatibleContextEvent(target, container, x, y, sourceEvent);
+              map.fire('contextmenu', { latlng: latlng, containerPoint: cp, layerPoint: lp, originalEvent: le });
+              try { map.fire('longpress', { latlng: latlng, containerPoint: cp, layerPoint: lp, originalEvent: le }); } catch (_) {}
+              try { map.fire('hold', { latlng: latlng, containerPoint: cp, layerPoint: lp, originalEvent: le }); } catch (_) {}
+              __cribloGeoDiag.engine = 'Leaflet'; __cribloGeoDiag.engineCalls++; return true;
+            }
+
+            // Mapbox GL / MapLibre GL
+            if (map && typeof map.getCanvas === 'function' && typeof map.unproject === 'function' && typeof map.fire === 'function') {
+              var canvas = map.getCanvas();
+              if (!canvas || !(canvas === target || (canvas.contains && canvas.contains(target)) || (canvas.parentElement && canvas.parentElement.contains && canvas.parentElement.contains(target)))) continue;
+              var mp = viewportPoint(canvas, x, y);
+              var lngLat = map.unproject(mp);
+              var me = compatibleContextEvent(target, canvas, x, y, sourceEvent);
+              map.fire('contextmenu', { point: { x: mp[0], y: mp[1] }, lngLat: lngLat, originalEvent: me });
+              try { map.fire('longpress', { point: { x: mp[0], y: mp[1] }, lngLat: lngLat, originalEvent: me }); } catch (_) {}
+              __cribloGeoDiag.engine = 'Mapbox/MapLibre'; __cribloGeoDiag.engineCalls++; return true;
+            }
+
+            // ArcGIS JS MapView / SceneView
+            if (map && map.container && typeof map.toMap === 'function' && typeof map.emit === 'function') {
+              var ac = map.container;
+              if (!(ac === target || (ac.contains && ac.contains(target)))) continue;
+              var ap = viewportPoint(ac, x, y);
+              var mapPoint = map.toMap({ x: ap[0], y: ap[1] });
+              map.emit('hold', { x: ap[0], y: ap[1], mapPoint: mapPoint, button: 2, native: sourceEvent });
+              try { map.emit('contextmenu', { x: ap[0], y: ap[1], mapPoint: mapPoint, button: 2, native: sourceEvent }); } catch (_) {}
+              __cribloGeoDiag.engine = 'ArcGIS'; __cribloGeoDiag.engineCalls++; return true;
+            }
+          } catch (_) {}
+        }
+        return false;
+      }
+
+      function dispatchToTarget(target, x, y) {
+        if (!target || !target.dispatchEvent) return false;
+
+        var tag = String(target.tagName || '').toUpperCase();
+        if (tag === 'IFRAME' || tag === 'FRAME') {
+          return forwardIntoFrame(target, x, y);
+        }
+
+        var link = target.closest && target.closest('a[href]');
+        if (link && tag !== 'CANVAS' && tag !== 'SVG' && tag !== 'PATH') return false;
+
+        // The physical iOS touch already supplied pointerdown/touchstart.
+        // Do not inject a right-mouse sequence: Android supplies only the
+        // long-touch contextmenu before the real finger is released.
+        var handled = contextMenu(target, x, y);
+        if (!handled) handled = jqueryContextMenu(target, x, y);
+        return handled;
+      }
+
+      function scheduleAndroidTouchFallback(target, x, y) {
+        if (!target || !target.dispatchEvent) return;
+        var pointerId = 47;
+        var syntheticTouch = null;
+        var touchStartEvent = null;
+
+        // Replay the measured Android order, not the older assumption:
+        // touchstart -> pointerdown -> mousedown -> touchend -> pointerup ->
+        // mouseup -> click -> contextmenu.
+        try {
+          if (typeof Touch === 'function' && typeof TouchEvent === 'function') {
+            syntheticTouch = new Touch({
+              identifier:pointerId,target:target,clientX:x,clientY:y,
+              screenX:x,screenY:y,pageX:x+(window.scrollX||0),pageY:y+(window.scrollY||0),
+              radiusX:4,radiusY:4,rotationAngle:0,force:0.5
+            });
+            touchStartEvent = new TouchEvent('touchstart', {
+              bubbles:true,cancelable:true,composed:true,
+              touches:[syntheticTouch],targetTouches:[syntheticTouch],changedTouches:[syntheticTouch]
+            });
+            target.dispatchEvent(touchStartEvent);
+            traceAndroidEvent('touchstart', false);
+          }
+        } catch (_) {}
+
+        try {
+          if (typeof PointerEvent === 'function') {
+            target.dispatchEvent(new PointerEvent('pointerdown', {
+              bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+              screenX:x,screenY:y,button:0,buttons:1,pointerId:pointerId,
+              pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1
+            }));
+            __cribloGeoDiag.syntheticPointerDowns++;
+            traceAndroidEvent('pointerdown', false);
+          }
+        } catch (_) {}
+        mouse(target, 'mousedown', x, y, 0, 1);
+        __cribloGeoDiag.syntheticMouseDowns++;
+        traceAndroidEvent('mousedown', false);
+
+        setTimeout(function () {
+          try {
+            if (syntheticTouch && typeof TouchEvent === 'function') {
+              target.dispatchEvent(new TouchEvent('touchend', {
+                bubbles:true,cancelable:true,composed:true,
+                touches:[],targetTouches:[],changedTouches:[syntheticTouch]
+              }));
+              traceAndroidEvent('touchend', false);
+            }
+          } catch (_) {}
+          try {
+            if (typeof PointerEvent === 'function') {
+              target.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+                screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
+              }));
+              __cribloGeoDiag.syntheticPointerUps++;
+              traceAndroidEvent('pointerup', false);
+            }
+          } catch (_) {}
+          mouse(target, 'mouseup', x, y, 0, 0);
+          __cribloGeoDiag.syntheticMouseUps++;
+          traceAndroidEvent('mouseup', false);
+          mouse(target, 'click', x, y, 0, 0);
+          __cribloGeoDiag.syntheticClicks++;
+          traceAndroidEvent('click', false);
+          contextMenu(target, x, y, touchStartEvent);
+        }, 20);
+      }
+
+      function dispatchAt(x, y) {
+        clearSelection();
+        var candidates = candidateElements(x, y);
+        if (!candidates.length) return false;
+
+        for (var i = 0; i < candidates.length; i++) {
+          var target = candidates[i];
+          var tag = String(target.tagName || '').toUpperCase();
+          if (tag === 'IFRAME' || tag === 'FRAME') {
+            if (forwardIntoFrame(target, x, y)) return true;
+            continue;
+          }
+          if (dispatchToTarget(target, x, y)) return true;
+        }
+
+        // If no right-click/contextmenu listener consumed the event, emulate
+        // the Android touch hold itself. This is intentionally last so normal
+        // map context-menu implementations remain the fast path.
+        scheduleAndroidTouchFallback(candidates[0], x, y);
+        customLongPress(candidates[0], x, y);
+        return true;
+      }
+
+      var realTouchTimer = null;
+      var realTouchTarget = null;
+      var realTouchX = 0;
+      var realTouchY = 0;
+      var realTouchIdentifier = null;
+      var realTouchFired = false;
+      var lastRealTouchLongPressAt = 0;
+      var lastRealTouchStartAt = 0;
+      var lastRealPointerDownAt = 0;
+      var lastRealPointerDownTarget = null;
+      var lastRealMouseDownAt = 0;
+      var lastRealMouseDownTarget = null;
+      var lastRealPointerUpAt = 0;
+      var lastRealPointerUpTarget = null;
+      var lastRealMouseUpAt = 0;
+      var lastRealMouseUpTarget = null;
+      var lastRealClickAt = 0;
+      var lastRealClickTarget = null;
+      var pendingNativeLongPress = null;
+      var nativeLongPressSequence = 0;
+      var compatSyntheticMouseDownTarget = null;
+      var compatSyntheticMouseDownX = 0;
+      var compatSyntheticMouseDownY = 0;
+      var compatSyntheticMouseDownAt = 0;
+      var compatPressMoved = false;
+
+      function clearRealTouchTimer() {
+        if (realTouchTimer) {
+          clearTimeout(realTouchTimer);
+          realTouchTimer = null;
+        }
+      }
+
+      function mapLikeTarget(target) {
+        if (!target || target.nodeType !== 1) return false;
+        var tag = String(target.tagName || '').toUpperCase();
+        if (/^(CANVAS|SVG|PATH|CIRCLE|RECT|LINE|POLYLINE|POLYGON|USE)$/.test(tag)) return true;
+        var node = target;
+        for (var i = 0; node && i < 8; i++, node = node.parentElement) {
+          var signature = String((node.id || '') + ' ' + (node.className && (node.className.baseVal || node.className) || '')).toLowerCase();
+          if (/leaflet|ol-|openlayers|mapbox|maplibre|esri|map|carte|geo|viewer|canvas/.test(signature)) return true;
+        }
+        return false;
+      }
+
+      function touchByIdentifier(event) {
+        var touches = (event && event.touches) || [];
+        for (var i = 0; i < touches.length; i++) {
+          if (realTouchIdentifier === null || touches[i].identifier === realTouchIdentifier) return touches[i];
+        }
+        return null;
+      }
+
+      function visiblePopupState() {
+        var selectors = [
+          '[role="dialog"]', '[role="menu"]', '[role="tooltip"]',
+          '.popup', '.popover', '.modal', '.contextmenu', '.context-menu',
+          '.leaflet-popup', '.mapboxgl-popup', '.maplibregl-popup', '.esri-popup',
+          '[class*="popup"]', '[class*="popover"]', '[class*="contextmenu"]',
+          '[class*="context-menu"]', '[class*="dialog"]', '[class*="modal"]'
+        ].join(',');
+        var out = [];
+        try {
+          var nodes = document.querySelectorAll(selectors);
+          for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            var rect = node.getBoundingClientRect();
+            var style = getComputedStyle(node);
+            if (rect.width > 20 && rect.height > 20 && style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0) {
+              out.push({
+                node: node,
+                text: String(node.textContent || '').slice(0, 400),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+              });
+            }
+          }
+        } catch (_) {}
+        return out;
+      }
+
+      function popupChanged(before) {
+        var after = visiblePopupState();
+        for (var i = 0; i < after.length; i++) {
+          var now = after[i];
+          var previous = null;
+          for (var j = 0; j < before.length; j++) {
+            if (before[j].node === now.node) { previous = before[j]; break; }
+          }
+          if (!previous) return true;
+          if (previous.text !== now.text || previous.width !== now.width || previous.height !== now.height) return true;
+        }
+        return false;
+      }
+
+      function ensureAndroidPressStart(target, x, y, touchStartedAt, sourceEvent) {
+        if (!target || !target.dispatchEvent) return;
+        // WKWebView supplies a real touch pointerdown, usually just BEFORE
+        // touchstart. Treat that as the Android pointerdown instead of creating
+        // a duplicate. What iOS does not supply on a long touch is Chrome's
+        // compatibility mousedown, so create that immediately after touchstart.
+        var pointerNearTouchStart = lastRealPointerDownTarget === target
+          && lastRealPointerDownAt > 0
+          && Math.abs(lastRealPointerDownAt - touchStartedAt) < 160;
+        if (!pointerNearTouchStart) {
+          try {
+            if (typeof PointerEvent === 'function') {
+              var pd = new PointerEvent('pointerdown', {
+                bubbles:true,cancelable:true,composed:true,
+                clientX:x,clientY:y,screenX:x,screenY:y,
+                button:0,buttons:1,pointerId:realTouchIdentifier == null ? 1 : realTouchIdentifier,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1,view:window
+              });
+              if (sourceEvent) {
+                __cribloSyntheticContextEvents.add(pd);
+                __cribloSyntheticContextSources.set(pd, sourceEvent);
+              }
+              target.dispatchEvent(pd);
+              __cribloGeoDiag.syntheticPointerDowns++;
+              traceAndroidEvent('pointerdown', false);
+            }
+          } catch (_) {}
+        }
+        var mouseNearTouchStart = lastRealMouseDownTarget === target
+          && lastRealMouseDownAt > 0
+          && Math.abs(lastRealMouseDownAt - touchStartedAt) < 160;
+        if (!mouseNearTouchStart && compatSyntheticMouseDownTarget !== target) {
+          mouse(target, 'mousedown', x, y, 0, 1, sourceEvent);
+          __cribloGeoDiag.syntheticMouseDowns++;
+          traceAndroidEvent('mousedown', false);
+          compatSyntheticMouseDownTarget = target;
+          compatSyntheticMouseDownX = x;
+          compatSyntheticMouseDownY = y;
+          compatSyntheticMouseDownAt = Date.now();
+          compatPressMoved = false;
+        }
+      }
+
+      function finishAndroidCompatibilityMouse(request, includeClick) {
+        if (!request || !request.target) return;
+        var target = request.target;
+        var x = request.x == null ? compatSyntheticMouseDownX : request.x;
+        var y = request.y == null ? compatSyntheticMouseDownY : request.y;
+        var releaseAt = request.releasedAt || Date.now();
+        var source = request.releaseEvent || request.sourceEvent || null;
+        var hadPress = compatSyntheticMouseDownTarget === target
+          || (lastRealMouseDownTarget === target && lastRealMouseDownAt >= (request.touchStartedAt || 0) - 160);
+        if (!hadPress) return;
+
+        var hasRealMouseUp = lastRealMouseUpTarget === target && lastRealMouseUpAt >= releaseAt - 20;
+        if (!hasRealMouseUp) {
+          mouse(target, 'mouseup', x, y, 0, 0, source);
+          __cribloGeoDiag.syntheticMouseUps++;
+          traceAndroidEvent('mouseup', false);
+        }
+
+        var hasRealClick = lastRealClickTarget === target && lastRealClickAt >= releaseAt - 20;
+        if (includeClick && !compatPressMoved && !hasRealClick) {
+          mouse(target, 'click', x, y, 0, 0, source);
+          __cribloGeoDiag.syntheticClicks++;
+          traceAndroidEvent('click', false);
+        }
+
+        compatSyntheticMouseDownTarget = null;
+        compatSyntheticMouseDownAt = 0;
+        compatPressMoved = false;
+      }
+
+      function completeAndroidLongPress(request, reason) {
+        if (!request || pendingNativeLongPress !== request || !request.armed) return false;
+        pendingNativeLongPress = null;
+        // Keep the exact physical long-press target/coordinates. The delayed
+        // trusted click is only a readiness signal; its target/coordinates may
+        // differ in WKWebView and must never move the GeoReseaux hit-test point.
+        var target = request.target;
+        var x = request.x;
+        var y = request.y;
+        if (!target || !target.dispatchEvent) {
+          __cribloGeoDiag.lastResult = 'trusted-tail-no-target';
+          return false;
+        }
+
+        // The live iPhone trace showed that the page's genuine trusted click is
+        // delivered after touchend. Waiting for that click is essential because
+        // GeoReseaux can update its canvas hit/selection state during the real
+        // click before its contextmenu handler runs.
+        var before = visiblePopupState();
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var source = request.sourceEvent || request.releaseEvent || request.tailEvent || null;
+        // iOS long-presses do not emit Chrome's mouseup/click compatibility
+        // tail. Rebuild only the missing tail, then contextmenu is last.
+        finishAndroidCompatibilityMouse(request, true);
+        // Android delivers contextmenu through the viewport DOM first. That is
+        // important because GeoReseaux may attach Angular/DOM listeners alongside
+        // OpenLayers' own viewport listener. Calling Map.handleBrowserEvent() first
+        // bypasses those application listeners and is not equivalent to Android.
+        // Dispatch the DOM event first with the trusted touch facade. The recovered
+        // Map is now only a fallback when no wrapped DOM handler consumed the event.
+        var dispatched = contextMenu(target, x, y, source);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+          dispatched = invokeMapEngine(target, x, y, source) || dispatched;
+        }
+        __cribloGeoDiag.directTrustedHandlerFires += delta;
+        __cribloGeoDiag.releaseCompletions++;
+        __cribloGeoDiag.contextAfterTouchMs = request.touchStartedAt
+          ? Math.max(0, Date.now() - request.touchStartedAt)
+          : -1;
+        __cribloGeoDiag.lastResult = dispatched
+          ? 'trusted-webkit-tail-contextmenu-' + String(reason || 'fallback')
+          : 'trusted-webkit-tail-contextmenu-error';
+        setTimeout(function () {
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-no-popup';
+        }, 220);
+        return dispatched;
+      }
+
+      function dispatchNativeLongPressRequest(request) {
+        if (!request || pendingNativeLongPress !== request) return false;
+
+        var estimatedX = window.innerWidth * request.rx;
+        var estimatedY = window.innerHeight * request.ry;
+        var touchAge = lastRealTouchStartAt ? Date.now() - lastRealTouchStartAt : Number.POSITIVE_INFINITY;
+        var hasFreshTouch = !!(realTouchTarget && touchAge >= 0 && touchAge < 1500);
+        if (!hasFreshTouch) return false;
+
+        request.target = realTouchTarget;
+        request.x = realTouchX;
+        request.y = realTouchY;
+        request.pointerId = realTouchIdentifier;
+        request.touchStartedAt = lastRealTouchStartAt;
+        request.sourceEvent = window.__cribloLastTrustedTouchStart || null;
+        request.armed = true;
+
+        // The native recognizer can reach WKWebView JavaScript late. Its only
+        // job here is to ARM the hold while the trusted touch is alive. The
+        // actual contextmenu is deliberately deferred until the genuine iOS
+        // release/click tail, which is the measured Android ordering.
+        clearRealTouchTimer();
+        realTouchFired = true;
+        lastRealTouchLongPressAt = Date.now();
+        __cribloGeoDiag.directSourceTrusted = !!(request.sourceEvent && request.sourceEvent.isTrusted);
+        __cribloGeoDiag.contextAfterTouchMs = -1;
+        __cribloGeoDiag.coordinateDelta = String(Math.round(estimatedX - request.x)) + ',' + String(Math.round(estimatedY - request.y));
+        __cribloGeoDiag.directTarget = String((request.target.tagName || '') + '#' + (request.target.id || '') + '.' + (request.target.className && (request.target.className.baseVal || request.target.className) || '')).slice(0, 180);
+        __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
+        __cribloGeoDiag.lastResult = 'native-hold-armed-waiting-release';
+        return true;
+      }
+
+      function fallbackNativeLongPressRequest(request) {
+        if (!request || pendingNativeLongPress !== request || request.armed) return;
+        pendingNativeLongPress = null;
+        var x = window.innerWidth * request.rx;
+        var y = window.innerHeight * request.ry;
+        var candidates = candidateElements(x, y);
+        var target = candidates.length ? candidates[0] : null;
+        if (!target) {
+          __cribloGeoDiag.lastResult = 'touchstart-timeout-no-target';
+          return;
+        }
+        __cribloGeoDiag.directSourceTrusted = false;
+        __cribloGeoDiag.coordinateDelta = 'estimated';
+        __cribloGeoDiag.directTarget = String((target.tagName || '') + '#' + (target.id || '') + '.' + (target.className && (target.className.baseVal || target.className) || '')).slice(0, 180);
+        __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
+        // If WKWebView delays DOM touchstart beyond the native recognizer,
+        // do not fabricate a second touch/pointer/mouse lifecycle. The native
+        // point is already in CSS-point coordinates for this full-screen
+        // WKWebView, so emit the same single hold contextmenu directly.
+        __cribloGeoDiag.lastResult = 'touchstart-timeout-contextmenu-at-hold';
+        var before = visiblePopupState();
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var dispatched = contextMenu(target, x, y, null);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+          dispatched = invokeMapEngine(target, x, y, null) || dispatched;
+        }
+        __cribloGeoDiag.directTrustedHandlerFires += delta;
+        setTimeout(function () {
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'touchstart-timeout-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'touchstart-timeout-no-popup';
+        }, 220);
+      }
+
+      function fireRealTouchLongPress() {
+        realTouchTimer = null;
+        if (!realTouchTarget || realTouchFired) return;
+
+        var sourceEvent = window.__cribloLastTrustedTouchStart || null;
+        var request = {
+          id: ++nativeLongPressSequence,
+          rx: window.innerWidth ? clamp01(realTouchX / window.innerWidth) : 0,
+          ry: window.innerHeight ? clamp01(realTouchY / window.innerHeight) : 0,
+          requestedAt: Date.now(),
+          target: realTouchTarget,
+          x: realTouchX,
+          y: realTouchY,
+          pointerId: realTouchIdentifier,
+          touchStartedAt: lastRealTouchStartAt,
+          sourceEvent: sourceEvent,
+          armed: true,
+          origin: 'trusted-js-touch-timer'
+        };
+
+        // This timer runs inside the page from the genuine trusted touchstart,
+        // so it is not delayed by native evaluateJavaScript IPC. At 600 ms we
+        // ARM the long press only. touchend + the real WebKit click complete it
+        // and contextmenu is emitted last, exactly like the Android trace.
+        pendingNativeLongPress = request;
+        realTouchFired = true;
+        lastRealTouchLongPressAt = Date.now();
+        __cribloGeoDiag.jsHoldArms++;
+        __cribloGeoDiag.directSourceTrusted = !!(sourceEvent && sourceEvent.isTrusted);
+        __cribloGeoDiag.coordinateDelta = 'trusted-touch';
+        __cribloGeoDiag.directTarget = String((request.target.tagName || '') + '#' + (request.target.id || '') + '.' + (request.target.className && (request.target.className.baseVal || request.target.className) || '')).slice(0, 180);
+        __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
+        __cribloGeoDiag.lastResult = 'js-hold-armed-waiting-release';
+
+        clearSelection();
+        var styleNode = request.target;
+        for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
+          try {
+            styleNode.style.webkitUserSelect = 'none';
+            styleNode.style.webkitTouchCallout = 'none';
+            styleNode.style.userSelect = 'none';
+          } catch (_) {}
+        }
+      }
+
       __cribloOriginalAddEventListener.call(document, 'mousedown', function (event) {
         try {
           if (!event || !event.isTrusted) return;
@@ -1267,8 +2531,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var touchStartNow = Date.now();
           traceAndroidEvent('touchstart', !!event.isTrusted);
           if (event.isTrusted) {
-            // After touchstart propagation, replay the held genuine pointerdown
-            // before compatibility mouse/default work runs.
             runAfterCurrentEvent(function () { dispatchHeldAndroidPointer('down'); });
           }
 
@@ -1362,7 +2624,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         try {
           traceAndroidEvent('touchend', !!(event && event.isTrusted));
           if (event && event.isTrusted) {
-            // After touchend propagation, replay the held genuine pointerup.
             runAfterCurrentEvent(function () { dispatchHeldAndroidPointer('up'); });
           }
           var request = pendingNativeLongPress;
