@@ -1,0 +1,69 @@
+name: Validate GeoReseaux HTTP user-agent parity
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - scripts/patch-georeso-http-ua-parity.mjs
+      - .github/workflows/apply-georeso-http-ua-parity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: criblo-master-spec-v1
+
+jobs:
+  patch-test-build:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Apply HTTP/JS Android identity parity fix
+        run: |
+          set -euxo pipefail
+          node scripts/patch-georeso-http-ua-parity.mjs
+          git diff --check
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Lint
+        run: npm run lint
+      - name: Test long-press bridge
+        run: npm run test:ios-longpress-bridge
+      - name: Test GeoReseaux HTTP/JS identity parity
+        run: npm run test:ios-georeseaux-ua-parity
+
+      - name: Generate and sync iOS
+        run: |
+          npx cap add ios
+          npx cap sync ios
+          node scripts/patch-ios-info.mjs
+      - name: Build iOS simulator
+        run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Build unsigned iPhone app
+        run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$PWD/ios-device-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Commit validated source and durable parity test
+        run: |
+          set -euxo pipefail
+          rm -f scripts/patch-georeso-http-ua-parity.mjs
+          rm -f .github/workflows/apply-georeso-http-ua-parity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Align GeoReseaux HTTP and JS Android identity"
+          git push origin HEAD:${TARGET_BRANCH}
