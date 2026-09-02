@@ -2242,9 +2242,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // iOS long-presses do not emit Chrome's mouseup/click compatibility
         // tail. Rebuild only the missing tail, then contextmenu is last.
         finishAndroidCompatibilityMouse(request, true);
-        var dispatched = invokeMapEngine(target, x, y, source);
-        if (!dispatched) dispatched = contextMenu(target, x, y, source);
+        // Android delivers contextmenu through the viewport DOM first. That is
+        // important because GeoReseaux may attach Angular/DOM listeners alongside
+        // OpenLayers' own viewport listener. Calling Map.handleBrowserEvent() first
+        // bypasses those application listeners and is not equivalent to Android.
+        // Dispatch the DOM event first with the trusted touch facade. The recovered
+        // Map is now only a fallback when no wrapped DOM handler consumed the event.
+        var dispatched = contextMenu(target, x, y, source);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+          dispatched = invokeMapEngine(target, x, y, source) || dispatched;
+        }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
         __cribloGeoDiag.contextAfterTouchMs = request.touchStartedAt
@@ -2317,9 +2325,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.lastResult = 'touchstart-timeout-contextmenu-at-hold';
         var before = visiblePopupState();
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        var dispatched = invokeMapEngine(target, x, y, null);
-        if (!dispatched) dispatched = contextMenu(target, x, y, null);
+        var dispatched = contextMenu(target, x, y, null);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+          dispatched = invokeMapEngine(target, x, y, null) || dispatched;
+        }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         setTimeout(function () {
           if (popupChanged(before)) __cribloGeoDiag.lastResult = 'touchstart-timeout-popup';

@@ -151,11 +151,20 @@ const hiddenMap = {
   forEachFeatureAtPixel(pixel, callback) { return callback({ id: 'fixture-feature' }); },
   handleBrowserEvent(event, type) {
     directMapCalls += 1;
-    directMapEvent = { type, x: event.clientX, y: event.clientY, trusted: event.isTrusted };
+    directMapEvent = { type: type || event.type, x: event.clientX, y: event.clientY, trusted: event.isTrusted };
   },
 };
 const hiddenBound = hiddenMap.handleBrowserEvent.bind(hiddenMap);
 if (typeof hiddenBound !== 'function') throw new Error('hidden OpenLayers bind fixture failed');
+let geoDomCalls = 0;
+let geoDomTrusted = false;
+canvas.addEventListener('contextmenu', (event) => {
+  geoDomCalls += 1;
+  geoDomTrusted = event.isTrusted === true && Boolean(event.originalEvent && event.originalEvent.isTrusted);
+});
+// This is the exact shape OpenLayers uses: a DOM contextmenu listener on the
+// viewport which forwards into map.handleBrowserEvent.
+canvas.addEventListener('contextmenu', hiddenBound);
 
 const contextBefore = Number((windowTarget.__cribloGeoDiagnosticsText().match(/Context events: (\d+)/) || [])[1] || 0);
 order.length = 0;
@@ -167,14 +176,14 @@ await wait(650);
 pointer("pointerup", 91, 42, 0);
 touch("touchend", 91, 42);
 await wait(40);
-if (directMapCalls !== 1) throw new Error('hidden OpenLayers map was not called exactly once: ' + directMapCalls);
+if (geoDomCalls !== 1 || !geoDomTrusted) throw new Error('GeoReseaux DOM context handler was bypassed or untrusted: calls=' + geoDomCalls + ' trusted=' + geoDomTrusted);
+if (directMapCalls !== 1) throw new Error('OpenLayers viewport listener was not called exactly once through DOM: ' + directMapCalls);
 if (!directMapEvent || directMapEvent.type !== 'contextmenu' || directMapEvent.x !== 91 || directMapEvent.y !== 42 || !directMapEvent.trusted) {
-  throw new Error('direct OpenLayers event mismatch: ' + JSON.stringify(directMapEvent));
+  throw new Error('OpenLayers DOM-forwarded event mismatch: ' + JSON.stringify(directMapEvent));
 }
 const directDiagnostics = windowTarget.__cribloGeoDiagnosticsText();
-if (!directDiagnostics.includes('Engine: OpenLayers / instances: 1 / calls: 1')) throw new Error('hidden OpenLayers map was not recovered: ' + directDiagnostics);
-if (!directDiagnostics.includes('OpenLayers direct: 1 / feature hits: 1 / recovery: OpenLayers-bound')) throw new Error('direct OpenLayers diagnostics mismatch: ' + directDiagnostics);
+if (!directDiagnostics.includes('OpenLayers direct: 0 / feature hits: 0 / recovery: OpenLayers-bound')) throw new Error('bridge incorrectly bypassed DOM with direct OpenLayers call: ' + directDiagnostics);
 const contextAfter = Number((directDiagnostics.match(/Context events: (\d+)/) || [])[1] || 0);
-if (contextAfter !== contextBefore) throw new Error('direct OpenLayers path fell back to DOM contextmenu: ' + directDiagnostics);
+if (contextAfter !== contextBefore + 1) throw new Error('GeoReseaux DOM contextmenu was not dispatched exactly once: ' + directDiagnostics);
 
-console.log("iOS GeoReseaux exact lifecycle + hidden OpenLayers direct bridge test passed");
+console.log("iOS GeoReseaux exact lifecycle + DOM-first hidden OpenLayers bridge test passed");
