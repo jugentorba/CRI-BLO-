@@ -1114,6 +1114,96 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var __cribloOriginalAddEventListener = EventTarget.prototype.addEventListener;
       var __cribloOriginalRemoveEventListener = EventTarget.prototype.removeEventListener;
 
+      // WKWebView exposes a different touch/pointer ordering than the working
+      // Android WebView. Keep WebKit's genuine events for internal timing and
+      // coordinates, but defer only PAGE listener delivery of trusted touch
+      // pointerdown/pointerup until the matching touch event has propagated.
+      // This makes application state see the measured Android order without
+      // fabricating a second pointer lifecycle.
+      var __cribloDeferredPointerDown = [];
+      var __cribloDeferredPointerUp = [];
+      var __cribloDeferredPointerDownTimer = null;
+      var __cribloDeferredPointerUpTimer = null;
+
+      function runAfterCurrentEvent(callback) {
+        try {
+          if (typeof queueMicrotask === 'function') { queueMicrotask(callback); return; }
+          if (typeof Promise === 'function') { Promise.resolve().then(callback); return; }
+        } catch (_) {}
+        setTimeout(callback, 0);
+      }
+
+      function deferredTrustedPointerFacade(event, currentTarget, options) {
+        var path = [];
+        try { path = event && event.composedPath ? event.composedPath() : []; } catch (_) {}
+        if (!path || !path.length) {
+          var node = event && event.target;
+          while (node) { path.push(node); node = node.parentNode; }
+          if (path.indexOf(document) < 0) path.push(document);
+          path.push(window);
+        }
+        var capture = captureOption(options);
+        try {
+          return new Proxy(event, {
+            get: function (raw, prop, receiver) {
+              if (prop === 'currentTarget') return currentTarget;
+              if (prop === 'eventPhase') return capture ? 1 : (currentTarget === raw.target ? 2 : 3);
+              if (prop === 'isTrusted') return true;
+              if (prop === 'sourceCapabilities') return { firesTouchEvents: true };
+              if (prop === 'composedPath') return function () { return path.slice(); };
+              if (prop === 'originalEvent' || prop === 'nativeEvent' || prop === 'srcEvent') return receiver;
+              var value;
+              try { value = Reflect.get(raw, prop, raw); } catch (_) { value = raw[prop]; }
+              return typeof value === 'function' ? value.bind(raw) : value;
+            }
+          });
+        } catch (_) { return event; }
+      }
+
+      function callDeferredPointerEntry(entry) {
+        if (!entry || entry.delivered) return;
+        entry.delivered = true;
+        var presented = deferredTrustedPointerFacade(entry.event, entry.currentTarget, entry.options);
+        try {
+          if (typeof entry.listener === 'function') entry.listener.call(entry.thisArg, presented);
+          else if (entry.listener && typeof entry.listener.handleEvent === 'function') entry.listener.handleEvent(presented);
+        } catch (_) {}
+      }
+
+      function flushDeferredPointers(kind) {
+        var isDown = kind === 'down';
+        var queue = isDown ? __cribloDeferredPointerDown : __cribloDeferredPointerUp;
+        var timer = isDown ? __cribloDeferredPointerDownTimer : __cribloDeferredPointerUpTimer;
+        if (timer) { try { clearTimeout(timer); } catch (_) {} }
+        if (isDown) __cribloDeferredPointerDownTimer = null; else __cribloDeferredPointerUpTimer = null;
+        var entries = queue.splice(0, queue.length);
+        for (var i = 0; i < entries.length; i++) callDeferredPointerEntry(entries[i]);
+      }
+
+      function queueDeferredPointer(kind, listener, thisArg, event, currentTarget, options) {
+        var isDown = kind === 'down';
+        var queue = isDown ? __cribloDeferredPointerDown : __cribloDeferredPointerUp;
+        queue.push({ listener: listener, thisArg: thisArg, event: event, currentTarget: currentTarget, options: options, delivered: false });
+        var timerName = isDown ? '__cribloDeferredPointerDownTimer' : '__cribloDeferredPointerUpTimer';
+        var existing = isDown ? __cribloDeferredPointerDownTimer : __cribloDeferredPointerUpTimer;
+        if (!existing) {
+          var timer = setTimeout(function () { flushDeferredPointers(kind); }, 55);
+          if (timerName === '__cribloDeferredPointerDownTimer') __cribloDeferredPointerDownTimer = timer;
+          else __cribloDeferredPointerUpTimer = timer;
+        }
+      }
+
+      function shouldDeferTrustedTouchPointer(name, event) {
+        try {
+          if (!window.__cribloGeoReseauxAndroidCompat) return false;
+          if (!event || !event.isTrusted || String(event.pointerType || '') !== 'touch') return false;
+          if (!mapLikeTarget(event.target)) return false;
+          if (name === 'pointerdown') return true;
+          if (name === 'pointerup') return lastRealTouchStartAt > 0;
+        } catch (_) {}
+        return false;
+      }
+
       // GeoReseaux is bundled, so the OpenLayers Map constructor is not exposed
       // as window.ol.Map. OpenLayers binds Map.handleBrowserEvent to the real Map
       // instance while constructing the viewport. Capture that one bind at
@@ -1219,9 +1309,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (entries[i].capture === capture) return entries[i].wrapper;
         }
         var wrapper = function (event) {
+          var name = String(event && event.type || '').toLowerCase();
+          // Real iOS pointerdown arrives before touchstart and pointerup before
+          // touchend. Hold only the application callback; CRI-BLO's raw native
+          // observers still receive the genuine trusted event immediately.
+          if ((name === 'pointerdown' || name === 'pointerup') && shouldDeferTrustedTouchPointer(name, event)) {
+            queueDeferredPointer(name === 'pointerdown' ? 'down' : 'up', listener, this, event, target, options);
+            return;
+          }
           var presented = syntheticContextFacade(event);
           if (presented !== event) {
-            if (String(event.type || '').toLowerCase() === 'contextmenu') __cribloGeoDiag.wrappedContextCalls++;
+            if (name === 'contextmenu') __cribloGeoDiag.wrappedContextCalls++;
             else __cribloGeoDiag.wrappedLifecycleCalls++;
           }
           if (typeof listener === 'function') return listener.call(this, presented);
@@ -2468,6 +2566,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (!mapLikeTarget(target)) return;
           var touchStartNow = Date.now();
           traceAndroidEvent('touchstart', !!event.isTrusted);
+          if (event.isTrusted) {
+            // Microtask checkpoint runs after touchstart propagation and before
+            // WebKit's compatibility mouse default action, restoring Android's
+            // page-visible touchstart -> pointerdown -> mousedown order.
+            runAfterCurrentEvent(function () { flushDeferredPointers('down'); });
+          }
 
           clearRealTouchTimer();
           realTouchTarget = target;
@@ -2558,6 +2662,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       document.addEventListener('touchend', function (event) {
         try {
           traceAndroidEvent('touchend', !!(event && event.isTrusted));
+          if (event && event.isTrusted) {
+            // Same conversion on release: GeoReseaux finishes touchend first,
+            // then sees the genuine trusted pointerup, then mouseup/click/context.
+            runAfterCurrentEvent(function () { flushDeferredPointers('up'); });
+          }
           var request = pendingNativeLongPress;
           var target = realTouchTarget || (event && event.target) || null;
           var sourceEvent = window.__cribloLastTrustedTouchStart || event || null;

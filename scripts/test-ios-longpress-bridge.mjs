@@ -91,24 +91,29 @@ function touch(type, x, y) {
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Real iPhone long-hold sequence from the user's diagnostic: trusted pointerdown
-// arrives before trusted touchstart, and WKWebView supplies no mouseup/click tail.
+// Physical iPhone input arrives pointerdown before touchstart. The bridge must
+// present the exact measured WORKING Android order to GeoReseaux listeners:
+// touchstart -> pointerdown -> mousedown ... touchend -> pointerup -> mouseup -> click -> contextmenu.
 pointer("pointerdown", 82, 31, 1);
+if (order.length !== 0) throw new Error("iOS pointerdown leaked to page before touchstart: " + order.join(","));
 touch("touchstart", 82, 31);
+await Promise.resolve();
 await wait(25);
-if (order.join(",") !== "pointerdown,touchstart,mousedown") throw new Error("Android mousedown was not prepared near touchstart: " + order.join(","));
+if (order.join(",") !== "touchstart,pointerdown,mousedown") throw new Error("measured Android press order was not presented: " + order.join(","));
 const md = lifecycle.find((entry) => entry.name === "mousedown");
 if (!md || !md.trusted || !md.touchSource || md.which !== 1) throw new Error("mousedown trusted facade mismatch: " + JSON.stringify(md));
 await wait(625);
 if (context !== null) throw new Error("contextmenu fired while finger was still down: " + order.join(","));
 
 pointer("pointerup", 82, 31, 0);
+if (order.join(",") !== "touchstart,pointerdown,mousedown") throw new Error("iOS pointerup leaked to page before touchend: " + order.join(","));
 touch("touchend", 82, 31);
 // Simulate the delayed native callback observed on the real iPhone. It must not
 // replace the already armed trusted-JS request.
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
+await Promise.resolve();
 await wait(35);
-const expected = "pointerdown,touchstart,mousedown,pointerup,touchend,mouseup,click,contextmenu";
+const expected = "touchstart,pointerdown,mousedown,touchend,pointerup,mouseup,click,contextmenu";
 if (order.join(",") !== expected) throw new Error("real-iPhone -> Android lifecycle mismatch: " + order.join(","));
 for (const name of ["mousedown", "mouseup", "click"]) {
   const event = lifecycle.find((entry) => entry.name === name);
@@ -124,6 +129,16 @@ if (!diagnostics.includes("Synthetic press/release: pd=0 md=1 pu=0 mu=1 click=1"
 if (!diagnostics.includes("Release completions: 1")) throw new Error("release completion missing: " + diagnostics);
 if (!diagnostics.includes("Lifecycle facade calls: 3")) throw new Error("lifecycle facade handlers were not exercised: " + diagnostics);
 if (!diagnostics.includes("contextmenu*")) throw new Error("trusted-source contextmenu missing: " + diagnostics);
+
+// A trusted touch pointer event with no matching TouchEvent must not be lost.
+// The 55ms escape hatch preserves normal Pointer Events behavior off the map path.
+order.length = 0;
+lifecycle.length = 0;
+context = null;
+pointer("pointerdown", 66, 22, 1);
+if (order.length !== 0) throw new Error("unpaired pointerdown was not initially deferred");
+await wait(75);
+if (order.join(",") !== "pointerdown") throw new Error("unpaired pointerdown fallback was lost/duplicated: " + order.join(","));
 
 // A short tap must never become a hold. Its synthetic Android mousedown is
 // balanced with mouseup so GeoReseaux cannot be left in a pressed state.
