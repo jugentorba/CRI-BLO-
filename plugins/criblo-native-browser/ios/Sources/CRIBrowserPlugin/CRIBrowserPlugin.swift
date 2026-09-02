@@ -983,6 +983,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var __cribloListenerWrappers = new WeakMap();
       var __cribloSyntheticContextEvents = new WeakSet();
       var __cribloSyntheticContextFacades = new WeakMap();
+      var __cribloSyntheticContextSources = new WeakMap();
       var __cribloOriginalAddEventListener = EventTarget.prototype.addEventListener;
       var __cribloOriginalRemoveEventListener = EventTarget.prototype.removeEventListener;
 
@@ -997,9 +998,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         if (!event || !__cribloSyntheticContextEvents.has(event)) return event;
         var cached = __cribloSyntheticContextFacades.get(event);
         if (cached) return cached;
-        var source = window.__cribloLastTrustedTouchStart || null;
-        var sourceAge = lastRealTouchStartAt ? Date.now() - lastRealTouchStartAt : Number.POSITIVE_INFINITY;
-        var sourceIsTrusted = !!(source && source.isTrusted && sourceAge >= 0 && sourceAge < 1500);
+        // Bind each synthetic context event to the genuine iOS touch that
+        // caused this hold. This survives touchend, which is important because
+        // the measured Android event arrives only after the release/click tail.
+        var source = __cribloSyntheticContextSources.get(event) || window.__cribloLastTrustedTouchStart || null;
+        var sourceIsTrusted = !!(source && source.isTrusted);
         try {
           cached = new Proxy(event, {
             get: function (raw, prop) {
@@ -1097,6 +1100,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         lastResult: 'not-run',
         eventProperties: {},
         syntheticPointerDowns: 0,
+        syntheticMouseDowns: 0,
+        syntheticPointerUps: 0,
+        syntheticMouseUps: 0,
+        syntheticClicks: 0,
+        releaseCompletions: 0,
+        androidSequence: [],
         contextDispatches: 0,
         trustedContextmenus: 0,
         trustedContextPrevented: false,
@@ -1113,6 +1122,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         directSourceTrusted: false,
         directTarget: 'none'
       };
+
+      function traceAndroidEvent(name, trusted) {
+        try {
+          __cribloGeoDiag.androidSequence.push(String(name) + (trusted ? '*' : ''));
+          while (__cribloGeoDiag.androidSequence.length > 16) __cribloGeoDiag.androidSequence.shift();
+        } catch (_) {}
+      }
 
       // Register actual map instances at construction time. Frameworks often
       // hide the map inside closures, so a later scan of window cannot find it.
@@ -1241,7 +1257,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               clientY: y,
               screenX: x,
               screenY: y,
-              button: -1,
+              button: 0,
               buttons: 0,
               pointerId: pointerId,
               pointerType: 'touch',
@@ -1260,7 +1276,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               clientY: y,
               screenX: x,
               screenY: y,
-              button: isContext ? -1 : 0,
+              button: 0,
               buttons: isContext ? 0 : 1,
               view: window
             });
@@ -1298,9 +1314,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           srcElement: target,
           currentTarget: currentTarget,
           eventPhase: currentTarget === target ? 2 : 3,
-          button: isContext ? -1 : 0,
+          button: 0,
           buttons: isContext ? 0 : 1,
-          which: isContext ? 0 : 1,
+          which: 1,
           clientX: x,
           clientY: y,
           x: x,
@@ -1518,19 +1534,21 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         }
       }
 
-      function contextMenu(target, x, y) {
-        // Android Chromium's real long-touch trace is a touch PointerEvent
-        // contextmenu with button=-1/buttons=0 while the finger is still down.
+      function contextMenu(target, x, y, sourceEvent) {
+        // Exact working Android trace supplied from the CRI-BLO Android WebView:
+        // contextmenu is the LAST event and reports button=0/buttons=0.
         try {
           if (typeof PointerEvent === 'function') {
             var event = new PointerEvent('contextmenu', {
               bubbles: true, cancelable: true, composed: true,
               clientX: x, clientY: y, screenX: x, screenY: y,
-              button: -1, buttons: 0, pointerId: 1, pointerType: 'touch',
+              button: 0, buttons: 0, pointerId: 1, pointerType: 'touch',
               isPrimary: true, width: 9, height: 9, pressure: 0, view: window
             });
             __cribloSyntheticContextEvents.add(event);
+            if (sourceEvent) __cribloSyntheticContextSources.set(event, sourceEvent);
             __cribloGeoDiag.contextDispatches++;
+            traceAndroidEvent('contextmenu', !!(sourceEvent && sourceEvent.isTrusted));
             target.dispatchEvent(event);
             __cribloGeoDiag.syntheticContextPrevented = !!event.defaultPrevented;
             return true;
@@ -1540,10 +1558,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var fallback = new MouseEvent('contextmenu', {
             bubbles: true, cancelable: true, composed: true,
             clientX: x, clientY: y, screenX: x, screenY: y,
-            button: -1, buttons: 0, view: window
+            button: 0, buttons: 0, view: window
           });
           __cribloSyntheticContextEvents.add(fallback);
+          if (sourceEvent) __cribloSyntheticContextSources.set(fallback, sourceEvent);
           __cribloGeoDiag.contextDispatches++;
+          traceAndroidEvent('contextmenu', !!(sourceEvent && sourceEvent.isTrusted));
           target.dispatchEvent(fallback);
           __cribloGeoDiag.syntheticContextPrevented = !!fallback.defaultPrevented;
           return true;
@@ -1559,9 +1579,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             clientY: y,
             pageX: x + (window.scrollX || 0),
             pageY: y + (window.scrollY || 0),
-            button: -1,
+            button: 0,
             buttons: 0,
-            which: 0
+            which: 1
           });
           jq(target).trigger(event);
           return !!(event.isDefaultPrevented && event.isDefaultPrevented());
@@ -1724,18 +1744,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       function scheduleAndroidTouchFallback(target, x, y) {
         if (!target || !target.dispatchEvent) return;
         var pointerId = 47;
-        try {
-          if (typeof PointerEvent === 'function') {
-            target.dispatchEvent(new PointerEvent('pointerdown', {
-              bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
-              screenX:x,screenY:y,button:0,buttons:1,pointerId:pointerId,
-              pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0.5
-            }));
-            __cribloGeoDiag.syntheticPointerDowns++;
-          }
-        } catch (_) {}
-
         var syntheticTouch = null;
+        var touchStartEvent = null;
+
+        // Replay the measured Android order, not the older assumption:
+        // touchstart -> pointerdown -> mousedown -> touchend -> pointerup ->
+        // mouseup -> click -> contextmenu.
         try {
           if (typeof Touch === 'function' && typeof TouchEvent === 'function') {
             syntheticTouch = new Touch({
@@ -1743,39 +1757,59 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               screenX:x,screenY:y,pageX:x+(window.scrollX||0),pageY:y+(window.scrollY||0),
               radiusX:4,radiusY:4,rotationAngle:0,force:0.5
             });
-            target.dispatchEvent(new TouchEvent('touchstart', {
+            touchStartEvent = new TouchEvent('touchstart', {
               bubbles:true,cancelable:true,composed:true,
               touches:[syntheticTouch],targetTouches:[syntheticTouch],changedTouches:[syntheticTouch]
-            }));
+            });
+            target.dispatchEvent(touchStartEvent);
+            traceAndroidEvent('touchstart', false);
           }
         } catch (_) {}
 
+        try {
+          if (typeof PointerEvent === 'function') {
+            target.dispatchEvent(new PointerEvent('pointerdown', {
+              bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+              screenX:x,screenY:y,button:0,buttons:1,pointerId:pointerId,
+              pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1
+            }));
+            __cribloGeoDiag.syntheticPointerDowns++;
+            traceAndroidEvent('pointerdown', false);
+          }
+        } catch (_) {}
+        mouse(target, 'mousedown', x, y, 0, 1);
+        __cribloGeoDiag.syntheticMouseDowns++;
+        traceAndroidEvent('mousedown', false);
+
         setTimeout(function () {
-          // Match the measured Chromium hold: contextmenu arrives about 600 ms
-          // after pointerdown/touchstart, with the finger still held.
-          contextMenu(target, x, y);
-          setTimeout(function () {
-            // The Android trace releases pointer first, then touch roughly
-            // 180 ms after contextmenu. Keep that order in the last-resort path.
-            try {
-              if (typeof PointerEvent === 'function') {
-                target.dispatchEvent(new PointerEvent('pointerup', {
-                  bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
-                  screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
-                  pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
-                }));
-              }
-            } catch (_) {}
-            try {
-              if (syntheticTouch && typeof TouchEvent === 'function') {
-                target.dispatchEvent(new TouchEvent('touchend', {
-                  bubbles:true,cancelable:true,composed:true,
-                  touches:[],targetTouches:[],changedTouches:[syntheticTouch]
-                }));
-              }
-            } catch (_) {}
-          }, 180);
-        }, 600);
+          try {
+            if (syntheticTouch && typeof TouchEvent === 'function') {
+              target.dispatchEvent(new TouchEvent('touchend', {
+                bubbles:true,cancelable:true,composed:true,
+                touches:[],targetTouches:[],changedTouches:[syntheticTouch]
+              }));
+              traceAndroidEvent('touchend', false);
+            }
+          } catch (_) {}
+          try {
+            if (typeof PointerEvent === 'function') {
+              target.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,
+                screenX:x,screenY:y,button:0,buttons:0,pointerId:pointerId,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0
+              }));
+              __cribloGeoDiag.syntheticPointerUps++;
+              traceAndroidEvent('pointerup', false);
+            }
+          } catch (_) {}
+          mouse(target, 'mouseup', x, y, 0, 0);
+          __cribloGeoDiag.syntheticMouseUps++;
+          traceAndroidEvent('mouseup', false);
+          mouse(target, 'click', x, y, 0, 0);
+          __cribloGeoDiag.syntheticClicks++;
+          traceAndroidEvent('click', false);
+          contextMenu(target, x, y, touchStartEvent);
+        }, 20);
       }
 
       function dispatchAt(x, y) {
@@ -1811,6 +1845,14 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var lastRealTouchStartAt = 0;
       var lastRealPointerDownAt = 0;
       var lastRealPointerDownTarget = null;
+      var lastRealMouseDownAt = 0;
+      var lastRealMouseDownTarget = null;
+      var lastRealPointerUpAt = 0;
+      var lastRealPointerUpTarget = null;
+      var lastRealMouseUpAt = 0;
+      var lastRealMouseUpTarget = null;
+      var lastRealClickAt = 0;
+      var lastRealClickTarget = null;
       var pendingNativeLongPress = null;
       var nativeLongPressSequence = 0;
 
@@ -1883,49 +1925,115 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return false;
       }
 
+      function ensureAndroidPressStart(target, x, y, touchStartedAt) {
+        if (!target || !target.dispatchEvent) return;
+        // The Android trace has pointerdown/mousedown AFTER touchstart. Only
+        // synthesize a missing event when WebKit did not provide a trusted one
+        // after this touchstart.
+        if (!(lastRealPointerDownTarget === target && lastRealPointerDownAt >= touchStartedAt)) {
+          try {
+            if (typeof PointerEvent === 'function') {
+              target.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles:true,cancelable:true,composed:true,
+                clientX:x,clientY:y,screenX:x,screenY:y,
+                button:0,buttons:1,pointerId:realTouchIdentifier == null ? 1 : realTouchIdentifier,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1,view:window
+              }));
+              __cribloGeoDiag.syntheticPointerDowns++;
+              traceAndroidEvent('pointerdown', false);
+            }
+          } catch (_) {}
+        }
+        if (!(lastRealMouseDownTarget === target && lastRealMouseDownAt >= touchStartedAt)) {
+          mouse(target, 'mousedown', x, y, 0, 1);
+          __cribloGeoDiag.syntheticMouseDowns++;
+          traceAndroidEvent('mousedown', false);
+        }
+      }
+
+      function completeAndroidLongPress(request) {
+        if (!request || pendingNativeLongPress !== request || !request.armed) return false;
+        pendingNativeLongPress = null;
+        var target = request.target;
+        var x = request.x;
+        var y = request.y;
+        if (!target || !target.dispatchEvent) {
+          __cribloGeoDiag.lastResult = 'android-trace-release-no-target';
+          return false;
+        }
+
+        var releasedAt = request.releasedAt || Date.now();
+        if (!(lastRealPointerUpTarget === target && lastRealPointerUpAt >= releasedAt)) {
+          try {
+            if (typeof PointerEvent === 'function') {
+              target.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles:true,cancelable:true,composed:true,
+                clientX:x,clientY:y,screenX:x,screenY:y,
+                button:0,buttons:0,pointerId:request.pointerId == null ? 1 : request.pointerId,
+                pointerType:'touch',isPrimary:true,width:9,height:9,pressure:0,view:window
+              }));
+              __cribloGeoDiag.syntheticPointerUps++;
+              traceAndroidEvent('pointerup', false);
+            }
+          } catch (_) {}
+        }
+        if (!(lastRealMouseUpTarget === target && lastRealMouseUpAt >= releasedAt)) {
+          mouse(target, 'mouseup', x, y, 0, 0);
+          __cribloGeoDiag.syntheticMouseUps++;
+          traceAndroidEvent('mouseup', false);
+        }
+        if (!(lastRealClickTarget === target && lastRealClickAt >= releasedAt)) {
+          mouse(target, 'click', x, y, 0, 0);
+          __cribloGeoDiag.syntheticClicks++;
+          traceAndroidEvent('click', false);
+        }
+
+        var before = visiblePopupState();
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var dispatched = contextMenu(target, x, y, request.sourceEvent || request.releaseEvent || null);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        __cribloGeoDiag.directTrustedHandlerFires += delta;
+        __cribloGeoDiag.releaseCompletions++;
+        __cribloGeoDiag.lastResult = dispatched ? 'android-trace-release-dispatched' : 'android-trace-release-error';
+        setTimeout(function () {
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'android-trace-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'android-trace-no-popup';
+        }, 220);
+        return dispatched;
+      }
+
       function dispatchNativeLongPressRequest(request) {
         if (!request || pendingNativeLongPress !== request) return false;
-        pendingNativeLongPress = null;
 
         var estimatedX = window.innerWidth * request.rx;
         var estimatedY = window.innerHeight * request.ry;
         var touchAge = lastRealTouchStartAt ? Date.now() - lastRealTouchStartAt : Number.POSITIVE_INFINITY;
         var hasFreshTouch = !!(realTouchTarget && touchAge >= 0 && touchAge < 1500);
-        var x = hasFreshTouch ? realTouchX : estimatedX;
-        var y = hasFreshTouch ? realTouchY : estimatedY;
-        var candidates = candidateElements(x, y);
-        var target = hasFreshTouch ? realTouchTarget : (candidates.length ? candidates[0] : null);
-        if (!target) {
-          __cribloGeoDiag.lastResult = 'ordered-context-no-target';
-          return false;
-        }
+        if (!hasFreshTouch) return false;
 
-        var source = hasFreshTouch ? (window.__cribloLastTrustedTouchStart || null) : null;
-        __cribloGeoDiag.directSourceTrusted = !!(source && source.isTrusted);
-        __cribloGeoDiag.contextAfterTouchMs = hasFreshTouch ? Math.max(0, Math.round(touchAge)) : -1;
-        __cribloGeoDiag.coordinateDelta = hasFreshTouch
-          ? String(Math.round(estimatedX - x)) + ',' + String(Math.round(estimatedY - y))
-          : 'estimated';
-        __cribloGeoDiag.directTarget = String((target.tagName || '') + '#' + (target.id || '') + '.' + (target.className && (target.className.baseVal || target.className) || '')).slice(0, 180);
+        request.target = realTouchTarget;
+        request.x = realTouchX;
+        request.y = realTouchY;
+        request.pointerId = realTouchIdentifier;
+        request.touchStartedAt = lastRealTouchStartAt;
+        request.sourceEvent = window.__cribloLastTrustedTouchStart || null;
+        request.armed = true;
+
+        __cribloGeoDiag.directSourceTrusted = !!(request.sourceEvent && request.sourceEvent.isTrusted);
+        __cribloGeoDiag.contextAfterTouchMs = -1;
+        __cribloGeoDiag.coordinateDelta = String(Math.round(estimatedX - request.x)) + ',' + String(Math.round(estimatedY - request.y));
+        __cribloGeoDiag.directTarget = String((request.target.tagName || '') + '#' + (request.target.id || '') + '.' + (request.target.className && (request.target.className.baseVal || request.target.className) || '')).slice(0, 180);
         __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
-        __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
+        __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
         lastRealTouchLongPressAt = Date.now();
 
-        var before = visiblePopupState();
-        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        var dispatched = contextMenu(target, x, y);
-        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        __cribloGeoDiag.directTrustedHandlerFires += delta;
-        __cribloGeoDiag.lastResult = dispatched ? 'ordered-context-dispatched' : 'ordered-context-error';
-        setTimeout(function () {
-          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'ordered-context-popup';
-          else if (dispatched) __cribloGeoDiag.lastResult = 'ordered-context-no-popup';
-        }, 220);
-        return dispatched;
+        ensureAndroidPressStart(request.target, request.x, request.y, request.touchStartedAt);
+        __cribloGeoDiag.lastResult = 'android-trace-armed-waiting-release';
+        return true;
       }
 
       function fallbackNativeLongPressRequest(request) {
-        if (!request || pendingNativeLongPress !== request) return;
+        if (!request || pendingNativeLongPress !== request || request.armed) return;
         pendingNativeLongPress = null;
         var x = window.innerWidth * request.rx;
         var y = window.innerHeight * request.ry;
@@ -1991,9 +2099,46 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       document.addEventListener('pointerdown', function (event) {
         try {
-          if (!event || String(event.pointerType || '') !== 'touch') return;
+          if (!event || !event.isTrusted || String(event.pointerType || '') !== 'touch') return;
           lastRealPointerDownAt = Date.now();
           lastRealPointerDownTarget = event.target || null;
+          traceAndroidEvent('pointerdown', true);
+        } catch (_) {}
+      }, true);
+
+      document.addEventListener('mousedown', function (event) {
+        try {
+          if (!event || !event.isTrusted) return;
+          lastRealMouseDownAt = Date.now();
+          lastRealMouseDownTarget = event.target || null;
+          traceAndroidEvent('mousedown', true);
+        } catch (_) {}
+      }, true);
+
+      document.addEventListener('pointerup', function (event) {
+        try {
+          if (!event || !event.isTrusted || String(event.pointerType || '') !== 'touch') return;
+          lastRealPointerUpAt = Date.now();
+          lastRealPointerUpTarget = event.target || null;
+          traceAndroidEvent('pointerup', true);
+        } catch (_) {}
+      }, true);
+
+      document.addEventListener('mouseup', function (event) {
+        try {
+          if (!event || !event.isTrusted) return;
+          lastRealMouseUpAt = Date.now();
+          lastRealMouseUpTarget = event.target || null;
+          traceAndroidEvent('mouseup', true);
+        } catch (_) {}
+      }, true);
+
+      document.addEventListener('click', function (event) {
+        try {
+          if (!event || !event.isTrusted) return;
+          lastRealClickAt = Date.now();
+          lastRealClickTarget = event.target || null;
+          traceAndroidEvent('click', true);
         } catch (_) {}
       }, true);
 
@@ -2023,6 +2168,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var target = event.target;
           if (!mapLikeTarget(target)) return;
           var touchStartNow = Date.now();
+          traceAndroidEvent('touchstart', !!event.isTrusted);
 
           clearRealTouchTimer();
           realTouchTarget = target;
@@ -2031,29 +2177,22 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           // mutate it; the marked context event facade uses only its trust bit.
           window.__cribloLastTrustedTouchStart = event;
 
-          // Android emits pointerdown before touchstart. If this WKWebView did
-          // not emit a matching touch PointerEvent, provide exactly one so the
-          // GeoReseaux framework can establish the same gesture state.
-          if (!(lastRealPointerDownTarget === target && (Date.now() - lastRealPointerDownAt) < 80)) {
-            try {
-              if (typeof PointerEvent === 'function') {
-                target.dispatchEvent(new PointerEvent('pointerdown', {
-                  bubbles:true,cancelable:true,composed:true,
-                  clientX:touch.clientX,clientY:touch.clientY,
-                  screenX:touch.screenX,screenY:touch.screenY,
-                  button:0,buttons:1,pointerId:touch.identifier == null ? 1 : touch.identifier,
-                  pointerType:'touch',isPrimary:true,width:9,height:9,pressure:1,view:window
-                }));
-                __cribloGeoDiag.syntheticPointerDowns++;
-              }
-            } catch (_) {}
-          }
+          // The measured Android WebView does the opposite of our previous
+          // assumption: touchstart is observed first, then pointerdown/mousedown.
+          // Save coordinates first; missing press events are filled only after
+          // this real touchstart has completed propagation.
 
-          realTouchX = touch.clientX;
+          realTouchX = touch.clientX;          realTouchX = touch.clientX;
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
           realTouchTimer = null;
+
+          setTimeout(function () {
+            if (realTouchTarget === target && lastRealTouchStartAt === touchStartNow) {
+              ensureAndroidPressStart(target, realTouchX, realTouchY, touchStartNow);
+            }
+          }, 0);
 
           // WKWebView can hold DOM touch delivery until the simultaneous native
           // recognizer has already begun. If that happened, let this touchstart
@@ -2074,7 +2213,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       document.addEventListener('touchmove', function (event) {
         try {
-          if (!realTouchTimer) return;
+          if (!realTouchTarget) return;
           var touch = touchByIdentifier(event);
           if (!touch) { clearRealTouchTimer(); return; }
           var dx = touch.clientX - realTouchX;
@@ -2085,6 +2224,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       document.addEventListener('touchcancel', function () {
         clearRealTouchTimer();
+        pendingNativeLongPress = null;
         realTouchTarget = null;
         realTouchIdentifier = null;
         lastRealTouchStartAt = 0;
@@ -2092,17 +2232,36 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }, true);
 
       document.addEventListener('touchend', function (event) {
-        var fired = realTouchFired;
+        try {
+          traceAndroidEvent('touchend', !!(event && event.isTrusted));
+          var request = pendingNativeLongPress;
+          var target = realTouchTarget || (event && event.target) || null;
+          var sourceEvent = window.__cribloLastTrustedTouchStart || event || null;
+          var releaseAt = Date.now();
+
+          if (request && request.armed && target) {
+            request.target = request.target || target;
+            request.x = request.x == null ? realTouchX : request.x;
+            request.y = request.y == null ? realTouchY : request.y;
+            request.pointerId = request.pointerId == null ? realTouchIdentifier : request.pointerId;
+            request.sourceEvent = request.sourceEvent || sourceEvent;
+            request.releaseEvent = event || null;
+            request.releasedAt = releaseAt;
+            __cribloGeoDiag.contextAfterTouchMs = lastRealTouchStartAt ? Math.max(0, releaseAt - lastRealTouchStartAt) : -1;
+            __cribloGeoDiag.lastResult = 'android-trace-touchend-waiting-tail';
+            // Let WebKit deliver its genuine pointerup/mouseup/click first. The
+            // zero-delay task then fills only missing tail events and emits the
+            // contextmenu LAST, matching the Android trace exactly.
+            setTimeout(function () { completeAndroidLongPress(request); }, 0);
+          }
+        } catch (_) {}
+
         clearRealTouchTimer();
         realTouchTarget = null;
         realTouchIdentifier = null;
         realTouchFired = false;
         lastRealTouchStartAt = 0;
         window.__cribloLastTrustedTouchStart = null;
-        // Let the real iOS touchend continue normally. Android also releases
-        // the physical touch after contextmenu; blocking the release can leave
-        // framework gesture state inconsistent.
-        void fired;
       }, { capture: true, passive: false });
 
       window.addEventListener('message', function (event) {
@@ -2150,8 +2309,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (realTouchTarget && touchAge >= 0 && touchAge < 1200) {
             __cribloGeoDiag.touchToNativeMs = Math.max(0, Math.round(touchAge));
             __cribloGeoDiag.lastResult = 'native-received-after-touchstart';
-            // Run after the current JavaScript stack so any remaining page
-            // gesture bookkeeping completes before contextmenu dispatch.
+            // Arm after the current stack. The actual contextmenu is held
+            // until the genuine touchend and release/click tail complete.
             setTimeout(function () {
               dispatchNativeLongPressRequest(request);
             }, 0);
@@ -2160,8 +2319,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             __cribloGeoDiag.lastResult = 'native-waiting-for-touchstart';
             // The normal delayed WKWebView touchstart arrives within a few
             // milliseconds. If it never arrives, fall back to a complete
-            // Android-shaped pointer/touch hold sequence instead of sending
-            // contextmenu before gesture state exists.
+            // Android-shaped sequence instead of sending contextmenu before
+            // gesture state exists.
             setTimeout(function () {
               fallbackNativeLongPressRequest(request);
             }, 260);
@@ -2194,7 +2353,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Native/touch coordinate delta: ' + __cribloGeoDiag.coordinateDelta,
           'Context events: ' + __cribloGeoDiag.contextDispatches + ' / observed: ' + __cribloGeoDiag.syntheticContextmenus,
           'Synthetic context prevented: ' + String(!!__cribloGeoDiag.syntheticContextPrevented),
-          'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
+          'Synthetic press/release: pd=' + __cribloGeoDiag.syntheticPointerDowns + ' md=' + __cribloGeoDiag.syntheticMouseDowns + ' pu=' + __cribloGeoDiag.syntheticPointerUps + ' mu=' + __cribloGeoDiag.syntheticMouseUps + ' click=' + __cribloGeoDiag.syntheticClicks,
+          'Release completions: ' + __cribloGeoDiag.releaseCompletions,
+          'Android-order trace (*=trusted source): ' + (__cribloGeoDiag.androidSequence.join(' > ') || 'none'),
           'Real WebKit contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
           'Trusted-facade handler calls: ' + __cribloGeoDiag.directTrustedHandlerFires,
           'Trusted touch source: ' + String(!!__cribloGeoDiag.directSourceTrusted),
