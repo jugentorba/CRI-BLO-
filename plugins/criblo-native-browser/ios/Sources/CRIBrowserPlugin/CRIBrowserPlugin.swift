@@ -1954,9 +1954,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       function completeAndroidLongPress(request, reason) {
         if (!request || pendingNativeLongPress !== request || !request.armed) return false;
         pendingNativeLongPress = null;
-        var target = request.tailTarget || request.target;
-        var x = request.tailX == null ? request.x : request.tailX;
-        var y = request.tailY == null ? request.y : request.tailY;
+        // Keep the exact physical long-press target/coordinates. The delayed
+        // trusted click is only a readiness signal; its target/coordinates may
+        // differ in WKWebView and must never move the GeoReseaux hit-test point.
+        var target = request.target;
+        var x = request.x;
+        var y = request.y;
         if (!target || !target.dispatchEvent) {
           __cribloGeoDiag.lastResult = 'trusted-tail-no-target';
           return false;
@@ -2124,9 +2127,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           if (request && request.armed && request.releasedAt && !request.tailCompletionScheduled) {
             request.tailCompletionScheduled = true;
             request.tailEvent = event;
-            request.tailTarget = event.target || request.target;
-            if (Number.isFinite(event.clientX)) request.tailX = event.clientX;
-            if (Number.isFinite(event.clientY)) request.tailY = event.clientY;
             // We are in capture phase. Run in the next task so GeoReseaux's own
             // trusted click handlers finish first, then contextmenu is truly last.
             setTimeout(function () {
