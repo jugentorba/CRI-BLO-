@@ -1124,6 +1124,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var __cribloHeldPointerUp = null;
       var __cribloHeldPointerDownFallback = null;
       var __cribloHeldPointerUpFallback = null;
+      var __cribloHeldMouseUp = null;
+      var __cribloHeldClick = null;
       var __cribloObservedPhysicalPointers = new WeakSet();
 
       function afterTouchPropagation(eventType, callback) {
@@ -1183,6 +1185,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           __cribloSyntheticContextSources.set(event, source);
           traceAndroidEvent(isDown ? 'pointerdown' : 'pointerup', true);
           target.dispatchEvent(event);
+          if (!isDown) {
+            var request = pendingNativeLongPress;
+            if (request && request.armed && request.releasedAt) {
+              request.pointerUpPresented = true;
+              replayHeldCompatibilityMouseTail(request);
+            }
+          }
           return true;
         } catch (_) { return false; }
       }
@@ -1217,6 +1226,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               __cribloHeldPointerUpFallback = setTimeout(function () {
                 if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');
               }, 55);
+              var activeRequest = pendingNativeLongPress;
+              if (activeRequest && activeRequest.armed && activeRequest.releasedAt) {
+                setTimeout(function () {
+                  if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');
+                }, 0);
+              }
             }
             // Suppress propagation only. Never preventDefault: WebKit must still
             // generate the genuine TouchEvent and its normal default behavior.
@@ -1235,6 +1250,86 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return mapLikeTarget(a) && mapLikeTarget(b);
       }
 
+      function shouldHoldCompatibilityMouseTail(event, name) {
+        try {
+          if (!event || __cribloSyntheticContextEvents.has(event) || !event.isTrusted) return false;
+          if (name !== 'mouseup' && name !== 'click') return false;
+          var request = pendingNativeLongPress;
+          if (!request || !request.armed || !request.releasedAt || request.pointerUpPresented) return false;
+          if (!sameMapPressTarget(event.target, request.target || compatSyntheticMouseDownTarget)) return false;
+          if (name === 'mouseup' && !__cribloHeldMouseUp) __cribloHeldMouseUp = event;
+          if (name === 'click' && !__cribloHeldClick) __cribloHeldClick = event;
+          return true;
+        } catch (_) { return false; }
+      }
+
+      function holdCompatibilityMouseTailAtBoundary(event) {
+        var name = String(event && event.type || '').toLowerCase();
+        if (!shouldHoldCompatibilityMouseTail(event, name)) return;
+        try { event.stopImmediatePropagation(); } catch (_) {}
+        try { event.stopPropagation(); } catch (_) {}
+      }
+
+      function replayHeldCompatibilityMouseTail(request) {
+        if (!request || pendingNativeLongPress !== request || !request.pointerUpPresented) return false;
+        var target = request.target;
+        if (!target || !target.dispatchEvent) return false;
+        var x = request.x == null ? compatSyntheticMouseDownX : request.x;
+        var y = request.y == null ? compatSyntheticMouseDownY : request.y;
+        var hadUp = !!__cribloHeldMouseUp;
+        var hadClick = !!__cribloHeldClick;
+        var upSource = __cribloHeldMouseUp;
+        var clickSource = __cribloHeldClick;
+        __cribloHeldMouseUp = null;
+        __cribloHeldClick = null;
+
+        if (hadUp) {
+          mouse(target, 'mouseup', x, y, 0, 0, upSource);
+          lastRealMouseUpTarget = target;
+          lastRealMouseUpAt = Date.now();
+          __cribloGeoDiag.syntheticMouseUps++;
+          traceAndroidEvent('mouseup', true);
+        }
+        if (hadClick) {
+          mouse(target, 'click', x, y, 0, 0, clickSource);
+          lastRealClickTarget = target;
+          lastRealClickAt = Date.now();
+          __cribloGeoDiag.syntheticClicks++;
+          traceAndroidEvent('click', true);
+          if (!request.tailCompletionScheduled) {
+            request.tailCompletionScheduled = true;
+            setTimeout(function () { completeAndroidLongPress(request, 'held-trusted-click'); }, 0);
+          }
+        }
+        return hadUp || hadClick;
+      }
+
+      function ensureAndroidPointerUpAfterTouchEnd(request) {
+        if (!request || pendingNativeLongPress !== request || request.pointerUpPresented) return true;
+        if (dispatchHeldAndroidPointer('up')) return true;
+        var target = request.target;
+        if (!target || !target.dispatchEvent || typeof PointerEvent !== 'function') return false;
+        var source = request.releaseEvent || request.sourceEvent || null;
+        try {
+          var event = new PointerEvent('pointerup', {
+            bubbles: true, cancelable: true, composed: true,
+            clientX: Number(request.x || 0), clientY: Number(request.y || 0),
+            screenX: Number(request.x || 0), screenY: Number(request.y || 0),
+            button: 0, buttons: 0,
+            pointerId: Number(request.pointerId || 1), pointerType: 'touch',
+            isPrimary: true, width: 9, height: 9, pressure: 0, view: window
+          });
+          __cribloSyntheticContextEvents.add(event);
+          if (source) __cribloSyntheticContextSources.set(event, source);
+          target.dispatchEvent(event);
+          request.pointerUpPresented = true;
+          __cribloGeoDiag.syntheticPointerUps++;
+          traceAndroidEvent('pointerup', !!(source && source.isTrusted));
+          replayHeldCompatibilityMouseTail(request);
+          return true;
+        } catch (_) { return false; }
+      }
+
       function suppressDuplicateCompatibilityMouseDown(event) {
         try {
           if (!event || __cribloSyntheticContextEvents.has(event) || !event.isTrusted) return;
@@ -1245,6 +1340,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           // Some WebKit/Chromium versions generate another mousedown after
           // touchend. Drop only that duplicate; genuine mouseup/click are kept.
           event.stopImmediatePropagation();
+          try { event.stopPropagation(); } catch (_) {}
         } catch (_) {}
       }
 
@@ -1256,6 +1352,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       __cribloOriginalAddEventListener.call(document, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
       __cribloOriginalAddEventListener.call(window, 'mousedown', suppressDuplicateCompatibilityMouseDown, true);
       __cribloOriginalAddEventListener.call(document, 'mousedown', suppressDuplicateCompatibilityMouseDown, true);
+      __cribloOriginalAddEventListener.call(window, 'mouseup', holdCompatibilityMouseTailAtBoundary, true);
+      __cribloOriginalAddEventListener.call(window, 'click', holdCompatibilityMouseTailAtBoundary, true);
+      __cribloOriginalAddEventListener.call(document, 'mouseup', holdCompatibilityMouseTailAtBoundary, true);
+      __cribloOriginalAddEventListener.call(document, 'click', holdCompatibilityMouseTailAtBoundary, true);
 
       // GeoReseaux is bundled, so the OpenLayers Map constructor is not exposed
       // as window.ol.Map. OpenLayers binds Map.handleBrowserEvent to the real Map
@@ -1363,6 +1463,14 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         }
         var wrapper = function (event) {
           var name = String(event && event.type || '').toLowerCase();
+          if (shouldHoldCompatibilityMouseTail(event, name)) return;
+          if (name === 'mousedown') {
+            try {
+              if (event && event.isTrusted && compatSyntheticMouseDownTarget
+                  && Date.now() - compatSyntheticMouseDownAt < 2500
+                  && sameMapPressTarget(event.target, compatSyntheticMouseDownTarget)) return;
+            } catch (_) {}
+          }
           var presented = syntheticContextFacade(event);
           if (presented !== event) {
             if (name === 'contextmenu') __cribloGeoDiag.wrappedContextCalls++;
@@ -2705,16 +2813,17 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             request.releasedAt = releaseAt;
             __cribloGeoDiag.contextAfterTouchMs = lastRealTouchStartAt ? Math.max(0, releaseAt - lastRealTouchStartAt) : -1;
             __cribloGeoDiag.lastResult = 'trusted-webkit-tail-touchend-waiting-click';
-            // The real iPhone trace shows no WebKit mouseup/click for a hold.
-            // Finish the Android compatibility mouse tail in the next task, after
-            // GeoReseaux's genuine touchend handlers have completed. If WebKit
-            // did produce a real click, the capture listener wins and this is a no-op.
+            // OpenLayers 7/Chromium can produce mouseup/click before its
+            // trusted pointerup. Hold that tail, present pointerup first, then
+            // replay the tail. WKWebView with no native mouse tail uses this
+            // watchdog to create only the missing release events afterwards.
             setTimeout(function () {
-              if (pendingNativeLongPress === request && request.armed && !request.tailCompletionScheduled) {
-                request.tailCompletionScheduled = true;
-                completeAndroidLongPress(request, 'android-compat-tail');
-              }
-            }, 0);
+              if (pendingNativeLongPress !== request || !request.armed || request.tailCompletionScheduled) return;
+              ensureAndroidPointerUpAfterTouchEnd(request);
+              if (request.tailCompletionScheduled) return;
+              request.tailCompletionScheduled = true;
+              completeAndroidLongPress(request, 'android-compat-tail');
+            }, 90);
           } else if (compatSyntheticMouseDownTarget) {
             var tapCleanup = {
               target: compatSyntheticMouseDownTarget,
