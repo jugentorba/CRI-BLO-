@@ -48,6 +48,7 @@ documentTarget.elementFromPoint = () => canvas;
 globalThis.window = windowTarget;
 globalThis.document = documentTarget;
 globalThis.location = windowTarget.location;
+windowTarget.__cribloGeoReseauxAndroidCompat = true;
 new Function(match[1])();
 
 const order = [];
