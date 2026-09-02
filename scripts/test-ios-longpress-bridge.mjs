@@ -113,7 +113,10 @@ touch("touchend", 82, 31);
 // replace the already armed trusted-JS request.
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await Promise.resolve();
-await wait(35);
+// Production deliberately waits up to 90 ms for a late trusted pointerup before
+// synthesizing any missing mouse release tail. The unit gate must allow that
+// window instead of approving only the old immediate-completion behavior.
+await wait(130);
 const expected = "touchstart,pointerdown,mousedown,touchend,pointerup,mouseup,click,contextmenu";
 if (order.join(",") !== expected) throw new Error("real-iPhone -> Android lifecycle mismatch: " + order.join(","));
 for (const name of ["mousedown", "mouseup", "click"]) {
