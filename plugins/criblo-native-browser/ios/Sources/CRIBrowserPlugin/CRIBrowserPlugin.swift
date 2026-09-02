@@ -2182,7 +2182,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           // Save coordinates first; missing press events are filled only after
           // this real touchstart has completed propagation.
 
-          realTouchX = touch.clientX;          realTouchX = touch.clientX;
+          realTouchX = touch.clientX;
           realTouchY = touch.clientY;
           realTouchIdentifier = touch.identifier;
           realTouchFired = false;
@@ -2196,8 +2196,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
           // WKWebView can hold DOM touch delivery until the simultaneous native
           // recognizer has already begun. If that happened, let this touchstart
-          // finish its normal capture/bubble propagation, then send contextmenu.
-          // GeoReseaux must see pointerdown/touchstart before the hold action.
+          // finish normal propagation, establish the Android press state, and arm
+          // the hold. contextmenu remains deferred until the physical release.
           var pending = pendingNativeLongPress;
           if (pending && touchStartNow >= pending.requestedAt && touchStartNow - pending.requestedAt < 500) {
             __cribloGeoDiag.nativeToTouchMs = Math.max(0, touchStartNow - pending.requestedAt);
