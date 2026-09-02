@@ -39,6 +39,9 @@ jobs:
       - name: Test iOS long-press bridge
         run: npm run test:ios-longpress-bridge
 
+      - name: Test GeoReseaux HTTP/JS Android identity parity
+        run: npm run test:ios-georeseaux-ua-parity
+
       - name: Upload PWA
         uses: actions/upload-artifact@v4
         with:
