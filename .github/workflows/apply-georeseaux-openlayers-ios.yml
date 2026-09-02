@@ -1,0 +1,40 @@
+name: Apply researched GeoReseaux OpenLayers iOS fix
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - scripts/patch-georeseaux-openlayers-ios.mjs
+      - .github/workflows/apply-georeseaux-openlayers-ios.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply researched OpenLayers iOS hold patch
+        run: node scripts/patch-georeseaux-openlayers-ios.mjs
+
+      - name: Commit researched fix and remove one-shot helper
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Use OpenLayers-native GeoReseaux hold on iOS"
+          git push origin HEAD:criblo-master-spec-v1
