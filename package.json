@@ -15,7 +15,8 @@
     "native:add:android": "cap add android",
     "native:add:ios": "cap add ios",
     "android:open": "cap open android",
-    "ios:open": "cap open ios"
+    "ios:open": "cap open ios",
+    "test:ios-georeseaux-ua-parity": "node scripts/test-ios-georeseaux-ua-parity.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.17.0",

@@ -293,10 +293,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.allowsLinkPreview = false
         webView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Keep the actual iPhone/Safari identity for Orange authentication so
-        // WebKit and the login page stay on the same path as Safari Password
-        // AutoFill. GeoReseaux Android compatibility is injected only inside
-        // the GIS page; it no longer changes the Orange login HTTP identity.
+        // Start with Safari for generic/authentication hosts. The navigation
+        // delegate switches the main frame to Android before MOBI/GeoReseaux
+        // application hosts load, keeping HTTP and JavaScript platform signals
+        // consistent while leaving external Orange identity pages untouched.
         webView.customUserAgent = Self.safariUserAgent
 
         if longPressCompatibility {
@@ -436,6 +436,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         guard longPressCompatibility else { return false }
         let host = (url.host ?? "").lowercased()
         return host == "sigreseaux.orange.fr"
+            || host == "mobi-prod.orange.fr"
             || host.contains("georeseaux")
             || host.contains("geo-reseaux")
     }
@@ -895,11 +896,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         }
 
         if scheme == "http" || scheme == "https" {
-            // Keep the Orange authentication pages on a genuine Safari identity,
-            // then reload only the authenticated GeoReseaux application with an
-            // Android HTTP identity. The Android working trace and the iOS v14
-            // diagnostic show the same trusted gesture reaching the canvas; the
-            // remaining difference is the server-selected map implementation.
+            // Match Android's network identity on the MOBI/GeoReseaux application
+            // hosts, including the stable mobi-prod entry point. Authentication
+            // redirects on other Orange/identity hosts keep the genuine Safari UA,
+            // then the app switches back to Android before MOBI/GeoReseaux loads.
+            // This keeps the HTTP and document-start JavaScript identities aligned
+            // instead of asking Orange for an iPhone bundle and then spoofing Android.
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
             let wantsAndroid = requiresAndroidGeoUserAgent(url)
             if isMainFrame && wantsAndroid != usesAndroidGeoUserAgent {
