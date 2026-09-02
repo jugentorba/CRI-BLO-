@@ -1,0 +1,34 @@
+name: Apply GeoReseaux trusted WebKit tail fix
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - '.github/workflows/apply-georeseaux-trusted-tail.yml'
+      - 'scripts/patch-georeseaux-trusted-webkit-tail.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - name: Apply trusted-tail patch
+        run: node scripts/patch-georeseaux-trusted-webkit-tail.mjs
+      - name: Commit source fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
+          if git diff --cached --quiet; then
+            echo "No source change needed"
+            exit 0
+          fi
+          git commit -m "Fix GeoReseaux iOS trusted WebKit release tail"
+          git push origin HEAD:criblo-master-spec-v1
