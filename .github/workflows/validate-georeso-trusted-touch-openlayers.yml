@@ -1,0 +1,131 @@
+name: Validate GeoReseaux trusted touch on real OpenLayers
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - .github/workflows/validate-georeso-trusted-touch-openlayers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-touch-openlayers:
+    strategy:
+      fail-fast: false
+      matrix:
+        ol-version: ['6.15.1', '7.2.2', '10.6.1']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout validated direct-OpenLayers source
+        uses: actions/checkout@v4
+        with:
+          ref: d6f9ed65bff40b81f36fa81296f52ced31bc05a1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prepare hidden OpenLayers fixture
+        env:
+          OL_VERSION: ${{ matrix.ol-version }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/ol-touch-fixture
+          cd /tmp/ol-touch-fixture
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "ol@${OL_VERSION}" vite@5 playwright-core@1.55.0
+          node - "$GITHUB_WORKSPACE" <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.argv[2];
+          const swift = fs.readFileSync(path.join(root, 'plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift'), 'utf8');
+          const match = swift.match(/private static let longPressBridgeScript = #\"\"\"([\s\S]*?)\"\"\"#/);
+          if (!match) throw new Error('bridge not found');
+          fs.writeFileSync('/tmp/ol-touch-fixture/bridge.js', match[1]);
+          NODE
+          cat > index.html <<'HTML'
+          <!doctype html><html><head><meta charset="utf-8"><style>
+          html,body{margin:0;width:100%;height:100%;touch-action:none} #map{position:absolute;left:20px;top:20px;width:600px;height:400px;touch-action:none}
+          .fixture-popup{position:absolute;left:200px;top:150px;width:180px;height:90px;background:white;border:1px solid black;z-index:9999}
+          </style></head><body><div id="map"></div><script src="/bridge.js"></script><script type="module" src="/main.js"></script></body></html>
+          HTML
+          cat > main.js <<'JS'
+          import Map from 'ol/Map.js';
+          import View from 'ol/View.js';
+          window.__pageEvents = [];
+          for (const type of ['pointerdown','touchstart','mousedown','pointerup','touchend','mouseup','click','contextmenu']) {
+            document.addEventListener(type, (e) => window.__pageEvents.push(type + (e.isTrusted ? '*' : '')), true);
+          }
+          const map = new Map({target:'map', layers:[], view:new View({center:[0,0], zoom:2})});
+          map.on('contextmenu', (event) => {
+            window.__mapOriginalTrusted = Boolean(event.originalEvent && event.originalEvent.isTrusted);
+            const popup = document.createElement('div');
+            popup.className = 'fixture-popup';
+            popup.textContent = 'OPENLAYERS_TRUSTED_TOUCH_OPENED';
+            document.body.appendChild(popup);
+            document.body.dataset.openlayersContext = 'yes';
+            event.preventDefault();
+          });
+          window.__fixtureReady = true;
+          JS
+
+      - name: Hold with browser-trusted touch and require real OpenLayers popup
+        env:
+          OL_VERSION: ${{ matrix.ol-version }}
+        run: |
+          set -euxo pipefail
+          cd /tmp/ol-touch-fixture
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME"
+          npx vite --host 127.0.0.1 --port 4174 > /tmp/vite-touch.log 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER || true; cat /tmp/vite-touch.log || true' EXIT
+          for i in {1..40}; do curl -fsS http://127.0.0.1:4174/ >/dev/null && break; sleep .25; done
+          cat > verify-touch.cjs <<'JS'
+          const { chromium } = require('playwright-core');
+          (async () => {
+            const browser = await chromium.launch({executablePath:process.env.CHROME_PATH, headless:true, args:['--no-sandbox','--disable-dev-shm-usage']});
+            const context = await browser.newContext({
+              viewport:{width:800,height:600},
+              isMobile:true,
+              hasTouch:true,
+              userAgent:'Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 Chrome/139.0.0.0 Mobile Safari/537.36'
+            });
+            const page = await context.newPage();
+            const cdp = await context.newCDPSession(page);
+            await page.goto('http://127.0.0.1:4174/', {waitUntil:'networkidle'});
+            await page.waitForFunction(() => window.__fixtureReady === true);
+            if (await page.evaluate(() => typeof window.ol) !== 'undefined') throw new Error('fixture unexpectedly exposes window.ol');
+
+            const x = 260, y = 180;
+            await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{x,y,radiusX:4,radiusY:4,force:1,id:1}]});
+            await new Promise(r => setTimeout(r, 720));
+            const armed = await page.evaluate(() => window.__cribloGeoDiagnosticsText());
+            if (!/JS trusted hold arms: 1/.test(armed)) throw new Error('trusted page touch did not arm long press\n' + armed);
+            await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
+            await page.waitForFunction(() => document.body.dataset.openlayersContext === 'yes', null, {timeout:2500});
+            const result = await page.evaluate(() => ({
+              popup: document.querySelector('.fixture-popup')?.textContent || '',
+              diagnostics: window.__cribloGeoDiagnosticsText(),
+              events: window.__pageEvents.slice(),
+              mapOriginalTrusted: window.__mapOriginalTrusted === true,
+            }));
+            console.log('OL_VERSION=' + process.env.OL_VERSION);
+            console.log('EVENTS=' + result.events.join(' > '));
+            console.log('DIAGNOSTICS\n' + result.diagnostics);
+            console.log(JSON.stringify(result));
+            if (result.popup !== 'OPENLAYERS_TRUSTED_TOUCH_OPENED') throw new Error('popup did not open from trusted touch lifecycle');
+            if (!result.mapOriginalTrusted) throw new Error('OpenLayers did not receive trusted touch source');
+            if (!/Engine: OpenLayers \/ instances: 1 \/ calls: 1/.test(result.diagnostics)) throw new Error('OpenLayers map not recovered/called once');
+            if (!/OpenLayers direct: 1 \/ feature hits: 0 \/ recovery: OpenLayers-bound/.test(result.diagnostics)) throw new Error('direct OpenLayers diagnostics mismatch');
+            if (!/Context events: 0 \/ observed: 0/.test(result.diagnostics)) throw new Error('fell back to synthetic DOM contextmenu');
+            if (!result.events.some(e => e === 'touchstart*') || !result.events.some(e => e === 'touchend*')) throw new Error('browser did not generate trusted touch lifecycle: ' + result.events.join(','));
+            await browser.close();
+          })().catch(e => { console.error(e); process.exit(1); });
+          JS
+          CHROME_PATH="$CHROME" OL_VERSION="$OL_VERSION" node verify-touch.cjs
