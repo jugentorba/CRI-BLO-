@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 const swiftPath = "plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift";
+const testPath = "scripts/test-ios-longpress-bridge.mjs";
 let swift = fs.readFileSync(swiftPath, "utf8");
 
 function replaceRegex(label, regex, replacement) {
@@ -46,4 +47,14 @@ replaceRegex(
 );
 
 fs.writeFileSync(swiftPath, swift);
+
+let test = fs.readFileSync(testPath, "utf8");
+const productionModeMarker = "globalThis.window = windowTarget;\nglobalThis.document = documentTarget;\nglobalThis.location = windowTarget.location;\nnew Function(match[1])();";
+if (!test.includes(productionModeMarker)) throw new Error("test production-mode marker not found");
+test = test.replace(
+  productionModeMarker,
+  "globalThis.window = windowTarget;\nglobalThis.document = documentTarget;\nglobalThis.location = windowTarget.location;\nwindowTarget.__cribloGeoReseauxAndroidCompat = true;\nnew Function(match[1])();",
+);
+fs.writeFileSync(testPath, test);
+
 console.log("Applied browser-level GeoReseaux Android-order conversion");
