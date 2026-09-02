@@ -1,7 +1,6 @@
 import fs from "node:fs";
 
 const swiftPath = "plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift";
-const testPath = "scripts/test-ios-longpress-bridge.mjs";
 
 function replaceOnce(text, label, from, to) {
   const i = text.indexOf(from);
@@ -30,7 +29,7 @@ swift = replaceOnce(
   swift,
   "late physical pointer up immediate replay",
   `              __cribloHeldPointerUpFallback = setTimeout(function () {\n                if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');\n              }, 55);`,
-  `              __cribloHeldPointerUpFallback = setTimeout(function () {\n                if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');\n              }, 55);\n              var activeRequest = pendingNativeLongPress;\n              if (activeRequest && activeRequest.armed && activeRequest.releasedAt) {\n                // Chromium/OpenLayers 7 can emit mouseup/click before pointerup.\n                // touchend has already propagated in that path, so present the\n                // held trusted pointerup immediately, then replay the held tail.\n                setTimeout(function () {\n                  if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');\n                }, 0);\n              }`,
+  `              __cribloHeldPointerUpFallback = setTimeout(function () {\n                if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');\n              }, 55);\n              var activeRequest = pendingNativeLongPress;\n              if (activeRequest && activeRequest.armed && activeRequest.releasedAt) {\n                setTimeout(function () {\n                  if (__cribloHeldPointerUp === event) dispatchHeldAndroidPointer('up');\n                }, 0);\n              }`,
 );
 
 swift = replaceOnce(
@@ -58,24 +57,14 @@ swift = replaceOnce(
   swift,
   "page wrapper holds early tail",
   `        var wrapper = function (event) {\n          var name = String(event && event.type || '').toLowerCase();\n          var presented = syntheticContextFacade(event);`,
-  `        var wrapper = function (event) {\n          var name = String(event && event.type || '').toLowerCase();\n          // Boundary capture is the primary guard. This listener-level guard is\n          // intentional redundancy for engines/frameworks that retarget events\n          // in a way that lets the native compatibility tail reach this wrapper.\n          if (shouldHoldCompatibilityMouseTail(event, name)) return;\n          if (name === 'mousedown') {\n            try {\n              if (event && event.isTrusted && compatSyntheticMouseDownTarget\n                  && Date.now() - compatSyntheticMouseDownAt < 2500\n                  && sameMapPressTarget(event.target, compatSyntheticMouseDownTarget)) return;\n            } catch (_) {}\n          }\n          var presented = syntheticContextFacade(event);`,
+  `        var wrapper = function (event) {\n          var name = String(event && event.type || '').toLowerCase();\n          if (shouldHoldCompatibilityMouseTail(event, name)) return;\n          if (name === 'mousedown') {\n            try {\n              if (event && event.isTrusted && compatSyntheticMouseDownTarget\n                  && Date.now() - compatSyntheticMouseDownAt < 2500\n                  && sameMapPressTarget(event.target, compatSyntheticMouseDownTarget)) return;\n            } catch (_) {}\n          }\n          var presented = syntheticContextFacade(event);`,
 );
 
 swift = replaceOnce(
   swift,
   "touchend fallback waits for pointer/tail",
   `            // The real iPhone trace shows no WebKit mouseup/click for a hold.\n            // Finish the Android compatibility mouse tail in the next task, after\n            // GeoReseaux's genuine touchend handlers have completed. If WebKit\n            // did produce a real click, the capture listener wins and this is a no-op.\n            setTimeout(function () {\n              if (pendingNativeLongPress === request && request.armed && !request.tailCompletionScheduled) {\n                request.tailCompletionScheduled = true;\n                completeAndroidLongPress(request, 'android-compat-tail');\n              }\n            }, 0);`,
-  `            // Do not complete immediately at touchend. OpenLayers 7/Chromium\n            // can produce mouseup/click before its trusted pointerup. Hold that\n            // compatibility tail, present pointerup first, then replay the tail.\n            // On WKWebView versions with no mouse tail, this short watchdog\n            // creates only the missing release events after pointerup.\n            setTimeout(function () {\n              if (pendingNativeLongPress !== request || !request.armed || request.tailCompletionScheduled) return;\n              ensureAndroidPointerUpAfterTouchEnd(request);\n              if (request.tailCompletionScheduled) return;\n              request.tailCompletionScheduled = true;\n              completeAndroidLongPress(request, 'android-compat-tail');\n            }, 90);`,
+  `            // OpenLayers 7/Chromium can produce mouseup/click before its\n            // trusted pointerup. Hold that tail, present pointerup first, then\n            // replay the tail. WKWebView with no native mouse tail uses this\n            // watchdog to create only the missing release events afterwards.\n            setTimeout(function () {\n              if (pendingNativeLongPress !== request || !request.armed || request.tailCompletionScheduled) return;\n              ensureAndroidPointerUpAfterTouchEnd(request);\n              if (request.tailCompletionScheduled) return;\n              request.tailCompletionScheduled = true;\n              completeAndroidLongPress(request, 'android-compat-tail');\n            }, 90);`,
 );
 
 fs.writeFileSync(swiftPath, swift);
-
-let test = fs.readFileSync(testPath, "utf8");
-test = replaceOnce(
-  test,
-  "pointer facade assertion",
-  `for (const name of ["pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {\n  const event = lifecycle.find((entry) => entry.name === name);\n  if (!event || !event.trusted || !event.touchSource || event.which !== 1) throw new Error(name + " facade mismatch: " + JSON.stringify(event));\n}`,
-  `for (const name of ["pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {\n  const event = lifecycle.find((entry) => entry.name === name);\n  if (!event || !event.trusted || !event.touchSource) throw new Error(name + " facade mismatch: " + JSON.stringify(event));\n  if (["mousedown", "mouseup", "click"].includes(name) && event.which !== 1) throw new Error(name + " mouse facade which mismatch: " + JSON.stringify(event));\n}`,
-);
-
-fs.writeFileSync(testPath, test);
