@@ -74,6 +74,7 @@ new Function(match[1])();
 
 let received = null;
 let pageOrder = [];
+
 function pageContextHandler(event) {
   event.preventDefault();
   pageOrder.push("contextmenu");
@@ -86,28 +87,55 @@ function pageContextHandler(event) {
     touchSource: Boolean(event.sourceCapabilities?.firesTouchEvents),
     clientX: event.clientX,
     clientY: event.clientY,
+    button: event.button,
+    buttons: event.buttons,
+    pointerType: event.pointerType,
   };
 }
 
-function realPointerDown(x, y) {
-  const event = new TestPointerEvent("pointerdown", {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: y,
-    pointerId: 9,
-    pointerType: "touch",
-    isPrimary: true,
-    button: 0,
-    buttons: 1,
-  });
-  Object.defineProperty(event, "isTrusted", { value: true });
+function trustedEvent(event) {
+  Object.defineProperty(event, "isTrusted", { configurable: true, value: true });
+  return event;
+}
+
+function realPointerEvent(type, x, y, buttons) {
+  const event = trustedEvent(
+    new TestPointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      screenX: x,
+      screenY: y,
+      pointerId: 9,
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      buttons,
+      pressure: buttons ? 1 : 0,
+    }),
+  );
+  canvas.dispatchEvent(event);
+}
+
+function realMouseEvent(type, x, y, buttons) {
+  const event = trustedEvent(
+    new TestPointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      screenX: x,
+      screenY: y,
+      button: 0,
+      buttons,
+    }),
+  );
   canvas.dispatchEvent(event);
 }
 
 function realTouchEvent(type, x, y) {
-  const event = new Event(type, { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "isTrusted", { value: true });
+  const event = trustedEvent(new Event(type, { bubbles: true, cancelable: true }));
   const touch = {
     identifier: 9,
     target: canvas,
@@ -131,17 +159,55 @@ function wait(ms = 15) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-canvas.addEventListener("contextmenu", pageContextHandler);
-canvas.addEventListener("touchstart", () => pageOrder.push("touchstart"));
+function installOrderListeners() {
+  for (const type of [
+    "touchstart",
+    "pointerdown",
+    "mousedown",
+    "touchend",
+    "pointerup",
+    "mouseup",
+    "click",
+  ]) {
+    canvas.addEventListener(type, () => pageOrder.push(type));
+  }
+}
 
-// Normal WebKit ordering: the physical touch reaches the page before the
-// native recognizer fires. The context event must use exact touch coordinates.
-realPointerDown(82, 31);
-realTouchEvent("touchstart", 82, 31);
+function androidPressStart(x, y) {
+  // Exact order measured on the working Android CRI-BLO WebView.
+  realTouchEvent("touchstart", x, y);
+  realPointerEvent("pointerdown", x, y, 1);
+  realMouseEvent("mousedown", x, y, 1);
+}
+
+function androidReleaseTail(x, y) {
+  // Exact release tail measured on Android. contextmenu is emitted by the
+  // iOS bridge after this tail, so it must not be manually dispatched here.
+  realTouchEvent("touchend", x, y);
+  realPointerEvent("pointerup", x, y, 0);
+  realMouseEvent("mouseup", x, y, 0);
+  realMouseEvent("click", x, y, 0);
+}
+
+canvas.addEventListener("contextmenu", pageContextHandler);
+installOrderListeners();
+
+// Normal WKWebView path: the page sees the physical touch first. The native
+// 600 ms recognizer only ARMS the compatibility gesture. It must not dispatch
+// contextmenu until the user releases and the Android-style release tail ends.
+androidPressStart(82, 31);
+await wait(1);
 
 if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
   throw new Error("native long-press bridge did not accept the hold request");
 }
+await wait();
+
+if (received !== null || pageOrder.includes("contextmenu")) {
+  throw new Error(`contextmenu fired before release: ${pageOrder.join(",")}`);
+}
+
+androidReleaseTail(82, 31);
 await wait();
 
 const normalFlags = received && [
@@ -157,28 +223,40 @@ if (!received || normalFlags.some((value) => value !== true)) {
 if (received.clientX !== 82 || received.clientY !== 31) {
   throw new Error(`native estimate replaced real touch coordinates: ${JSON.stringify(received)}`);
 }
-if (pageOrder.join(",") !== "touchstart,contextmenu") {
-  throw new Error(`normal event order is wrong: ${pageOrder.join(",")}`);
+if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
+  throw new Error(`contextmenu shape does not match Android: ${JSON.stringify(received)}`);
 }
 
-// Delayed WKWebView ordering observed on-device: native recognition arrives
-// first. The bridge must wait for touchstart to finish propagating, then emit
-// contextmenu with that touch's coordinates rather than the WebView estimate.
-realTouchEvent("touchend", 82, 31);
+const expectedOrder =
+  "touchstart,pointerdown,mousedown,touchend,pointerup,mouseup,click,contextmenu";
+if (pageOrder.join(",") !== expectedOrder) {
+  throw new Error(`normal Android event order is wrong: ${pageOrder.join(",")}`);
+}
+
+// Delayed WKWebView path observed on-device: the native recognizer can arrive
+// before DOM touchstart. It must wait, arm once touchstart arrives, and still
+// hold contextmenu until the release tail has completed.
 received = null;
 pageOrder = [];
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await wait(5);
-realPointerDown(73, 27);
-realTouchEvent("touchstart", 73, 27);
+androidPressStart(73, 27);
+await wait();
+
+if (received !== null || pageOrder.includes("contextmenu")) {
+  throw new Error(`delayed path fired contextmenu before release: ${pageOrder.join(",")}`);
+}
+
+androidReleaseTail(73, 27);
 await wait();
 
 if (!received || received.clientX !== 73 || received.clientY !== 27) {
   throw new Error(`delayed touch coordinates were not preserved: ${JSON.stringify(received)}`);
 }
-if (pageOrder.join(",") !== "touchstart,contextmenu") {
-  throw new Error(`delayed event order is wrong: ${pageOrder.join(",")}`);
+if (pageOrder.join(",") !== expectedOrder) {
+  throw new Error(`delayed Android event order is wrong: ${pageOrder.join(",")}`);
 }
+
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
 if (!diagnostics.includes("Native waits for touchstart: 1")) {
   throw new Error(`delayed native wait was not recorded: ${diagnostics}`);
@@ -186,17 +264,26 @@ if (!diagnostics.includes("Native waits for touchstart: 1")) {
 if (!diagnostics.includes("Native/touch coordinate delta: 27,23")) {
   throw new Error(`touch coordinate correction was not recorded: ${diagnostics}`);
 }
+if (!diagnostics.includes("Release completions: 2")) {
+  throw new Error(`release completion count is wrong: ${diagnostics}`);
+}
+if (!diagnostics.includes("contextmenu*")) {
+  throw new Error(`trusted-source contextmenu was not recorded: ${diagnostics}`);
+}
 
+// Listener removal must still preserve the page's original listener identity.
 canvas.removeEventListener("contextmenu", pageContextHandler);
-realTouchEvent("touchend", 73, 27);
 received = null;
-realPointerDown(60, 20);
-realTouchEvent("touchstart", 60, 20);
+pageOrder = [];
+androidPressStart(60, 20);
+await wait(1);
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
+await wait();
+androidReleaseTail(60, 20);
 await wait();
 
 if (received !== null) {
   throw new Error("wrapped context listener was not removed by its original identity");
 }
 
-console.log("iOS long-press browser-path facade test passed");
+console.log("iOS GeoReseaux Android-order long-press bridge test passed");
