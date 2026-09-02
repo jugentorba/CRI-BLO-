@@ -1,4 +1,5 @@
 name: Validate browser-level GeoReseaux Android ordering
+# Validation checkpoint: test the committed application source only; never patch here.
 
 on:
   push:
