@@ -36,6 +36,9 @@ jobs:
       - name: Lint source
         run: npm run lint
 
+      - name: Test iOS long-press bridge
+        run: npm run test:ios-longpress-bridge
+
       - name: Upload PWA
         uses: actions/upload-artifact@v4
         with:

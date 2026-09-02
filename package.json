@@ -7,6 +7,7 @@
     "dev": "vite dev",
     "build": "vite build && node scripts_apkforge_postbuild.mjs",
     "build:dev": "vite build --mode development",
+    "test:ios-longpress-bridge": "node scripts/test-ios-longpress-bridge.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",

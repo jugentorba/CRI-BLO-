@@ -728,10 +728,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         let ry = max(0, min(1, location.y / webView.bounds.height))
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // v14: do not dispatch an untrusted DOM contextmenu. Call the page's
-        // already-registered contextmenu handler directly, with a facade backed
-        // by the genuine trusted iOS touchstart event, at Android's ~600ms timing.
-        let script = "window.__cribloNativeTrustedHandlerLongPress && window.__cribloNativeTrustedHandlerLongPress(\(rx), \(ry));"
+        // Dispatch one Android-shaped context event through WebKit's normal
+        // capture/bubble path. GeoReseaux's registered listener receives a
+        // facade backed by the genuine trusted iOS touchstart event.
+        let script = "window.__cribloNativeWrappedContextLongPress && window.__cribloNativeWrappedContextLongPress(\(rx), \(ry));"
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
@@ -972,13 +972,91 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       window.__cribloLongPressInstalled = true;
 
 
-      // Capture the page's own long-press/context handlers as they are
-      // registered. On iOS WebKit a synthetic dispatchEvent is always
-      // isTrusted=false; calling the already-registered application handler
-      // directly avoids depending on WebKit manufacturing an Android-style
-      // trusted contextmenu event.
+      // WebKit always exposes a JavaScript-created event as isTrusted=false.
+      // Keep the browser's real event propagation instead of calling page
+      // handlers one by one: contextmenu listeners are registered through a
+      // transparent wrapper which presents only CRI-BLO's marked synthetic
+      // hold event through the genuine touch's trusted facade. The underlying
+      // PointerEvent still owns propagation, currentTarget, defaultPrevented,
+      // once/signal handling and listener order.
       var __cribloCapturedListeners = new WeakMap();
+      var __cribloListenerWrappers = new WeakMap();
+      var __cribloSyntheticContextEvents = new WeakSet();
+      var __cribloSyntheticContextFacades = new WeakMap();
       var __cribloOriginalAddEventListener = EventTarget.prototype.addEventListener;
+      var __cribloOriginalRemoveEventListener = EventTarget.prototype.removeEventListener;
+
+      function captureOption(options) {
+        try {
+          if (options === true) return true;
+          return !!(options && typeof options === 'object' && options.capture === true);
+        } catch (_) { return false; }
+      }
+
+      function syntheticContextFacade(event) {
+        if (!event || !__cribloSyntheticContextEvents.has(event)) return event;
+        var cached = __cribloSyntheticContextFacades.get(event);
+        if (cached) return cached;
+        var source = window.__cribloLastTrustedTouchStart || null;
+        var sourceIsTrusted = !!(source && source.isTrusted);
+        try {
+          cached = new Proxy(event, {
+            get: function (raw, prop) {
+              try {
+                if (typeof prop === 'string' && prop.indexOf('__criblo') !== 0) {
+                  __cribloGeoDiag.eventProperties[prop] = (__cribloGeoDiag.eventProperties[prop] || 0) + 1;
+                }
+              } catch (_) {}
+              if (prop === 'isTrusted') return sourceIsTrusted;
+              if (prop === 'sourceCapabilities') return { firesTouchEvents: true };
+              var value;
+              try { value = Reflect.get(raw, prop, raw); } catch (_) { value = raw[prop]; }
+              return typeof value === 'function' ? value.bind(raw) : value;
+            }
+          });
+        } catch (_) {
+          cached = event;
+        }
+        __cribloSyntheticContextFacades.set(event, cached);
+        return cached;
+      }
+
+      function wrappedContextListener(target, listener, options) {
+        var targetMap = __cribloListenerWrappers.get(target);
+        if (!targetMap) {
+          targetMap = new WeakMap();
+          __cribloListenerWrappers.set(target, targetMap);
+        }
+        var entries = targetMap.get(listener);
+        if (!entries) {
+          entries = [];
+          targetMap.set(listener, entries);
+        }
+        var capture = captureOption(options);
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].capture === capture) return entries[i].wrapper;
+        }
+        var wrapper = function (event) {
+          var presented = syntheticContextFacade(event);
+          if (presented !== event) __cribloGeoDiag.wrappedContextCalls++;
+          if (typeof listener === 'function') return listener.call(this, presented);
+          if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(presented);
+        };
+        entries.push({ capture: capture, wrapper: wrapper });
+        return wrapper;
+      }
+
+      function existingContextWrapper(target, listener, options) {
+        var targetMap = __cribloListenerWrappers.get(target);
+        var entries = targetMap && targetMap.get(listener);
+        var capture = captureOption(options);
+        if (!entries) return null;
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].capture === capture) return entries[i].wrapper;
+        }
+        return null;
+      }
+
       try {
         EventTarget.prototype.addEventListener = function (type, listener, options) {
           try {
@@ -990,8 +1068,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
                 list.push({ type: name, listener: listener, options: options });
               }
             }
+            if (listener && name === 'contextmenu') {
+              return __cribloOriginalAddEventListener.call(this, type, wrappedContextListener(this, listener, options), options);
+            }
           } catch (_) {}
           return __cribloOriginalAddEventListener.apply(this, arguments);
+        };
+        EventTarget.prototype.removeEventListener = function (type, listener, options) {
+          try {
+            if (listener && String(type || '').toLowerCase() === 'contextmenu') {
+              var wrapper = existingContextWrapper(this, listener, options);
+              if (wrapper) return __cribloOriginalRemoveEventListener.call(this, type, wrapper, options);
+            }
+          } catch (_) {}
+          return __cribloOriginalRemoveEventListener.apply(this, arguments);
         };
       } catch (_) {}
 
@@ -1009,6 +1099,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         contextDispatches: 0,
         trustedContextmenus: 0,
         trustedContextPrevented: false,
+        syntheticContextmenus: 0,
+        wrappedContextCalls: 0,
         nativeRecognizerFires: 0,
         directTrustedHandlerFires: 0,
         directSourceTrusted: false,
@@ -1430,10 +1522,23 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               button: -1, buttons: 0, pointerId: 1, pointerType: 'touch',
               isPrimary: true, width: 9, height: 9, pressure: 0, view: window
             });
-            return !target.dispatchEvent(event) || event.defaultPrevented;
+            __cribloSyntheticContextEvents.add(event);
+            __cribloGeoDiag.contextDispatches++;
+            target.dispatchEvent(event);
+            return true;
           }
         } catch (_) {}
-        return mouse(target, 'contextmenu', x, y, -1, 0);
+        try {
+          var fallback = new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, composed: true,
+            clientX: x, clientY: y, screenX: x, screenY: y,
+            button: -1, buttons: 0, view: window
+          });
+          __cribloSyntheticContextEvents.add(fallback);
+          __cribloGeoDiag.contextDispatches++;
+          target.dispatchEvent(fallback);
+          return true;
+        } catch (_) { return false; }
       }
 
       function jqueryContextMenu(target, x, y) {
@@ -1791,7 +1896,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // Do not directly call handlers first and do not redispatch to parents:
         // either approach invokes the same framework listener multiple times.
         var before = visiblePopupState();
-        __cribloGeoDiag.contextDispatches++;
         dispatchToTarget(realTouchTarget, realTouchX, realTouchY);
 
         setTimeout(function () {
@@ -1820,8 +1924,15 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
       }, true);
 
-      document.addEventListener('contextmenu', function (event) {
+      // Bypass the page-listener wrapper for CRI-BLO's own observer. This keeps
+      // diagnostics honest: a marked synthetic event is not counted as a real
+      // WebKit trusted contextmenu merely because page listeners see its facade.
+      __cribloOriginalAddEventListener.call(document, 'contextmenu', function (event) {
         try {
+          if (__cribloSyntheticContextEvents.has(event)) {
+            __cribloGeoDiag.syntheticContextmenus++;
+            return;
+          }
           if (!event || !event.isTrusted) return;
           __cribloGeoDiag.trustedContextmenus++;
           __cribloGeoDiag.lastResult = 'trusted-contextmenu';
@@ -1933,7 +2044,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return true;
       };
 
-      window.__cribloNativeTrustedHandlerLongPress = function (rx, ry) {
+      window.__cribloNativeWrappedContextLongPress = function (rx, ry) {
         try {
           __cribloGeoDiag.nativeRecognizerFires++;
           var x = window.innerWidth * clamp01(rx);
@@ -1948,19 +2059,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           __cribloGeoDiag.directSourceTrusted = !!(source && source.isTrusted);
           __cribloGeoDiag.directTarget = String((target.tagName || '') + '#' + (target.id || '') + '.' + (target.className && (target.className.baseVal || target.className) || '')).slice(0, 180);
           __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
+          __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
           var before = visiblePopupState();
-          var callsBefore = __cribloGeoDiag.capturedCalls;
-          var invoked = invokeCapturedSemanticHandlers(target, x, y, source);
-          var delta = __cribloGeoDiag.capturedCalls - callsBefore;
+          var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+          var dispatched = contextMenu(target, x, y);
+          var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
           __cribloGeoDiag.directTrustedHandlerFires += delta;
-          __cribloGeoDiag.lastResult = invoked ? 'direct-trusted-handler-called' : 'direct-no-handler';
+          __cribloGeoDiag.lastResult = dispatched ? 'wrapped-context-dispatched' : 'wrapped-context-error';
           setTimeout(function () {
-            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'direct-handler-popup';
-            else if (invoked) __cribloGeoDiag.lastResult = 'direct-handler-no-popup';
+            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'wrapped-context-popup';
+            else if (dispatched) __cribloGeoDiag.lastResult = 'wrapped-context-no-popup';
           }, 220);
-          return invoked;
+          return dispatched;
         } catch (_) {
-          __cribloGeoDiag.lastResult = 'direct-handler-error';
+          __cribloGeoDiag.lastResult = 'wrapped-context-error';
           return false;
         }
       };
@@ -1975,7 +2087,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'URL: ' + String(location.href || '').slice(0, 180),
           'Target: ' + (__cribloGeoDiag.lastTarget || 'none'),
           'Captured handlers on path: ' + __cribloGeoDiag.capturedListeners,
-          'Context handler calls: ' + __cribloGeoDiag.capturedCalls,
+          'Wrapped page handler calls: ' + __cribloGeoDiag.wrappedContextCalls,
           'Hold/longpress handler calls: ' + __cribloGeoDiag.semanticCalls,
           'Registered maps: ' + (__cribloGeoDiag.registry.join(', ') || 'none'),
           'Detected engine: ' + __cribloGeoDiag.engine,
@@ -1983,14 +2095,15 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Registered map instances: ' + __cribloMapRegistry.length,
           'Last result: ' + __cribloGeoDiag.lastResult,
           'Context dispatches: ' + __cribloGeoDiag.contextDispatches,
+          'Synthetic context events: ' + __cribloGeoDiag.syntheticContextmenus,
           'Synthetic pointerdowns: ' + __cribloGeoDiag.syntheticPointerDowns,
-          'Trusted contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
+          'Real WebKit contextmenus: ' + __cribloGeoDiag.trustedContextmenus,
           'Trusted context prevented: ' + String(!!__cribloGeoDiag.trustedContextPrevented),
           'Native recognizer fires: ' + __cribloGeoDiag.nativeRecognizerFires,
-          'Direct trusted handler fires: ' + __cribloGeoDiag.directTrustedHandlerFires,
-          'Direct source trusted: ' + String(!!__cribloGeoDiag.directSourceTrusted),
-          'Direct target: ' + (__cribloGeoDiag.directTarget || 'none'),
-          'Synthetic context fallback: disabled',
+          'Trusted-facade handler calls: ' + __cribloGeoDiag.directTrustedHandlerFires,
+          'Trusted touch source: ' + String(!!__cribloGeoDiag.directSourceTrusted),
+          'Dispatch target: ' + (__cribloGeoDiag.directTarget || 'none'),
+          'Listener path: browser capture/bubble',
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
           'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat),
