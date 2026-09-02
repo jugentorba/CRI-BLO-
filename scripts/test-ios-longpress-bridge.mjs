@@ -36,21 +36,24 @@ globalThis.getComputedStyle = () => ({
 });
 
 const documentTarget = new EventTarget();
-documentTarget.querySelectorAll = () => [];
+documentTarget.querySelectorAll = (selector) => selector === ".ol-viewport" ? [documentTarget] : [];
 documentTarget.scripts = [];
 documentTarget.parentNode = null;
 documentTarget.parentElement = null;
 documentTarget.nodeType = 1;
 documentTarget.tagName = "CANVAS";
 documentTarget.id = "";
-documentTarget.className = "";
+documentTarget.className = "ol-viewport";
+documentTarget.style = {};
 documentTarget.getBoundingClientRect = () => ({
   left: 0,
   top: 0,
+  right: 200,
+  bottom: 100,
   width: 200,
   height: 100,
 });
-documentTarget.closest = () => null;
+documentTarget.closest = (selector) => selector === ".ol-viewport" ? documentTarget : null;
 
 const windowTarget = new EventTarget();
 windowTarget.window = windowTarget;
@@ -153,6 +156,7 @@ function realTouchEvent(type, x, y) {
     changedTouches: { value: [touch] },
   });
   canvas.dispatchEvent(event);
+  return event;
 }
 
 function wait(ms = 15) {
@@ -178,7 +182,7 @@ function installOrderListeners() {
 // compatibility tail is delayed until after touchend.
 function iosPressStart(x, y) {
   realPointerEvent("pointerdown", x, y, 1);
-  realTouchEvent("touchstart", x, y);
+  return realTouchEvent("touchstart", x, y);
 }
 
 function iosReleaseBeforeMouseTail(x, y) {
@@ -195,84 +199,84 @@ function iosTrustedMouseTail(x, y, clickX = x, clickY = y) {
 canvas.addEventListener("contextmenu", pageContextHandler);
 installOrderListeners();
 
-// Normal real-iPhone path. The native hold only arms the bridge. After
-// touchend, contextmenu MUST remain pending until WebKit sends its genuine
-// trusted mouse/click tail. The delayed click is only a readiness signal; the
-// contextmenu must retain the original physical touch coordinates.
-iosPressStart(82, 31);
+// Research-backed OpenLayers/iOS path. Orange documents SIGReseaux as an
+// Angular/OpenLayers viewer. OpenLayers context-menu controls listen directly
+// on .ol-viewport; Chrome Android synthesizes contextmenu for a long hold while
+// iOS does not. CRI-BLO must prevent the iOS native callout at touchstart and
+// emit exactly one contextmenu on the OpenLayers viewport at native hold time.
+const firstTouchStart = iosPressStart(82, 31);
+if (!firstTouchStart.defaultPrevented) {
+  throw new Error("OpenLayers touchstart was not actively prevented on iOS");
+}
 await wait(1);
 
 if (!windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5)) {
-  throw new Error("native long-press bridge did not accept the hold request");
+  throw new Error("native long-press bridge did not accept the OpenLayers hold");
 }
-await wait();
+await wait(20);
 
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`contextmenu fired before release: ${pageOrder.join(",")}`);
+if (!received) {
+  throw new Error(`OpenLayers viewport contextmenu did not fire at hold time: ${pageOrder.join(",")}`);
 }
-
-iosReleaseBeforeMouseTail(82, 31);
-await wait(25);
-
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`contextmenu raced touchend before trusted click: ${pageOrder.join(",")}`);
-}
-
-// Deliberately give the delayed trusted click DIFFERENT coordinates. The
-// bridge must still dispatch contextmenu at the original long-press point.
-iosTrustedMouseTail(82, 31, 7, 9);
-await wait();
-
-const normalFlags = received && [
+const holdFlags = received && [
   received.trusted,
   received.prevented,
   received.target,
   received.pointerEvent,
   received.touchSource,
 ];
-if (!received || normalFlags.some((value) => value !== true)) {
-  throw new Error(`trusted browser-path facade failed: ${JSON.stringify(received)}`);
+if (holdFlags.some((value) => value !== true)) {
+  throw new Error(`OpenLayers trusted facade failed: ${JSON.stringify(received)}`);
 }
 if (received.clientX !== 82 || received.clientY !== 31) {
-  throw new Error(`delayed click replaced real touch coordinates: ${JSON.stringify(received)}`);
+  throw new Error(`OpenLayers hold coordinates changed: ${JSON.stringify(received)}`);
 }
 if (received.button !== 0 || received.buttons !== 0 || received.pointerType !== "touch") {
-  throw new Error(`contextmenu shape does not match Android: ${JSON.stringify(received)}`);
+  throw new Error(`OpenLayers contextmenu shape is wrong: ${JSON.stringify(received)}`);
+}
+if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
+  throw new Error(`contextmenu was not emitted directly at hold time: ${pageOrder.join(",")}`);
 }
 
-const expectedOrder =
-  "pointerdown,touchstart,pointerup,touchend,mousedown,mouseup,click,contextmenu";
-if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`real-iPhone trusted-tail order is wrong: ${pageOrder.join(",")}`);
+// Even if WKWebView later emits the release/mouse compatibility tail, the
+// OpenLayers path is already complete and must never emit a second menu event.
+iosReleaseBeforeMouseTail(82, 31);
+iosTrustedMouseTail(82, 31, 7, 9);
+await wait(30);
+if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
+  throw new Error(`duplicate contextmenu after WebKit release tail: ${pageOrder.join(",")}`);
+}
+const fullExpected =
+  "pointerdown,touchstart,contextmenu,pointerup,touchend,mousedown,mouseup,click";
+if (pageOrder.join(",") !== fullExpected) {
+  throw new Error(`unexpected OpenLayers iPhone order: ${pageOrder.join(",")}`);
 }
 
-// Delayed WKWebView path: native recognition can arrive before DOM touchstart.
-// It must wait for touchstart, then still wait through touchend for the genuine
-// trusted click tail instead of creating pointer/mouse events itself.
+// Delayed WKWebView path: native recognizer can begin just before DOM
+// touchstart. Once the trusted touch arrives, it must still prevent iOS's
+// native callout and dispatch to .ol-viewport without waiting for touchend.
 received = null;
 pageOrder = [];
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
 await wait(5);
-iosPressStart(73, 27);
-await wait();
+const delayedTouchStart = iosPressStart(73, 27);
+if (!delayedTouchStart.defaultPrevented) {
+  throw new Error("delayed OpenLayers touchstart was not prevented");
+}
+await wait(20);
 
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`delayed path fired contextmenu before release: ${pageOrder.join(",")}`);
+if (!received || received.clientX !== 73 || received.clientY !== 27) {
+  throw new Error(`delayed OpenLayers hold failed: ${JSON.stringify(received)}`);
+}
+if (pageOrder.join(",") !== "pointerdown,touchstart,contextmenu") {
+  throw new Error(`delayed OpenLayers order is wrong: ${pageOrder.join(",")}`);
 }
 
 iosReleaseBeforeMouseTail(73, 27);
-await wait(25);
-if (received !== null || pageOrder.includes("contextmenu")) {
-  throw new Error(`delayed path raced touchend before trusted click: ${pageOrder.join(",")}`);
-}
 iosTrustedMouseTail(73, 27, 1, 1);
-await wait();
-
-if (!received || received.clientX !== 73 || received.clientY !== 27) {
-  throw new Error(`delayed touch coordinates were not preserved: ${JSON.stringify(received)}`);
-}
-if (pageOrder.join(",") !== expectedOrder) {
-  throw new Error(`delayed real-iPhone event order is wrong: ${pageOrder.join(",")}`);
+await wait(20);
+if (pageOrder.filter((name) => name === "contextmenu").length !== 1) {
+  throw new Error(`delayed path duplicated contextmenu: ${pageOrder.join(",")}`);
 }
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
@@ -282,31 +286,35 @@ if (!diagnostics.includes("Native waits for touchstart: 1")) {
 if (!diagnostics.includes("Native/touch coordinate delta: 27,23")) {
   throw new Error(`touch coordinate correction was not recorded: ${diagnostics}`);
 }
-if (!diagnostics.includes("Release completions: 2")) {
-  throw new Error(`release completion count is wrong: ${diagnostics}`);
+if (!diagnostics.includes("OpenLayers viewport dispatches: 2")) {
+  throw new Error(`OpenLayers viewport dispatch count is wrong: ${diagnostics}`);
+}
+if (!diagnostics.includes("OpenLayers viewport target: CANVAS#.ol-viewport")) {
+  throw new Error(`OpenLayers viewport target was not recorded: ${diagnostics}`);
+}
+if (!diagnostics.includes("Map touchstart prevented: 2")) {
+  throw new Error(`active map touch prevention was not recorded: ${diagnostics}`);
 }
 if (!diagnostics.includes("Synthetic press/release: pd=0 md=0 pu=0 mu=0 click=0")) {
-  throw new Error(`real iPhone path still fabricated pointer/mouse events: ${diagnostics}`);
+  throw new Error(`OpenLayers path fabricated low-level events: ${diagnostics}`);
+}
+if (!diagnostics.includes("Release completions: 0")) {
+  throw new Error(`OpenLayers path incorrectly waited for release: ${diagnostics}`);
 }
 if (!diagnostics.includes("contextmenu*")) {
-  throw new Error(`trusted-source contextmenu was not recorded: ${diagnostics}`);
+  throw new Error(`trusted-source contextmenu was not traced: ${diagnostics}`);
 }
 
-// Listener removal must preserve the page's original listener identity.
+// Listener removal must still preserve the page's original listener identity.
 canvas.removeEventListener("contextmenu", pageContextHandler);
 received = null;
 pageOrder = [];
 iosPressStart(60, 20);
 await wait(1);
 windowTarget.__cribloNativeWrappedContextLongPress(0.5, 0.5);
-await wait();
-iosReleaseBeforeMouseTail(60, 20);
-await wait(25);
-iosTrustedMouseTail(60, 20, 2, 2);
-await wait();
-
+await wait(20);
 if (received !== null) {
   throw new Error("wrapped context listener was not removed by its original identity");
 }
 
-console.log("iOS GeoReseaux real-WebKit trusted-tail long-press bridge test passed");
+console.log("iOS GeoReseaux OpenLayers viewport long-press bridge test passed");

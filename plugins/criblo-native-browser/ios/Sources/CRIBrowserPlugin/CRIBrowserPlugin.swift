@@ -1013,6 +1013,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               } catch (_) {}
               if (prop === 'isTrusted') return sourceIsTrusted;
               if (prop === 'sourceCapabilities') return { firesTouchEvents: true };
+              // The raw event is synthetic, but page code should see the same
+              // touch-pointer semantic shape Chrome/Android exposes for a hold.
+              if (prop === 'pointerType') return 'touch';
+              if (prop === 'pointerId') return 1;
+              if (prop === 'isPrimary') return true;
+              if (prop === 'width' || prop === 'height') return 9;
+              if (prop === 'pressure') return 0;
               var value;
               try { value = Reflect.get(raw, prop, raw); } catch (_) { value = raw[prop]; }
               return typeof value === 'function' ? value.bind(raw) : value;
@@ -1120,7 +1127,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         coordinateDelta: 'none',
         directTrustedHandlerFires: 0,
         directSourceTrusted: false,
-        directTarget: 'none'
+        directTarget: 'none',
+        openLayersViewportDispatches: 0,
+        mapTouchStartsPrevented: 0,
+        openLayersViewportTarget: 'none'
       };
 
       function traceAndroidEvent(name, trusted) {
@@ -1622,6 +1632,65 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }
 
 
+      // SIGReseaux is documented by Orange as an Angular/OpenLayers viewer.
+      // OpenLayers context-menu controls attach their DOM listener to
+      // map.getViewport(), i.e. the .ol-viewport element.  On iOS the browser
+      // does not synthesize Chrome/Android's long-press contextmenu, so target
+      // that viewport explicitly instead of replaying a fake mouse sequence.
+      function openLayersViewportFor(target, x, y) {
+        try {
+          var node = target;
+          for (var i = 0; node && i < 12; i++, node = node.parentElement) {
+            var cls = String(node.className && (node.className.baseVal || node.className) || '');
+            if (/(^|\s)ol-viewport(\s|$)/.test(cls)) return node;
+          }
+        } catch (_) {}
+        try {
+          var closest = target && target.closest && target.closest('.ol-viewport');
+          if (closest) return closest;
+        } catch (_) {}
+        try {
+          var viewports = document.querySelectorAll('.ol-viewport');
+          for (var v = 0; v < viewports.length; v++) {
+            var rect = viewports[v].getBoundingClientRect();
+            if (rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return viewports[v];
+          }
+        } catch (_) {}
+        return null;
+      }
+
+      function suppressIOSMapCallout(viewport, target) {
+        try {
+          var node = target;
+          for (var i = 0; node && i < 12; i++, node = node.parentElement) {
+            if (node.style) {
+              node.style.webkitTouchCallout = 'none';
+              node.style.webkitUserSelect = 'none';
+              node.style.userSelect = 'none';
+            }
+            if (node === viewport) break;
+          }
+          if (viewport && viewport.style) {
+            viewport.style.webkitTouchCallout = 'none';
+            viewport.style.webkitUserSelect = 'none';
+            viewport.style.userSelect = 'none';
+          }
+        } catch (_) {}
+      }
+
+      function dispatchOpenLayersViewportContextMenu(target, x, y, sourceEvent) {
+        var viewport = openLayersViewportFor(target, x, y);
+        if (!viewport) return false;
+        suppressIOSMapCallout(viewport, target);
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        __cribloGeoDiag.openLayersViewportTarget = String((viewport.tagName || '') + '#' + (viewport.id || '') + '.' + (viewport.className && (viewport.className.baseVal || viewport.className) || '')).slice(0, 180);
+        __cribloGeoDiag.openLayersViewportDispatches++;
+        var dispatched = contextMenu(viewport, x, y, sourceEvent);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        __cribloGeoDiag.directTrustedHandlerFires += Math.max(0, delta);
+        return dispatched;
+      }
+
       function viewportPoint(element, x, y) {
         try {
           var rect = element && element.getBoundingClientRect && element.getBoundingClientRect();
@@ -2011,6 +2080,28 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
         lastRealTouchLongPressAt = Date.now();
 
+        // Orange documents SIGReseaux as Angular + OpenLayers.  The common
+        // OpenLayers context-menu control listens on map.getViewport() and then
+        // derives map pixel/coordinate directly from event.clientX/clientY.
+        // Chrome Android creates this event from a hold; iOS does not.  Emit the
+        // one missing event at recognition time and stop here: no fake release
+        // tail, no duplicate pointer/mouse events, and no dependency on a click.
+        if (openLayersViewportFor(request.target, request.x, request.y)) {
+          var before = visiblePopupState();
+          var dispatched = dispatchOpenLayersViewportContextMenu(
+            request.target, request.x, request.y, request.sourceEvent
+          );
+          pendingNativeLongPress = null;
+          __cribloGeoDiag.lastResult = dispatched
+            ? 'openlayers-viewport-contextmenu-at-hold'
+            : 'openlayers-viewport-contextmenu-error';
+          setTimeout(function () {
+            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'openlayers-viewport-popup';
+          }, 220);
+          return dispatched;
+        }
+
+        // Non-OpenLayers pages keep the older generic release-tail fallback.
         __cribloGeoDiag.lastResult = 'trusted-webkit-tail-armed-waiting-release';
         return true;
       }
@@ -2161,6 +2252,22 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var touch = event.touches[0];
           var target = event.target;
           if (!mapLikeTarget(target)) return;
+
+          // WebKit can take ownership of a long press before page code sees a
+          // contextmenu.  Its own bug tracker recommends an active touchstart
+          // preventDefault() for canvas-style interfaces.  Restrict this to the
+          // OpenLayers viewport so normal links/forms in Orange remain native.
+          var openLayersViewport = openLayersViewportFor(target, touch.clientX, touch.clientY);
+          if (openLayersViewport) {
+            suppressIOSMapCallout(openLayersViewport, target);
+            try {
+              if (event.cancelable) {
+                event.preventDefault();
+                if (event.defaultPrevented) __cribloGeoDiag.mapTouchStartsPrevented++;
+              }
+            } catch (_) {}
+          }
+
           var touchStartNow = Date.now();
           traceAndroidEvent('touchstart', !!event.isTrusted);
 
@@ -2197,7 +2304,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             __cribloGeoDiag.lastResult = 'touchstart-ready-before-native';
           }
         } catch (_) {}
-      }, { capture: true, passive: true });
+      }, { capture: true, passive: false });
 
       document.addEventListener('touchmove', function (event) {
         try {
@@ -2347,6 +2454,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Native/touch coordinate delta: ' + __cribloGeoDiag.coordinateDelta,
           'Context events: ' + __cribloGeoDiag.contextDispatches + ' / observed: ' + __cribloGeoDiag.syntheticContextmenus,
           'Synthetic context prevented: ' + String(!!__cribloGeoDiag.syntheticContextPrevented),
+          'OpenLayers viewport dispatches: ' + __cribloGeoDiag.openLayersViewportDispatches,
+          'OpenLayers viewport target: ' + __cribloGeoDiag.openLayersViewportTarget,
+          'Map touchstart prevented: ' + __cribloGeoDiag.mapTouchStartsPrevented,
           'Synthetic press/release: pd=' + __cribloGeoDiag.syntheticPointerDowns + ' md=' + __cribloGeoDiag.syntheticMouseDowns + ' pu=' + __cribloGeoDiag.syntheticPointerUps + ' mu=' + __cribloGeoDiag.syntheticMouseUps + ' click=' + __cribloGeoDiag.syntheticClicks,
           'Release completions: ' + __cribloGeoDiag.releaseCompletions,
           'Android-order trace (*=trusted source): ' + (__cribloGeoDiag.androidSequence.join(' > ') || 'none'),
