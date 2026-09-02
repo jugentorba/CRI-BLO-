@@ -2136,8 +2136,29 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
         lastRealTouchLongPressAt = Date.now();
 
-        __cribloGeoDiag.lastResult = 'trusted-webkit-tail-armed-waiting-release';
-        return true;
+        // The working Android diagnostic shows contextmenu at ~600 ms while
+        // the finger is STILL DOWN, before pointerup/touchend. The previous iOS
+        // bridge waited until physical release (often >1.5 s), which is too late
+        // for GeoReseaux's internal feature-selection state. Dispatch the one
+        // missing contextmenu now, at native recognition time, and clear the
+        // request so release can never emit a duplicate.
+        var before = visiblePopupState();
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var dispatched = contextMenu(request.target, request.x, request.y, request.sourceEvent);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        __cribloGeoDiag.directTrustedHandlerFires += delta;
+        __cribloGeoDiag.contextAfterTouchMs = lastRealTouchStartAt
+          ? Math.max(0, Date.now() - lastRealTouchStartAt)
+          : -1;
+        pendingNativeLongPress = null;
+        __cribloGeoDiag.lastResult = dispatched
+          ? 'native-hold-contextmenu'
+          : 'native-hold-contextmenu-error';
+        setTimeout(function () {
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'native-hold-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'native-hold-no-popup';
+        }, 220);
+        return dispatched;
       }
 
       function fallbackNativeLongPressRequest(request) {
@@ -2156,8 +2177,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.directTarget = String((target.tagName || '') + '#' + (target.id || '') + '.' + (target.className && (target.className.baseVal || target.className) || '')).slice(0, 180);
         __cribloGeoDiag.lastTarget = __cribloGeoDiag.directTarget;
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(target);
-        __cribloGeoDiag.lastResult = 'touchstart-timeout-android-sequence';
-        scheduleAndroidTouchFallback(target, x, y);
+        // If WKWebView delays DOM touchstart beyond the native recognizer,
+        // do not fabricate a second touch/pointer/mouse lifecycle. The native
+        // point is already in CSS-point coordinates for this full-screen
+        // WKWebView, so emit the same single hold contextmenu directly.
+        __cribloGeoDiag.lastResult = 'touchstart-timeout-contextmenu-at-hold';
+        var before = visiblePopupState();
+        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var dispatched = contextMenu(target, x, y, null);
+        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
+        __cribloGeoDiag.directTrustedHandlerFires += delta;
+        setTimeout(function () {
+          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'touchstart-timeout-popup';
+          else if (dispatched) __cribloGeoDiag.lastResult = 'touchstart-timeout-no-popup';
+        }, 220);
       }
 
       function fireRealTouchLongPress() {
@@ -2436,13 +2469,13 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           } else {
             __cribloGeoDiag.nativeWaitsForTouchStart++;
             __cribloGeoDiag.lastResult = 'native-waiting-for-touchstart';
-            // The normal delayed WKWebView touchstart arrives within a few
-            // milliseconds. If it never arrives, fall back to a complete
-            // Android-shaped sequence instead of sending contextmenu before
-            // gesture state exists.
+            // Give delayed WKWebView touchstart a short chance to bind the
+            // genuine target/coordinates. If it still has not arrived, use the
+            // native hold point directly. Do not wait for finger release and do
+            // not fabricate pointer/mouse events.
             setTimeout(function () {
               fallbackNativeLongPressRequest(request);
-            }, 260);
+            }, 90);
           }
           return true;
         } catch (_) {
