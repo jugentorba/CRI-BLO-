@@ -33,15 +33,13 @@ jobs:
               -D /tmp/h -o /tmp/b -w 'final_url=%{url_effective}\nhttp=%{http_code}\nctype=%{content_type}\nsize=%{size_download}\n' "$URL" || true
             echo '--- response chain ---'
             grep -Ei '^(HTTP/|location:|content-type:|server:|set-cookie:)' /tmp/h | sed -E 's/(set-cookie: [^=]+=)[^;]*/\1[redacted]/I' | tail -80 || true
-            echo '--- title/scripts/styles/forms ---'
-            python3 - <<'PY'
-from pathlib import Path
-import re
-p=Path('/tmp/b')
-text=p.read_text('utf-8','replace') if p.exists() else ''
-for pat in [r'<title[^>]*>.*?</title>', r'<script[^>]+src=["\x27]([^"\x27]+)', r'<link[^>]+href=["\x27]([^"\x27]+)', r'<form[^>]+action=["\x27]([^"\x27]+)']:
-    for m in re.finditer(pat,text,re.I|re.S):
-        print((m.group(1) if m.lastindex else m.group(0))[:500])
-print('BODY_PREFIX:', re.sub(r'\s+',' ',text[:4000])[:4000])
-PY
+            echo '--- title ---'
+            grep -Eio '<title[^>]*>[^<]{0,300}</title>' /tmp/b | head -10 || true
+            echo '--- scripts ---'
+            grep -Eo 'src=["'"'][^"'"']+["'"']' /tmp/b | head -80 || true
+            echo '--- styles/links ---'
+            grep -Eo 'href=["'"'][^"'"']+["'"']' /tmp/b | head -80 || true
+            echo '--- body prefix ---'
+            head -c 5000 /tmp/b | tr '\n\r\t' '   ' | head -c 5000 || true
+            echo
           done
