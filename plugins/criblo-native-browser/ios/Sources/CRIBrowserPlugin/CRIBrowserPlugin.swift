@@ -1116,19 +1116,37 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       // WebKit physically sends touch pointerdown before touchstart (and
       // pointerup before touchend), while the measured working Android WebView
-      // exposes the reverse order to GeoReseaux. Intercept the genuine pointer
-      // once at the top of the DOM path and retain it only as the trusted source.
-      // Replay its pointer semantics in the NEXT TASK after the corresponding
-      // genuine TouchEvent. A microtask is not sufficient here: browsers may run
-      // a microtask checkpoint between capture and target listeners.
+      // exposes the reverse order. Capture the genuine WebKit pointer once at
+      // the top of the path and retain it as the trusted source. Its semantics
+      // are replayed only after the matching genuine TouchEvent has completed
+      // all page listeners, but still before browser compatibility-mouse defaults.
       var __cribloHeldPointerDown = null;
       var __cribloHeldPointerUp = null;
       var __cribloObservedPhysicalPointers = new WeakSet();
 
-      function runAfterCurrentEvent(callback) {
-        // A task boundary guarantees the current touch event has completed its
-        // full capture -> target -> bubble propagation before pointer replay.
-        setTimeout(callback, 0);
+      function afterTouchPropagation(eventType, callback) {
+        var finished = false;
+        var fallbackTimer = null;
+        function finish() {
+          if (finished) return;
+          finished = true;
+          if (fallbackTimer) { try { clearTimeout(fallbackTimer); } catch (_) {} }
+          try { __cribloOriginalRemoveEventListener.call(window, eventType, finish, false); } catch (_) {}
+          callback();
+        }
+        try {
+          // This listener is appended during document capture. By the time the
+          // same TouchEvent reaches window bubble, all pre-existing page target,
+          // ancestor, document and window listeners have run. Browser default
+          // compatibility mouse actions have not run yet.
+          __cribloOriginalAddEventListener.call(window, eventType, finish, { capture: false, once: true });
+          // Minimal EventTarget test fixtures do not propagate through Window.
+          // Their fallback runs on the next task; production browsers hit the
+          // window-bubble listener synchronously first.
+          fallbackTimer = setTimeout(finish, 0);
+        } catch (_) {
+          fallbackTimer = setTimeout(finish, 0);
+        }
       }
 
       function dispatchHeldAndroidPointer(kind) {
@@ -1175,8 +1193,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           }
           if (window.__cribloGeoReseauxAndroidCompat && mapLikeTarget(event.target)) {
             if (isDown) __cribloHeldPointerDown = event; else __cribloHeldPointerUp = event;
-            // Stop propagation only. Never preventDefault: WebKit must continue
-            // producing the genuine touch/default stream.
+            // Suppress propagation only. Never preventDefault: WebKit must still
+            // generate the genuine TouchEvent and its normal default behavior.
             event.stopImmediatePropagation();
             return;
           }
@@ -1184,12 +1202,35 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         } catch (_) {}
       }
 
-      // Installed before page scripts. Window capture prevents a later
-      // GeoReseaux/OpenLayers capture listener seeing WebKit's premature pointer.
+      function sameMapPressTarget(a, b) {
+        if (!a || !b) return false;
+        if (a === b) return true;
+        try { if (a.contains && a.contains(b)) return true; } catch (_) {}
+        try { if (b.contains && b.contains(a)) return true; } catch (_) {}
+        return mapLikeTarget(a) && mapLikeTarget(b);
+      }
+
+      function suppressDuplicateCompatibilityMouseDown(event) {
+        try {
+          if (!event || __cribloSyntheticContextEvents.has(event) || !event.isTrusted) return;
+          if (!compatSyntheticMouseDownTarget || !compatSyntheticMouseDownAt) return;
+          if (Date.now() - compatSyntheticMouseDownAt > 2500) return;
+          if (!sameMapPressTarget(event.target, compatSyntheticMouseDownTarget)) return;
+          // We already delivered Android's single mousedown beside touchstart.
+          // Some WebKit/Chromium versions generate another mousedown after
+          // touchend. Drop only that duplicate; genuine mouseup/click are kept.
+          event.stopImmediatePropagation();
+        } catch (_) {}
+      }
+
+      // Installed before page scripts so premature physical pointer events cannot
+      // reach later GeoReseaux/OpenLayers listeners. Marked replays bypass this.
       __cribloOriginalAddEventListener.call(window, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
       __cribloOriginalAddEventListener.call(window, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
       __cribloOriginalAddEventListener.call(document, 'pointerdown', function (event) { capturePhysicalTouchPointer(event, 'down'); }, true);
       __cribloOriginalAddEventListener.call(document, 'pointerup', function (event) { capturePhysicalTouchPointer(event, 'up'); }, true);
+      __cribloOriginalAddEventListener.call(window, 'mousedown', suppressDuplicateCompatibilityMouseDown, true);
+      __cribloOriginalAddEventListener.call(document, 'mousedown', suppressDuplicateCompatibilityMouseDown, true);
 
       // GeoReseaux is bundled, so the OpenLayers Map constructor is not exposed
       // as window.ol.Map. OpenLayers binds Map.handleBrowserEvent to the real Map
@@ -2529,7 +2570,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var touchStartNow = Date.now();
           traceAndroidEvent('touchstart', !!event.isTrusted);
           if (event.isTrusted) {
-            runAfterCurrentEvent(function () { dispatchHeldAndroidPointer('down'); });
+            afterTouchPropagation('touchstart', function () { dispatchHeldAndroidPointer('down'); });
           }
 
           clearRealTouchTimer();
@@ -2622,7 +2663,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         try {
           traceAndroidEvent('touchend', !!(event && event.isTrusted));
           if (event && event.isTrusted) {
-            runAfterCurrentEvent(function () { dispatchHeldAndroidPointer('up'); });
+            afterTouchPropagation('touchend', function () { dispatchHeldAndroidPointer('up'); });
           }
           var request = pendingNativeLongPress;
           var target = realTouchTarget || (event && event.target) || null;
