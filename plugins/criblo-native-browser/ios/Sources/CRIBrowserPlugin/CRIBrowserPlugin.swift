@@ -201,6 +201,19 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     private var tabURLs: [String] = []
     private var currentTabIndex = 0
     private var usesAndroidGeoUserAgent = false
+    private var geoLongPressRecognizer: UILongPressGestureRecognizer?
+    private var prioritizedLongPressRecognizers = Set<ObjectIdentifier>()
+    private var nativeLongPressTouchesReceived = 0
+    private var nativeLongPressShouldBeginCount = 0
+    private var nativeLongPressBeganCount = 0
+    private var nativeLongPressChangedCount = 0
+    private var nativeLongPressEndedCount = 0
+    private var nativeLongPressCancelledCount = 0
+    private var nativeLongPressFailedCount = 0
+    private var nativeLongPressPriorityLinks = 0
+    private var nativeCompetingLongPressClasses: [String] = []
+    private var nativeLongPressLastTransition = "none"
+    private var nativeLongPressLastPoint = "none"
 
     private static let androidGeoUserAgent = "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
 
@@ -287,15 +300,27 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.customUserAgent = Self.safariUserAgent
 
         if longPressCompatibility {
-            // GeoReseaux v13 isolation: restore the same simultaneous native
-            // recognizer that was present when v11 observed a trusted WebKit
-            // contextmenu, but do NOT dispatch any synthetic JS context event.
+            // WKWebView owns several internal long-press recognizers. Chromium's
+            // iOS WebView integration gives its app recognizer priority over the
+            // system context-menu recognizer; do the same here so GeoReseaux's
+            // 600 ms hold cannot be stolen before CRI-BLO sees it.
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleNativeLongPress(_:)))
-            // Android trace: context action begins at about 600 ms.
             longPress.minimumPressDuration = 0.60
+            // A real finger moves a few points even during an intentional hold.
+            // Keep map pans responsive while avoiding false failures from jitter.
+            longPress.allowableMovement = 28
+            longPress.numberOfTouchesRequired = 1
+            longPress.numberOfTapsRequired = 0
             longPress.cancelsTouchesInView = false
+            longPress.delaysTouchesBegan = false
+            longPress.delaysTouchesEnded = false
             longPress.delegate = self
+            geoLongPressRecognizer = longPress
             webView.addGestureRecognizer(longPress)
+            prioritizeGeoLongPressRecognizer()
+            DispatchQueue.main.async { [weak self] in
+                self?.prioritizeGeoLongPressRecognizer()
+            }
         }
 
         view.addSubview(webView)
@@ -469,6 +494,81 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         true
     }
 
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer === geoLongPressRecognizer {
+            nativeLongPressTouchesReceived += 1
+            let point = touch.location(in: webView)
+            nativeLongPressLastPoint = "\(Int(point.x.rounded())),\(Int(point.y.rounded()))"
+            nativeLongPressLastTransition = "touch-received"
+        }
+        return true
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === geoLongPressRecognizer {
+            nativeLongPressShouldBeginCount += 1
+            nativeLongPressLastTransition = "should-begin"
+        }
+        return true
+    }
+
+    private func allGestureRecognizers(in root: UIView) -> [UIGestureRecognizer] {
+        var result = root.gestureRecognizers ?? []
+        for child in root.subviews {
+            result.append(contentsOf: allGestureRecognizers(in: child))
+        }
+        return result
+    }
+
+    private func prioritizeGeoLongPressRecognizer() {
+        guard let ours = geoLongPressRecognizer, webView != nil else { return }
+        var classes = Set(nativeCompetingLongPressClasses)
+        for recognizer in allGestureRecognizers(in: webView) {
+            guard recognizer !== ours, recognizer is UILongPressGestureRecognizer else { continue }
+            classes.insert(NSStringFromClass(type(of: recognizer)))
+            let identifier = ObjectIdentifier(recognizer)
+            if prioritizedLongPressRecognizers.insert(identifier).inserted {
+                // The competing WK recognizer must wait until CRI-BLO's hold
+                // either recognizes or fails. This mirrors Chromium's iOS
+                // context-menu recognizer ordering without calling private API.
+                recognizer.require(toFail: ours)
+                nativeLongPressPriorityLinks += 1
+            }
+        }
+        nativeCompetingLongPressClasses = Array(classes).sorted()
+    }
+
+    private func gestureStateName(_ state: UIGestureRecognizer.State) -> String {
+        switch state {
+        case .possible: return "possible"
+        case .began: return "began"
+        case .changed: return "changed"
+        case .ended: return "ended"
+        case .cancelled: return "cancelled"
+        case .failed: return "failed"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func nativeGeoDiagnosticText() -> String {
+        let state = geoLongPressRecognizer.map { gestureStateName($0.state) } ?? "missing"
+        let competitors = nativeCompetingLongPressClasses.isEmpty
+            ? "none"
+            : nativeCompetingLongPressClasses.joined(separator: ", ")
+        return [
+            "Native UIKit touches received: \(nativeLongPressTouchesReceived)",
+            "Native UIKit shouldBegin: \(nativeLongPressShouldBeginCount)",
+            "Native UIKit callbacks: began=\(nativeLongPressBeganCount) changed=\(nativeLongPressChangedCount) ended=\(nativeLongPressEndedCount) cancelled=\(nativeLongPressCancelledCount) failed=\(nativeLongPressFailedCount)",
+            "Native UIKit last transition: \(nativeLongPressLastTransition)",
+            "Native UIKit last point: \(nativeLongPressLastPoint)",
+            "Native UIKit recognizer state: \(state)",
+            "Native competing long-press recognizers: \(nativeCompetingLongPressClasses.count)",
+            "Native long-press classes: \(competitors)",
+            "Native priority links: \(nativeLongPressPriorityLinks)",
+            "Native config: 0.60s / 28pt / simultaneous"
+        ].joined(separator: "\n")
+    }
+
     @objc private func goBack() {
         if webView.canGoBack { webView.goBack() }
     }
@@ -557,7 +657,9 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         webView.evaluateJavaScript(script) { [weak self] result, _ in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let message = (result as? String) ?? "Aucune information de diagnostic disponible."
+                let jsMessage = (result as? String) ?? "Aucune information de diagnostic disponible."
+                self.prioritizeGeoLongPressRecognizer()
+                let message = jsMessage + "\n\n" + self.nativeGeoDiagnosticText()
                 let controller = UIAlertController(title: "Diagnostic GeoReseaux", message: message, preferredStyle: .alert)
                 controller.addAction(UIAlertAction(title: "OK", style: .default))
                 self.present(controller, animated: true)
@@ -719,18 +821,39 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     }
 
     @objc private func handleNativeLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            nativeLongPressBeganCount += 1
+            nativeLongPressLastTransition = "began"
+        case .changed:
+            nativeLongPressChangedCount += 1
+            nativeLongPressLastTransition = "changed"
+        case .ended:
+            nativeLongPressEndedCount += 1
+            nativeLongPressLastTransition = "ended"
+        case .cancelled:
+            nativeLongPressCancelledCount += 1
+            nativeLongPressLastTransition = "cancelled"
+        case .failed:
+            nativeLongPressFailedCount += 1
+            nativeLongPressLastTransition = "failed"
+        default:
+            break
+        }
+
         guard recognizer.state == .began,
               webView.bounds.width > 0,
               webView.bounds.height > 0 else { return }
 
         let location = recognizer.location(in: webView)
+        nativeLongPressLastPoint = "\(Int(location.x.rounded())),\(Int(location.y.rounded()))"
         let rx = max(0, min(1, location.x / webView.bounds.width))
         let ry = max(0, min(1, location.y / webView.bounds.height))
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // Dispatch one Android-shaped context event through WebKit's normal
-        // capture/bubble path. GeoReseaux's registered listener receives a
-        // facade backed by the genuine trusted iOS touchstart event.
+        // The native recognizer only arms the long press. JavaScript waits for
+        // the genuine WKWebView release/mouse/click tail, then emits exactly one
+        // contextmenu last, matching the measured Android event order.
         let script = "window.__cribloNativeWrappedContextLongPress && window.__cribloNativeWrappedContextLongPress(\(rx), \(ry));"
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
@@ -742,6 +865,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let networkMode = usesAndroidGeoUserAgent ? "true" : "false"
         webView.evaluateJavaScript("window.__cribloGeoHTTPAndroid = \(networkMode);", completionHandler: nil)
+        prioritizeGeoLongPressRecognizer()
+        DispatchQueue.main.async { [weak self] in self?.prioritizeGeoLongPressRecognizer() }
         recordHistory()
         updateChrome()
     }
@@ -1013,13 +1138,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               } catch (_) {}
               if (prop === 'isTrusted') return sourceIsTrusted;
               if (prop === 'sourceCapabilities') return { firesTouchEvents: true };
-              // The raw event is synthetic, but page code should see the same
-              // touch-pointer semantic shape Chrome/Android exposes for a hold.
-              if (prop === 'pointerType') return 'touch';
-              if (prop === 'pointerId') return 1;
-              if (prop === 'isPrimary') return true;
-              if (prop === 'width' || prop === 'height') return 9;
-              if (prop === 'pressure') return 0;
               var value;
               try { value = Reflect.get(raw, prop, raw); } catch (_) { value = raw[prop]; }
               return typeof value === 'function' ? value.bind(raw) : value;
@@ -1127,10 +1245,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         coordinateDelta: 'none',
         directTrustedHandlerFires: 0,
         directSourceTrusted: false,
-        directTarget: 'none',
-        openLayersViewportDispatches: 0,
-        mapTouchStartsPrevented: 0,
-        openLayersViewportTarget: 'none'
+        directTarget: 'none'
       };
 
       function traceAndroidEvent(name, trusted) {
@@ -1632,65 +1747,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       }
 
 
-      // SIGReseaux is documented by Orange as an Angular/OpenLayers viewer.
-      // OpenLayers context-menu controls attach their DOM listener to
-      // map.getViewport(), i.e. the .ol-viewport element.  On iOS the browser
-      // does not synthesize Chrome/Android's long-press contextmenu, so target
-      // that viewport explicitly instead of replaying a fake mouse sequence.
-      function openLayersViewportFor(target, x, y) {
-        try {
-          var node = target;
-          for (var i = 0; node && i < 12; i++, node = node.parentElement) {
-            var cls = String(node.className && (node.className.baseVal || node.className) || '');
-            if (/(^|\s)ol-viewport(\s|$)/.test(cls)) return node;
-          }
-        } catch (_) {}
-        try {
-          var closest = target && target.closest && target.closest('.ol-viewport');
-          if (closest) return closest;
-        } catch (_) {}
-        try {
-          var viewports = document.querySelectorAll('.ol-viewport');
-          for (var v = 0; v < viewports.length; v++) {
-            var rect = viewports[v].getBoundingClientRect();
-            if (rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return viewports[v];
-          }
-        } catch (_) {}
-        return null;
-      }
-
-      function suppressIOSMapCallout(viewport, target) {
-        try {
-          var node = target;
-          for (var i = 0; node && i < 12; i++, node = node.parentElement) {
-            if (node.style) {
-              node.style.webkitTouchCallout = 'none';
-              node.style.webkitUserSelect = 'none';
-              node.style.userSelect = 'none';
-            }
-            if (node === viewport) break;
-          }
-          if (viewport && viewport.style) {
-            viewport.style.webkitTouchCallout = 'none';
-            viewport.style.webkitUserSelect = 'none';
-            viewport.style.userSelect = 'none';
-          }
-        } catch (_) {}
-      }
-
-      function dispatchOpenLayersViewportContextMenu(target, x, y, sourceEvent) {
-        var viewport = openLayersViewportFor(target, x, y);
-        if (!viewport) return false;
-        suppressIOSMapCallout(viewport, target);
-        var callsBefore = __cribloGeoDiag.wrappedContextCalls;
-        __cribloGeoDiag.openLayersViewportTarget = String((viewport.tagName || '') + '#' + (viewport.id || '') + '.' + (viewport.className && (viewport.className.baseVal || viewport.className) || '')).slice(0, 180);
-        __cribloGeoDiag.openLayersViewportDispatches++;
-        var dispatched = contextMenu(viewport, x, y, sourceEvent);
-        var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        __cribloGeoDiag.directTrustedHandlerFires += Math.max(0, delta);
-        return dispatched;
-      }
-
       function viewportPoint(element, x, y) {
         try {
           var rect = element && element.getBoundingClientRect && element.getBoundingClientRect();
@@ -2080,28 +2136,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.capturedListeners = listenerCountOnPath(request.target);
         lastRealTouchLongPressAt = Date.now();
 
-        // Orange documents SIGReseaux as Angular + OpenLayers.  The common
-        // OpenLayers context-menu control listens on map.getViewport() and then
-        // derives map pixel/coordinate directly from event.clientX/clientY.
-        // Chrome Android creates this event from a hold; iOS does not.  Emit the
-        // one missing event at recognition time and stop here: no fake release
-        // tail, no duplicate pointer/mouse events, and no dependency on a click.
-        if (openLayersViewportFor(request.target, request.x, request.y)) {
-          var before = visiblePopupState();
-          var dispatched = dispatchOpenLayersViewportContextMenu(
-            request.target, request.x, request.y, request.sourceEvent
-          );
-          pendingNativeLongPress = null;
-          __cribloGeoDiag.lastResult = dispatched
-            ? 'openlayers-viewport-contextmenu-at-hold'
-            : 'openlayers-viewport-contextmenu-error';
-          setTimeout(function () {
-            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'openlayers-viewport-popup';
-          }, 220);
-          return dispatched;
-        }
-
-        // Non-OpenLayers pages keep the older generic release-tail fallback.
         __cribloGeoDiag.lastResult = 'trusted-webkit-tail-armed-waiting-release';
         return true;
       }
@@ -2252,22 +2286,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           var touch = event.touches[0];
           var target = event.target;
           if (!mapLikeTarget(target)) return;
-
-          // WebKit can take ownership of a long press before page code sees a
-          // contextmenu.  Its own bug tracker recommends an active touchstart
-          // preventDefault() for canvas-style interfaces.  Restrict this to the
-          // OpenLayers viewport so normal links/forms in Orange remain native.
-          var openLayersViewport = openLayersViewportFor(target, touch.clientX, touch.clientY);
-          if (openLayersViewport) {
-            suppressIOSMapCallout(openLayersViewport, target);
-            try {
-              if (event.cancelable) {
-                event.preventDefault();
-                if (event.defaultPrevented) __cribloGeoDiag.mapTouchStartsPrevented++;
-              }
-            } catch (_) {}
-          }
-
           var touchStartNow = Date.now();
           traceAndroidEvent('touchstart', !!event.isTrusted);
 
@@ -2304,7 +2322,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             __cribloGeoDiag.lastResult = 'touchstart-ready-before-native';
           }
         } catch (_) {}
-      }, { capture: true, passive: false });
+      }, { capture: true, passive: true });
 
       document.addEventListener('touchmove', function (event) {
         try {
@@ -2454,9 +2472,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Native/touch coordinate delta: ' + __cribloGeoDiag.coordinateDelta,
           'Context events: ' + __cribloGeoDiag.contextDispatches + ' / observed: ' + __cribloGeoDiag.syntheticContextmenus,
           'Synthetic context prevented: ' + String(!!__cribloGeoDiag.syntheticContextPrevented),
-          'OpenLayers viewport dispatches: ' + __cribloGeoDiag.openLayersViewportDispatches,
-          'OpenLayers viewport target: ' + __cribloGeoDiag.openLayersViewportTarget,
-          'Map touchstart prevented: ' + __cribloGeoDiag.mapTouchStartsPrevented,
           'Synthetic press/release: pd=' + __cribloGeoDiag.syntheticPointerDowns + ' md=' + __cribloGeoDiag.syntheticMouseDowns + ' pu=' + __cribloGeoDiag.syntheticPointerUps + ' mu=' + __cribloGeoDiag.syntheticMouseUps + ' click=' + __cribloGeoDiag.syntheticClicks,
           'Release completions: ' + __cribloGeoDiag.releaseCompletions,
           'Android-order trace (*=trusted source): ' + (__cribloGeoDiag.androidSequence.join(' > ') || 'none'),
