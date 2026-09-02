@@ -1,4 +1,4 @@
-name: Apply final GeoReseaux lifecycle source
+name: Apply GeoReseaux pointer safety patch
 
 on:
   push:
@@ -22,16 +22,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Generate and persist final lifecycle source
+      - name: Add standalone pointer escape hatch
         run: |
           set -euxo pipefail
-          node scripts/patch-georeso-global-capture-order.mjs
+          node scripts/patch-georeso-pointer-escape-hatch.mjs
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift scripts/test-ios-longpress-bridge.mjs
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
           git diff --cached --check
-          git diff --cached --quiet && { echo "Expected lifecycle source diff is missing"; exit 1; }
-          git commit -m "Complete GeoReseaux Android lifecycle on iOS"
+          git diff --cached --quiet && { echo "Expected pointer safety diff is missing"; exit 1; }
+          git commit -m "Preserve standalone pointer events in GeoReseaux"
           git pull --rebase origin criblo-master-spec-v1
           git push origin HEAD:criblo-master-spec-v1
