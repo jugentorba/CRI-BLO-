@@ -7,11 +7,12 @@ import {
   listAttachments,
   type AttachmentRecord,
 } from "@/lib/attachments/repository";
-import { downloadBlob } from "@/lib/export/folder";
+import { AttachmentViewer } from "@/components/cri/AttachmentViewer";
 
 export function AttachmentsSection({ criId }: { criId: string }) {
   const [items, setItems] = useState<AttachmentRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [openFile, setOpenFile] = useState<AttachmentRecord | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -32,16 +33,6 @@ export function AttachmentsSection({ criId }: { criId: string }) {
     }
   }
 
-  function handleOpen(a: AttachmentRecord) {
-    const url = URL.createObjectURL(a.blob);
-    const win = window.open(url, "_blank");
-    if (!win) {
-      // Certaines WebView bloquent l'ouverture : on retombe sur le téléchargement.
-      downloadBlob(a.name, a.blob);
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  }
-
   async function handleDelete(id: string) {
     if (!confirm("Supprimer ce fichier ?")) return;
     await deleteAttachment(id);
@@ -54,8 +45,9 @@ export function AttachmentsSection({ criId }: { criId: string }) {
         Fichiers supplémentaires
       </h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        Fichiers externes joints à l'intervention (PDF, Word, Excel, images, …).
-        Ils ne sont PAS ajoutés dans le CRI Excel — ils sont inclus dans l'export ZIP.
+        Fichiers externes joints à l'intervention (PDF, Word, Excel, images, …). Ils sont copiés
+        dans ce dossier et restent disponibles après le retrait de la clé USB. Ils ne sont PAS
+        ajoutés dans le CRI Excel — ils sont inclus dans l'export ZIP.
       </p>
 
       <div className="space-y-2">
@@ -74,7 +66,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             </div>
             <button
               type="button"
-              onClick={() => handleOpen(a)}
+              onClick={() => setOpenFile(a)}
               className="min-w-0 flex-1 text-left"
               aria-label={`Ouvrir ${a.name}`}
             >
@@ -85,7 +77,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => handleOpen(a)}
+              onClick={() => setOpenFile(a)}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-primary transition active:scale-95"
               aria-label="Ouvrir le fichier"
             >
@@ -120,6 +112,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
         className="hidden"
         onChange={(e) => void handleFiles(e.target.files)}
       />
+      {openFile && <AttachmentViewer file={openFile} onClose={() => setOpenFile(null)} />}
     </section>
   );
 }

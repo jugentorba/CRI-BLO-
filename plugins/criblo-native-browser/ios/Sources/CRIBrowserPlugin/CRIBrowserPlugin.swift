@@ -200,6 +200,15 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     private var completed = false
     private var tabURLs: [String] = []
     private var currentTabIndex = 0
+    private var usesAndroidGeoUserAgent = false
+
+    private static let androidGeoUserAgent = "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+
+    private static var safariUserAgent: String {
+        let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
+        let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+    }
 
     private lazy var backButton = makeToolbarButton("chevron.backward", action: #selector(goBack))
     private lazy var forwardButton = makeToolbarButton("chevron.forward", action: #selector(goForward))
@@ -275,9 +284,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // WebKit and the login page stay on the same path as Safari Password
         // AutoFill. GeoReseaux Android compatibility is injected only inside
         // the GIS page; it no longer changes the Orange login HTTP identity.
-        let os = UIDevice.current.systemVersion.replacingOccurrences(of: ".", with: "_")
-        let major = UIDevice.current.systemVersion.split(separator: ".").first.map(String.init) ?? "18"
-        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS \(os) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(major).0 Mobile/15E148 Safari/604.1"
+        webView.customUserAgent = Self.safariUserAgent
 
         if longPressCompatibility {
             // GeoReseaux v13 isolation: restore the same simultaneous native
@@ -398,6 +405,24 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var request = URLRequest(url: url)
         request.setValue("fr-FR,fr;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
         webView.load(request)
+    }
+
+    private func requiresAndroidGeoUserAgent(_ url: URL) -> Bool {
+        guard longPressCompatibility else { return false }
+        let host = (url.host ?? "").lowercased()
+        return host == "sigreseaux.orange.fr"
+            || host.contains("georeseaux")
+            || host.contains("geo-reseaux")
+    }
+
+    private func reload(_ request: URLRequest, withAndroidGeoUserAgent enabled: Bool) {
+        usesAndroidGeoUserAgent = enabled
+        webView.customUserAgent = enabled ? Self.androidGeoUserAgent : Self.safariUserAgent
+        var updated = request
+        updated.setValue("fr-FR,fr;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.load(updated)
+        }
     }
 
     private func loadAddress(_ raw: String) {
@@ -715,6 +740,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let networkMode = usesAndroidGeoUserAgent ? "true" : "false"
+        webView.evaluateJavaScript("window.__cribloGeoHTTPAndroid = \(networkMode);", completionHandler: nil)
         recordHistory()
         updateChrome()
     }
@@ -742,7 +769,24 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             return
         }
 
-        if scheme == "http" || scheme == "https" || scheme == "about" || scheme == "blob" || scheme == "data" {
+        if scheme == "http" || scheme == "https" {
+            // Keep the Orange authentication pages on a genuine Safari identity,
+            // then reload only the authenticated GeoReseaux application with an
+            // Android HTTP identity. The Android working trace and the iOS v14
+            // diagnostic show the same trusted gesture reaching the canvas; the
+            // remaining difference is the server-selected map implementation.
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let wantsAndroid = requiresAndroidGeoUserAgent(url)
+            if isMainFrame && wantsAndroid != usesAndroidGeoUserAgent {
+                reload(navigationAction.request, withAndroidGeoUserAgent: wantsAndroid)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+            return
+        }
+
+        if scheme == "about" || scheme == "blob" || scheme == "data" {
             decisionHandler(.allow)
             return
         }
@@ -1949,7 +1993,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Synthetic context fallback: disabled',
           'Event properties read: ' + (Object.keys(__cribloGeoDiag.eventProperties).sort().join(', ') || 'none'),
           'Global hints: ' + (engineHints.join(', ') || 'none'),
-          'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat)
+          'UA Android compatibility: ' + String(!!window.__cribloGeoReseauxAndroidCompat),
+          'HTTP Android identity: ' + String(!!window.__cribloGeoHTTPAndroid)
         ].join('\n');
       };
     })();
