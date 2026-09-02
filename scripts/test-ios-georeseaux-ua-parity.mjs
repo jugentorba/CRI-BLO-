@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+// This durable gate also provides a normal push trigger after validated bot source updates.
 const swift = fs.readFileSync('plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift', 'utf8');
 
 const nativeMatch = swift.match(/private func requiresAndroidGeoUserAgent\(_ url: URL\) -> Bool \{([\s\S]*?)\n    \}/);
