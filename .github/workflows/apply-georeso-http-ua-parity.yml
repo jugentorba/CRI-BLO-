@@ -56,14 +56,13 @@ jobs:
       - name: Build unsigned iPhone app
         run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$PWD/ios-device-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 
-      - name: Commit validated source and durable parity test
+      - name: Commit validated application source and durable parity test
         run: |
           set -euxo pipefail
-          rm -f scripts/patch-georeso-http-ua-parity.mjs
-          rm -f .github/workflows/apply-georeso-http-ua-parity.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift package.json scripts/test-ios-georeseaux-ua-parity.mjs
           git diff --cached --check
+          git diff --cached --quiet && { echo "Expected UA parity source diff is missing"; exit 1; }
           git commit -m "Align GeoReseaux HTTP and JS Android identity"
           git push origin HEAD:${TARGET_BRANCH}
