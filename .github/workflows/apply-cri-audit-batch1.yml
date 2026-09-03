@@ -28,6 +28,16 @@ jobs:
         run: |
           set -euxo pipefail
           node scripts/patch-cri-audit-batch1.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/test-cri-field-regressions.mjs')
+          s = p.read_text()
+          bad = 'assert.match(route, /if \\(scope === "A" \\|\\| scope === "B"\\) \\{[\\s\\S]*?Point A\\/B : ne jamais écrire?aser/s, "A/B address isolation marker missing");'
+          good = 'assert.ok(route.includes("// Point A/B : ne jamais écraser la localisation officielle du défaut."), "A/B address isolation marker missing");'
+          if bad not in s:
+              raise SystemExit('malformed isolation assertion not found')
+          p.write_text(s.replace(bad, good))
+          PY
           git diff --check
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
