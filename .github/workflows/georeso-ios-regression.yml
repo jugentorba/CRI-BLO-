@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - criblo-master-spec-v1
+      - temp-supercool-export
     paths:
       - plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
       - scripts/test-ios-longpress-bridge.mjs
