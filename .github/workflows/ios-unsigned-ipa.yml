@@ -9,6 +9,7 @@ on:
     paths:
       - src/**
       - plugins/criblo-native-browser/**
+      - scripts/patch-ios-info.mjs
       - capacitor.config.ts
       - package.json
       - package-lock.json
@@ -36,6 +37,15 @@ jobs:
           npx cap add ios
           npx cap sync ios
           test -f ios/App/App.xcodeproj/project.pbxproj
+      - name: Apply CRI-BLO iOS privacy permissions
+        run: node scripts/patch-ios-info.mjs
+      - name: Verify GeoReseaux-relevant privacy keys
+        run: |
+          set -euxo pipefail
+          PLIST="ios/App/App/Info.plist"
+          grep -q '<key>NSLocationWhenInUseUsageDescription</key>' "$PLIST"
+          grep -q '<key>NSCameraUsageDescription</key>' "$PLIST"
+          grep -q '<key>NSMicrophoneUsageDescription</key>' "$PLIST"
       - name: Build unsigned device app
         run: |
           set -euxo pipefail
@@ -56,6 +66,7 @@ jobs:
           cd "$RUNNER_TEMP/ipa"
           /usr/bin/zip -qry "$GITHUB_WORKSPACE/CRI-BLO-GeoReseaux-iOS-unsigned.ipa" Payload
           test -s "$GITHUB_WORKSPACE/CRI-BLO-GeoReseaux-iOS-unsigned.ipa"
+          /usr/bin/unzip -t "$GITHUB_WORKSPACE/CRI-BLO-GeoReseaux-iOS-unsigned.ipa"
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
