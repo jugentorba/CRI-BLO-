@@ -1,0 +1,52 @@
+name: Apply CRI audit batch 4
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - scripts/patch-cri-audit-batch4.mjs
+      - .github/workflows/apply-cri-audit-batch4.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply confirmed fixes
+        run: |
+          set -euxo pipefail
+          node scripts/patch-cri-audit-batch4.mjs
+          git diff --check
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Regression tests
+        run: |
+          npm run test:cri-regressions
+          npm run test:ios-longpress-bridge
+          npm run test:ios-georeseaux-ua-parity
+      - name: Build and lint
+        run: |
+          npm run build
+          npm run lint
+      - name: Commit production fixes
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/cri.'$id'.tsx src/lib/export/html.ts src/lib/export/xlsx.ts scripts/test-cri-field-regressions.mjs
+          git diff --cached --check
+          git diff --cached --quiet && { echo "Expected fixes are missing"; exit 1; }
+          git commit -m "Fix stale GPS address and CRI template export artifacts"
+          git push origin HEAD:criblo-master-spec-v1
