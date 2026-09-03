@@ -1,41 +1,21 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-const swiftPath = new URL(
-  "../plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift",
-  import.meta.url,
-);
-
-let swift = readFileSync(swiftPath, "utf8");
-
-if (swift.includes("geoReseauxNativePassthroughDiagnosticsScript")) {
-  console.log("iOS GeoReseaux native passthrough patch already applied");
-  process.exit(0);
-}
+const swiftPaths = [
+  new URL(
+    "../plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift",
+    import.meta.url,
+  ),
+  new URL(
+    "../node_modules/@criblo/native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift",
+    import.meta.url,
+  ),
+];
 
 const userAgentAnchor =
   '    private static let androidGeoUserAgent = "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"\n';
-if (!swift.includes(userAgentAnchor)) throw new Error("androidGeoUserAgent anchor not found");
-swift = swift.replace(
-  userAgentAnchor,
-  `${userAgentAnchor}\n    // Real-device iOS testing showed the compatibility bridge was replacing\n    // genuine WebKit pointer/mouse events with synthetic events. Keep that\n    // implementation available as a rollback, but default to native event\n    // passthrough so GeoReseaux receives the browser's trusted lifecycle.\n    private static let useLegacySyntheticGeoLongPressBridge = false\n`,
-);
-
 const bridgeInjection = `                    source: Self.longPressBridgeScript,`;
-if (!swift.includes(bridgeInjection)) throw new Error("longPressBridgeScript injection anchor not found");
-swift = swift.replace(
-  bridgeInjection,
-  `                    source: Self.useLegacySyntheticGeoLongPressBridge\n                        ? Self.longPressBridgeScript\n                        : Self.geoReseauxNativePassthroughDiagnosticsScript,`,
-);
-
 const recognizerAnchor = `        if longPressCompatibility {\n            // WKWebView owns several internal long-press recognizers.`;
-if (!swift.includes(recognizerAnchor)) throw new Error("native long-press recognizer anchor not found");
-swift = swift.replace(
-  recognizerAnchor,
-  `        if longPressCompatibility && Self.useLegacySyntheticGeoLongPressBridge {\n            // WKWebView owns several internal long-press recognizers.`,
-);
-
 const longPressScriptAnchor = `    private static let longPressBridgeScript = #\"\"\"`;
-if (!swift.includes(longPressScriptAnchor)) throw new Error("longPressBridgeScript definition anchor not found");
 
 const passthroughScript = String.raw`    private static let geoReseauxNativePassthroughDiagnosticsScript = #"""
     (function () {
@@ -171,6 +151,44 @@ const passthroughScript = String.raw`    private static let geoReseauxNativePass
 
 `;
 
-swift = swift.replace(longPressScriptAnchor, passthroughScript + longPressScriptAnchor);
-writeFileSync(swiftPath, swift);
-console.log("Applied iOS GeoReseaux native passthrough patch");
+function patchSwift(swiftPath) {
+  if (!existsSync(swiftPath)) return "missing";
+
+  let swift = readFileSync(swiftPath, "utf8");
+  if (swift.includes("geoReseauxNativePassthroughDiagnosticsScript")) return "already";
+
+  if (!swift.includes(userAgentAnchor)) throw new Error("androidGeoUserAgent anchor not found");
+  swift = swift.replace(
+    userAgentAnchor,
+    `${userAgentAnchor}\n    // Keep the legacy synthetic bridge available as a rollback, but default\n    // to real WKWebView event delivery for GeoReseaux on iOS. Synthetic DOM\n    // pointer events cannot reproduce WebKit's trusted pointer lifecycle.\n    private static let useLegacySyntheticGeoLongPressBridge = false\n`,
+  );
+
+  if (!swift.includes(bridgeInjection)) throw new Error("longPressBridgeScript injection anchor not found");
+  swift = swift.replace(
+    bridgeInjection,
+    `                    source: Self.useLegacySyntheticGeoLongPressBridge\n                        ? Self.longPressBridgeScript\n                        : Self.geoReseauxNativePassthroughDiagnosticsScript,`,
+  );
+
+  if (!swift.includes(recognizerAnchor)) throw new Error("native long-press recognizer anchor not found");
+  swift = swift.replace(
+    recognizerAnchor,
+    `        if longPressCompatibility && Self.useLegacySyntheticGeoLongPressBridge {\n            // WKWebView owns several internal long-press recognizers.`,
+  );
+
+  if (!swift.includes(longPressScriptAnchor)) throw new Error("longPressBridgeScript definition anchor not found");
+  swift = swift.replace(longPressScriptAnchor, passthroughScript + longPressScriptAnchor);
+  writeFileSync(swiftPath, swift);
+  return "patched";
+}
+
+let available = 0;
+let patched = 0;
+for (const swiftPath of swiftPaths) {
+  const result = patchSwift(swiftPath);
+  if (result !== "missing") available += 1;
+  if (result === "patched") patched += 1;
+  console.log(`${result}: ${swiftPath.pathname}`);
+}
+
+if (available === 0) throw new Error("No CRI-BLO iOS browser plugin source was found");
+console.log(`iOS GeoReseaux native passthrough ready (${patched} source copies patched)`);
