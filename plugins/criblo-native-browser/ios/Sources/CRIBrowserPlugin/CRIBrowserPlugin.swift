@@ -1364,6 +1364,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
       var __cribloOriginalBind = Function.prototype.bind;
       var __cribloPatchedBind = null;
       var __cribloBindHookTimer = null;
+      var __cribloOpenLayersDomIntercepts = 0;
 
       function looksLikeOpenLayersMap(value) {
         try {
@@ -1394,7 +1395,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
               var thisArg = arguments.length ? arguments[0] : null;
               if (looksLikeOpenLayersMap(thisArg) && this === thisArg.handleBrowserEvent) {
                 registerMapInstance(thisArg, 'OpenLayers-bound');
+                var semanticBound = function () { return bound.apply(null, arguments); };
+                try { Object.defineProperty(semanticBound, '__cribloOpenLayersBrowserHandler', { value: true }); }
+                catch (_) { semanticBound.__cribloOpenLayersBrowserHandler = true; }
                 restoreOpenLayersBindHook();
+                return semanticBound;
               }
             } catch (_) {}
             return bound;
@@ -1464,6 +1469,15 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var wrapper = function (event) {
           var name = String(event && event.type || '').toLowerCase();
           if (shouldHoldCompatibilityMouseTail(event, name)) return;
+          // Do not make WKWebView pretend a JavaScript-created contextmenu is
+          // native browser input for OpenLayers. Preserve every application DOM
+          // listener, but deliver the map event once through Map.handleBrowserEvent
+          // after DOM propagation completes.
+          if (name === 'contextmenu' && listener && listener.__cribloOpenLayersBrowserHandler
+              && __cribloSyntheticContextEvents.has(event)) {
+            __cribloOpenLayersDomIntercepts++;
+            return;
+          }
           if (name === 'mousedown') {
             try {
               if (event && event.isTrusted && compatSyntheticMouseDownTarget
@@ -2492,6 +2506,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // click before its contextmenu handler runs.
         var before = visiblePopupState();
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var openLayersBefore = __cribloOpenLayersDomIntercepts;
         var source = request.sourceEvent || request.releaseEvent || request.tailEvent || null;
         // iOS long-presses do not emit Chrome's mouseup/click compatibility
         // tail. Rebuild only the missing tail, then contextmenu is last.
@@ -2504,7 +2519,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // Map is now only a fallback when no wrapped DOM handler consumed the event.
         var dispatched = contextMenu(target, x, y, source);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+        var openLayersIntercepted = __cribloOpenLayersDomIntercepts > openLayersBefore;
+        if (openLayersIntercepted || (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented)) {
           dispatched = invokeMapEngine(target, x, y, source) || dispatched;
         }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
@@ -2579,9 +2595,11 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.lastResult = 'touchstart-timeout-contextmenu-at-hold';
         var before = visiblePopupState();
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
+        var openLayersBefore = __cribloOpenLayersDomIntercepts;
         var dispatched = contextMenu(target, x, y, null);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
+        var openLayersIntercepted = __cribloOpenLayersDomIntercepts > openLayersBefore;
+        if (openLayersIntercepted || (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented)) {
           dispatched = invokeMapEngine(target, x, y, null) || dispatched;
         }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
