@@ -2591,6 +2591,20 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         }, 220);
       }
 
+      // iOS decides whether to start text selection / the callout well before
+      // 600 ms. Suppressing the callout only after the hold already fired is too
+      // late, so apply it on the map element chain at touchstart.
+      function suppressIOSCalloutChain(target) {
+        var styleNode = target;
+        for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
+          try {
+            styleNode.style.webkitUserSelect = 'none';
+            styleNode.style.webkitTouchCallout = 'none';
+            styleNode.style.userSelect = 'none';
+          } catch (_) {}
+        }
+      }
+
       function fireRealTouchLongPress() {
         realTouchTimer = null;
         if (!realTouchTarget || realTouchFired) return;
@@ -2627,14 +2641,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.lastResult = 'js-hold-armed-waiting-release';
 
         clearSelection();
-        var styleNode = request.target;
-        for (var si = 0; styleNode && si < 7; si++, styleNode = styleNode.parentElement) {
-          try {
-            styleNode.style.webkitUserSelect = 'none';
-            styleNode.style.webkitTouchCallout = 'none';
-            styleNode.style.userSelect = 'none';
-          } catch (_) {}
-        }
+        suppressIOSCalloutChain(request.target);
       }
 
       __cribloOriginalAddEventListener.call(document, 'mousedown', function (event) {
@@ -2724,6 +2731,7 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           realTouchFired = false;
           realTouchTimer = null;
           if (event.isTrusted) {
+            suppressIOSCalloutChain(target);
             // Android Chrome creates its compatibility mouse press near the
             // beginning of the touch, not 600 ms later. Run after this genuine
             // touchstart finishes propagation so page touch handlers stay first.
@@ -2775,17 +2783,39 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
 
       document.addEventListener('touchcancel', function (event) {
         clearRealTouchTimer();
-        if (compatSyntheticMouseDownTarget) {
-          finishAndroidCompatibilityMouse({
-            target: compatSyntheticMouseDownTarget,
-            x: compatSyntheticMouseDownX,
-            y: compatSyntheticMouseDownY,
-            releaseEvent: event || null,
-            releasedAt: Date.now(),
-            touchStartedAt: lastRealTouchStartAt
-          }, false);
+        var cancelledRequest = pendingNativeLongPress;
+        var cancelledAt = Date.now();
+        if (cancelledRequest && cancelledRequest.armed && cancelledRequest.target && !cancelledRequest.releasedAt) {
+          // On a real iPhone one of WKWebView's own long-press recognizers
+          // (text selection / callout) can claim the gesture, and WebKit then
+          // ends the sequence with touchcancel instead of touchend. The 600 ms
+          // hold already completed, so finish it exactly like a physical
+          // release. Discarding it here is what prevented GeoReseaux's own
+          // popup from opening on iOS.
+          traceAndroidEvent('touchcancel', !!(event && event.isTrusted));
+          cancelledRequest.releaseEvent = event || null;
+          cancelledRequest.releasedAt = cancelledAt;
+          __cribloGeoDiag.lastResult = 'trusted-webkit-tail-touchcancel-completing';
+          setTimeout(function () {
+            if (pendingNativeLongPress !== cancelledRequest || !cancelledRequest.armed || cancelledRequest.tailCompletionScheduled) return;
+            ensureAndroidPointerUpAfterTouchEnd(cancelledRequest);
+            if (cancelledRequest.tailCompletionScheduled) return;
+            cancelledRequest.tailCompletionScheduled = true;
+            completeAndroidLongPress(cancelledRequest, 'touchcancel-tail');
+          }, 0);
+        } else {
+          if (compatSyntheticMouseDownTarget) {
+            finishAndroidCompatibilityMouse({
+              target: compatSyntheticMouseDownTarget,
+              x: compatSyntheticMouseDownX,
+              y: compatSyntheticMouseDownY,
+              releaseEvent: event || null,
+              releasedAt: cancelledAt,
+              touchStartedAt: lastRealTouchStartAt
+            }, false);
+          }
+          pendingNativeLongPress = null;
         }
-        pendingNativeLongPress = null;
         realTouchTarget = null;
         realTouchIdentifier = null;
         lastRealTouchStartAt = 0;

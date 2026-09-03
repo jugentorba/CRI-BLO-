@@ -208,4 +208,20 @@ if (!directDiagnostics.includes('OpenLayers direct: 0 / feature hits: 0 / recove
 const contextAfter = Number((directDiagnostics.match(/Context events: (\d+)/) || [])[1] || 0);
 if (contextAfter !== contextBefore + 1) throw new Error('GeoReseaux DOM contextmenu was not dispatched exactly once: ' + directDiagnostics);
 
-console.log("iOS GeoReseaux exact lifecycle + DOM-first hidden OpenLayers bridge test passed");
+// Real iPhone case: WKWebView's own selection/callout recognizer claims the
+// gesture, so the sequence ends with touchcancel instead of touchend. The hold
+// already completed, so GeoReseaux must still receive its contextmenu.
+const domCallsBeforeCancel = geoDomCalls;
+order.length = 0;
+lifecycle.length = 0;
+context = null;
+pointer("pointerdown", 44, 18, 1);
+touch("touchstart", 44, 18);
+await wait(650);
+touch("touchcancel", 44, 18);
+await wait(130);
+if (!order.includes("contextmenu")) throw new Error("armed hold cancelled by touchcancel lost its contextmenu: " + order.join(","));
+if (geoDomCalls !== domCallsBeforeCancel + 1) throw new Error("touchcancel hold did not reach the GeoReseaux DOM handler exactly once: " + geoDomCalls);
+if (!context || !context.target || context.clientX !== 44 || context.clientY !== 18) throw new Error("touchcancel contextmenu shape mismatch: " + JSON.stringify(context));
+
+console.log("iOS GeoReseaux exact lifecycle + touchcancel hold recovery + DOM-first hidden OpenLayers bridge test passed");

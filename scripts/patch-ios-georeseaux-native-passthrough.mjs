@@ -160,7 +160,7 @@ function patchSwift(swiftPath) {
   if (!swift.includes(userAgentAnchor)) throw new Error("androidGeoUserAgent anchor not found");
   swift = swift.replace(
     userAgentAnchor,
-    `${userAgentAnchor}\n    // Keep the legacy synthetic bridge available as a rollback, but default\n    // to real WKWebView event delivery for GeoReseaux on iOS. Synthetic DOM\n    // pointer events cannot reproduce WebKit's trusted pointer lifecycle.\n    private static let useLegacySyntheticGeoLongPressBridge = false\n`,
+    `${userAgentAnchor}\n    // The GeoReseaux hold bridge stays ACTIVE in shipped iOS builds. Pure\n    // WKWebView passthrough only records diagnostics and never opens the\n    // GeoReseaux popup, so keep it as an explicit rollback switch only.\n    private static let useLegacySyntheticGeoLongPressBridge = true\n`,
   );
 
   if (!swift.includes(bridgeInjection)) throw new Error("longPressBridgeScript injection anchor not found");
