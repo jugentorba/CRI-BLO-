@@ -27,12 +27,28 @@ jobs:
           import fs from 'node:fs';
           const wb = new ExcelJS.Workbook();
           await wb.xlsx.load(fs.readFileSync('public/cri_blo_template.xlsx'));
+
+          function cellText(value) {
+            if (value == null) return '';
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+            if (value instanceof Date) return value.toISOString();
+            if (typeof value === 'object') {
+              if (typeof value.text === 'string') return value.text;
+              if (Array.isArray(value.richText)) return value.richText.map((part) => part?.text ?? '').join('');
+              if (value.result != null) return String(value.result);
+              if (value.formula && value.result != null) return String(value.result);
+              // ExcelJS merged cells can contain an internal master object with no printable value.
+              return '';
+            }
+            return '';
+          }
+
           const terms = /\b(?:D1|D2|PT)\b|ARBRE|POTEAU|CHAMBRE|TRON[CÇ]ON|CONTENANT|C[ÂA]BLE/i;
           for (const ws of wb.worksheets) {
             const hits = [];
             ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
               row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-                const value = cell.text?.trim?.() ?? String(cell.value ?? '').trim();
+                const value = cellText(cell.value).replace(/\s+/g, ' ').trim();
                 if (value && terms.test(value)) hits.push({ cell: cell.address, row: rowNumber, col: colNumber, value });
               });
             });
