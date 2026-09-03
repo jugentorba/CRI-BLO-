@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "prebuild": "node scripts/patch-ios-georeseaux-native-passthrough.mjs",
     "build": "vite build && node scripts_apkforge_postbuild.mjs",
     "build:dev": "vite build --mode development",
     "test:ios-longpress-bridge": "node scripts/test-ios-longpress-bridge.mjs",
@@ -67,7 +68,7 @@
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
-    "input-otp": "^1.4.2",
+    "input-otp": "^1.4.1",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.575.0",
@@ -96,12 +97,12 @@
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.0.16"
+    "vite-tsconfig-paths": "^6.0.2"
   }
 }
