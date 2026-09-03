@@ -8,6 +8,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { useThemeSync } from "../hooks/use-theme";
+import { requestNativeStartupPermissions } from "@/lib/native/permissions";
 
 function NotFoundComponent() {
   return (
@@ -90,8 +91,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Application terrain Orange pour techniciens — CRI BLO." },
       { property: "og:type", content: "website" },
     ],
-    links: [
-    ],
+    links: [],
   }),
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
@@ -107,10 +107,15 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
-
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useThemeSync();
+
+  useEffect(() => {
+    // Native Android/iOS only. Requests are deliberately sequential and never
+    // block app startup if a permission is denied or temporarily unavailable.
+    void requestNativeStartupPermissions();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,7 +129,7 @@ function RootComponent() {
         if (cancelled || !s.cloudSyncEnabled) return;
         await drainQueue();
       } catch {
-        /* noop */
+        /* sync failure never blocks the app */
       }
     };
     void tryDrain();

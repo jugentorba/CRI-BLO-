@@ -1,9 +1,8 @@
-# Architecture modulaire de la PWA
+# Architecture modulaire CRI-BLO
 
-Une seule PWA, plusieurs modules indépendants. Le module CRI BLO est **protégé** :
-aucune nouvelle fonctionnalité ne doit modifier ses fichiers.
+Une seule base React/Vite/Capacitor alimente la PWA ainsi que les applications Android et iOS. Le module CRI BLO reste isolé des modules « autres documents », assistant et navigateur, sauf lorsqu'une évolution est explicitement destinée au formulaire CRI BLO.
 
-## Module CRI BLO (stable — ne pas modifier)
+## Module CRI BLO
 
 - `src/routes/cri.$id.tsx`, `src/routes/historique.tsx`
 - `src/lib/cri/*` (schéma, visibilité, dépôt, types)
@@ -11,31 +10,48 @@ aucune nouvelle fonctionnalité ne doit modifier ses fichiers.
 - `src/lib/photos/*`, `src/lib/attachments/*`
 - `src/lib/geo/*` (GPS, géocodage, cache, file d'attente)
 - `src/lib/onedrive/*` (synchronisation cloud)
-- Store IndexedDB `cris` (+ `photos`, `attachments`) — historique CRI BLO uniquement.
+- stores IndexedDB `cris`, `photos`, `attachments`
 
-Toute évolution demandée sur ces fichiers doit être explicitement destinée au CRI BLO.
+Toute évolution de ces fichiers doit être explicitement destinée au CRI BLO.
 
 ## Module « Autres documents »
 
-- Détection de type : `src/lib/docs/registry.ts`, `src/lib/docs/detect.ts`
-- Historique séparé : store IndexedDB `otherDocs` (`src/lib/docs/repository.ts`)
-- Écran : `src/routes/documents.tsx`
+- détection : `src/lib/docs/registry.ts`, `src/lib/docs/detect.ts`
+- historique séparé : store IndexedDB `otherDocs` (`src/lib/docs/repository.ts`)
+- écran : `src/routes/documents.tsx`
 
 Un document non reconnu comme CRI BLO n'écrit jamais dans le store `cris`.
 
 ## Module Assistant IA
 
-- Écran : `src/routes/assistant.tsx`
-- Serveur : `src/lib/ai/assistant.functions.ts` + `src/lib/ai/assistant.server.ts`
-- Repli hors-ligne : `translateNotes` de `src/lib/ai/glossary.ts` (lecture seule)
+- écran : `src/routes/assistant.tsx`
+- orchestration : `src/lib/ai/assistant.functions.ts`
+- client Gemini : `src/lib/ai/gemini.ts`
+- historique : `src/lib/ai/chats.ts`
+- repli hors-ligne : `translateNotes` de `src/lib/ai/glossary.ts`
 
-Indépendant du formulaire CRI BLO : l'assistant intégré au CRI
-(`src/components/cri/CommentAssistant.tsx`, `src/lib/ai/comment.functions.ts`) reste inchangé.
+L'assistant en ligne utilise uniquement la configuration Gemini personnelle enregistrée localement dans les paramètres. Aucun endpoint OpenAI-compatible n'est utilisé par le flux principal.
+
+## Module Navigateur
+
+- écran et état web : `src/routes/navigateur.tsx`, `src/lib/browser/*`
+- plugin natif propriétaire : `plugins/criblo-native-browser`
+- Android : WebView natif
+- iOS : WKWebView natif + pont de compatibilité long-press pour cartes interactives
+
+La PWA conserve un fallback web; Android/iOS chargent les pages live dans le navigateur natif CRI-BLO.
 
 ## Import
 
 `src/routes/importer.tsx` détecte d'abord le type :
 
-- CRI BLO → analyse et création dans le module CRI BLO (comportement existant).
-- Autre type / inconnu → détection affichée, choix laissé à l'utilisateur
-  (conserver dans son propre historique, ou forcer l'analyse CRI BLO).
+- CRI BLO → analyse et création dans le module CRI BLO.
+- autre type / inconnu → détection affichée, choix laissé à l'utilisateur sans écrire automatiquement dans l'historique CRI BLO.
+
+## Native / CI
+
+Les projets Android et iOS générés sont reconstruits par Capacitor dans GitHub Actions. Les éléments natifs durables sont conservés sous forme de plugins/scripts source, puis validés par :
+
+- build PWA + lint
+- APK Android debug
+- build iOS Simulator

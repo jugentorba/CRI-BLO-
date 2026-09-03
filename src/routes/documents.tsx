@@ -17,8 +17,8 @@ import { UniversalDocumentEditor } from "@/components/UniversalDocumentEditor";
 import {
   deleteOtherDoc,
   listOtherDocs,
-  openOtherDocFile,
   saveOtherDoc,
+  updateOtherDocFile,
   type OtherDocRecord,
 } from "@/lib/docs/repository";
 import { DOC_TYPES, type DetectionResult } from "@/lib/docs/registry";
@@ -113,9 +113,9 @@ function Documents() {
       setError("Sélectionnez à nouveau le fichier avant de le traiter comme CRI BLO.");
       return;
     }
-    if (!/\.(xlsx|xlsm|pdf|docx)$/i.test(file.name)) {
+    if (!/\.(xlsx|xlsm|pdf)$/i.test(file.name)) {
       setError(
-        "Ce format ne peut pas être converti en CRI BLO (Excel .xlsx/.xlsm, PDF ou DOCX).",
+        "Ce format ne peut pas être converti en CRI BLO (Excel .xlsx/.xlsm ou PDF).",
       );
       return;
     }
@@ -182,6 +182,18 @@ function Documents() {
       setError((e as Error).message || "Enregistrement impossible.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDocumentSaved(blob: Blob, fileName: string) {
+    if (!editingDoc) return;
+    try {
+      const updated = await updateOtherDocFile(editingDoc.id, blob, fileName);
+      setEditingDoc(updated);
+      setError(null);
+      await load();
+    } catch (e) {
+      setError((e as Error).message || "La modification n'a pas pu être conservée dans CRI-BLO.");
     }
   }
 
@@ -322,11 +334,7 @@ function Documents() {
                       type="button"
                       aria-label="Ouvrir"
                       disabled={!d.blob}
-                      onClick={() => {
-                        if (!openOtherDocFile(d)) {
-                          setError("Fichier d'origine indisponible pour ce document.");
-                        }
-                      }}
+                      onClick={() => setEditingDoc(d)}
                       className="rounded-lg p-1 text-primary hover:bg-primary/10 disabled:opacity-30"
                     >
                       <ExternalLink className="h-3 w-3" />
@@ -352,7 +360,7 @@ function Documents() {
         <UniversalDocumentEditor
           document={{ name: editingDoc.fileName, mimeType: editingDoc.mimeType, blob: editingDoc.blob }}
           onClose={() => setEditingDoc(null)}
-          onSaved={() => setError(null)}
+          onSaved={handleDocumentSaved}
         />
       )}
     </AppShell>
