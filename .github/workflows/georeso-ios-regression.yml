@@ -9,12 +9,14 @@ on:
     paths:
       - plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
       - scripts/test-ios-longpress-bridge.mjs
+      - scripts/test-ios-longpress-cancel.mjs
       - scripts/test-ios-georeseaux-ua-parity.mjs
       - .github/workflows/georeso-ios-regression.yml
   pull_request:
     paths:
       - plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift
       - scripts/test-ios-longpress-bridge.mjs
+      - scripts/test-ios-longpress-cancel.mjs
       - scripts/test-ios-georeseaux-ua-parity.mjs
       - .github/workflows/georeso-ios-regression.yml
 
@@ -31,6 +33,7 @@ jobs:
           node-version: 22
       - run: npm ci --no-audit --no-fund
       - run: npm run test:ios-longpress-bridge
+      - run: node scripts/test-ios-longpress-cancel.mjs
       - run: npm run test:ios-georeseaux-ua-parity
 
   openlayers-popup:
