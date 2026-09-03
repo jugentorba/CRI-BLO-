@@ -1446,6 +1446,40 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         return cached;
       }
 
+      // Real-iPhone diagnosis aid: record WHICH contextmenu handlers ran and
+      // whether they were the ones calling preventDefault().
+      function describeContextHandler(target, listener) {
+        var where = 'unknown';
+        try {
+          if (target === window) where = 'window';
+          else if (target === document) where = 'document';
+          else {
+            var cls = '';
+            try {
+              var raw = target.className;
+              raw = raw && raw.baseVal ? raw.baseVal : raw;
+              if (raw && typeof raw === 'string') cls = '.' + raw.split(/\s+/).slice(0, 2).join('.');
+            } catch (_) {}
+            where = String(target.tagName || target.nodeName || 'obj') + (target.id ? '#' + target.id : '') + cls;
+          }
+        } catch (_) {}
+        var code = 'anonymous';
+        try {
+          var fn = typeof listener === 'function' ? listener : (listener && listener.handleEvent);
+          code = String((fn && fn.name) || 'anonymous') + ' ' + String(fn ? Function.prototype.toString.call(fn) : '').replace(/\s+/g, ' ').slice(0, 140);
+        } catch (_) {}
+        return where + ' :: ' + code;
+      }
+
+      function recordContextHandler(identity) {
+        try {
+          if (__cribloGeoDiag.contextHandlerIdentities.indexOf(identity) < 0) {
+            __cribloGeoDiag.contextHandlerIdentities.push(identity);
+            while (__cribloGeoDiag.contextHandlerIdentities.length > 6) __cribloGeoDiag.contextHandlerIdentities.shift();
+          }
+        } catch (_) {}
+      }
+
       function wrappedContextListener(target, listener, options) {
         var targetMap = __cribloListenerWrappers.get(target);
         if (!targetMap) {
@@ -1472,9 +1506,21 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
             } catch (_) {}
           }
           var presented = syntheticContextFacade(event);
-          if (presented !== event) {
-            if (name === 'contextmenu') __cribloGeoDiag.wrappedContextCalls++;
-            else __cribloGeoDiag.wrappedLifecycleCalls++;
+          var synthetic = presented !== event;
+          if (synthetic && name !== 'contextmenu') __cribloGeoDiag.wrappedLifecycleCalls++;
+          if (synthetic && name === 'contextmenu') {
+            __cribloGeoDiag.wrappedContextCalls++;
+            var identity = describeContextHandler(target, listener);
+            var preventedBefore = false;
+            try { preventedBefore = !!event.defaultPrevented; } catch (_) {}
+            var outcome;
+            if (typeof listener === 'function') outcome = listener.call(this, presented);
+            else if (listener && typeof listener.handleEvent === 'function') outcome = listener.handleEvent(presented);
+            try {
+              var preventedAfter = !!event.defaultPrevented;
+              recordContextHandler(identity + (preventedAfter && !preventedBefore ? ' [prevented]' : ''));
+            } catch (_) {}
+            return outcome;
           }
           if (typeof listener === 'function') return listener.call(this, presented);
           if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(presented);
@@ -1559,7 +1605,10 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         coordinateDelta: 'none',
         directTrustedHandlerFires: 0,
         directSourceTrusted: false,
-        directTarget: 'none'
+        directTarget: 'none',
+        contextHandlerIdentities: [],
+        popupEscalations: 0,
+        mapEscalationRuns: 0
       };
 
       function traceAndroidEvent(name, trusted) {
@@ -2504,9 +2553,6 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         // Map is now only a fallback when no wrapped DOM handler consumed the event.
         var dispatched = contextMenu(target, x, y, source);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
-          dispatched = invokeMapEngine(target, x, y, source) || dispatched;
-        }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
         __cribloGeoDiag.contextAfterTouchMs = request.touchStartedAt
@@ -2515,10 +2561,30 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         __cribloGeoDiag.lastResult = dispatched
           ? 'trusted-webkit-tail-contextmenu-' + String(reason || 'fallback')
           : 'trusted-webkit-tail-contextmenu-error';
+        // Measured on a real iPhone: the DOM contextmenu DID reach two
+        // GeoReseaux handlers and one of them called preventDefault(), yet no
+        // popup was created. The old gate (delta === 0 && !prevented) then
+        // skipped the OpenLayers path entirely, so the hold ended in
+        // 'trusted-webkit-tail-no-popup'. Escalate on the ACTUAL popup result:
+        // handler count and defaultPrevented are not evidence of a popup.
         setTimeout(function () {
-          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-popup';
-          else if (dispatched) __cribloGeoDiag.lastResult = 'trusted-webkit-tail-no-popup';
-        }, 220);
+          if (popupChanged(before)) {
+            __cribloGeoDiag.lastResult = 'trusted-webkit-tail-popup';
+            return;
+          }
+          __cribloGeoDiag.popupEscalations++;
+          var engineHandled = invokeMapEngine(target, x, y, source);
+          if (engineHandled) __cribloGeoDiag.mapEscalationRuns++;
+          setTimeout(function () {
+            if (popupChanged(before)) {
+              __cribloGeoDiag.lastResult = 'trusted-webkit-tail-popup-after-map-direct';
+            } else {
+              __cribloGeoDiag.lastResult = engineHandled
+                ? 'trusted-webkit-tail-no-popup-map-direct-ran'
+                : 'trusted-webkit-tail-no-popup-map-direct-unavailable';
+            }
+          }, 240);
+        }, 200);
         return dispatched;
       }
 
@@ -2581,14 +2647,22 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var callsBefore = __cribloGeoDiag.wrappedContextCalls;
         var dispatched = contextMenu(target, x, y, null);
         var delta = __cribloGeoDiag.wrappedContextCalls - callsBefore;
-        if (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented) {
-          dispatched = invokeMapEngine(target, x, y, null) || dispatched;
-        }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         setTimeout(function () {
-          if (popupChanged(before)) __cribloGeoDiag.lastResult = 'touchstart-timeout-popup';
-          else if (dispatched) __cribloGeoDiag.lastResult = 'touchstart-timeout-no-popup';
-        }, 220);
+          if (popupChanged(before)) {
+            __cribloGeoDiag.lastResult = 'touchstart-timeout-popup';
+            return;
+          }
+          __cribloGeoDiag.popupEscalations++;
+          var engineHandled = invokeMapEngine(target, x, y, null);
+          if (engineHandled) __cribloGeoDiag.mapEscalationRuns++;
+          setTimeout(function () {
+            if (popupChanged(before)) __cribloGeoDiag.lastResult = 'touchstart-timeout-popup-after-map-direct';
+            else __cribloGeoDiag.lastResult = engineHandled
+              ? 'touchstart-timeout-no-popup-map-direct-ran'
+              : 'touchstart-timeout-no-popup-map-direct-unavailable';
+          }, 240);
+        }, 200);
       }
 
       // iOS decides whether to start text selection / the callout well before
@@ -2977,6 +3051,8 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
           'Native/touch coordinate delta: ' + __cribloGeoDiag.coordinateDelta,
           'Context events: ' + __cribloGeoDiag.contextDispatches + ' / observed: ' + __cribloGeoDiag.syntheticContextmenus,
           'Synthetic context prevented: ' + String(!!__cribloGeoDiag.syntheticContextPrevented),
+          'Popup escalations: ' + __cribloGeoDiag.popupEscalations + ' / map-direct escalations: ' + __cribloGeoDiag.mapEscalationRuns,
+          'Context handlers called: ' + (__cribloGeoDiag.contextHandlerIdentities.join(' || ') || 'none'),
           'Synthetic press/release: pd=' + __cribloGeoDiag.syntheticPointerDowns + ' md=' + __cribloGeoDiag.syntheticMouseDowns + ' pu=' + __cribloGeoDiag.syntheticPointerUps + ' mu=' + __cribloGeoDiag.syntheticMouseUps + ' click=' + __cribloGeoDiag.syntheticClicks,
           'Release completions: ' + __cribloGeoDiag.releaseCompletions,
           'Android-order trace (*=trusted source): ' + (__cribloGeoDiag.androidSequence.join(' > ') || 'none'),

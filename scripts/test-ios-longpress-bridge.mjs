@@ -224,4 +224,29 @@ if (!order.includes("contextmenu")) throw new Error("armed hold cancelled by tou
 if (geoDomCalls !== domCallsBeforeCancel + 1) throw new Error("touchcancel hold did not reach the GeoReseaux DOM handler exactly once: " + geoDomCalls);
 if (!context || !context.target || context.clientX !== 44 || context.clientY !== 18) throw new Error("touchcancel contextmenu shape mismatch: " + JSON.stringify(context));
 
-console.log("iOS GeoReseaux exact lifecycle + touchcancel hold recovery + DOM-first hidden OpenLayers bridge test passed");
+// REAL iPhone trace 37b6896: two DOM contextmenu handlers ran, one called
+// preventDefault(), and still no popup appeared, so the OpenLayers direct path
+// must now be escalated on the ACTUAL popup result instead of handler counts.
+const domCallsBeforeEscalation = geoDomCalls;
+const directBeforeEscalation = directMapCalls;
+order.length = 0;
+lifecycle.length = 0;
+context = null;
+pointer("pointerdown", 51, 27, 1);
+touch("touchstart", 51, 27);
+await wait(650);
+pointer("pointerup", 51, 27, 0);
+touch("touchend", 51, 27);
+await wait(140);
+if (geoDomCalls !== domCallsBeforeEscalation + 1) throw new Error("DOM-first contextmenu must still run exactly once: " + geoDomCalls);
+if (directMapCalls < directBeforeEscalation + 1) throw new Error("DOM forward to OpenLayers missing before escalation: " + directMapCalls);
+await wait(700);
+if (directMapCalls < directBeforeEscalation + 2) throw new Error("no-popup result did not escalate to the OpenLayers direct path: " + directMapCalls);
+const escalationDiagnostics = windowTarget.__cribloGeoDiagnosticsText();
+if (!/OpenLayers direct: [1-9]/.test(escalationDiagnostics)) throw new Error("OpenLayers direct call was not recorded: " + escalationDiagnostics);
+if (!/Popup escalations: [1-9]/.test(escalationDiagnostics)) throw new Error("popup escalation counter missing: " + escalationDiagnostics);
+if (!/Context handlers called: .*contextmenu|Context handlers called: .*CANVAS/.test(escalationDiagnostics)) throw new Error("contextmenu handler identities were not captured: " + escalationDiagnostics);
+if (!escalationDiagnostics.includes("[prevented]")) throw new Error("preventDefault attribution per handler missing: " + escalationDiagnostics);
+if (!/map-direct-ran|popup-after-map-direct/.test(escalationDiagnostics)) throw new Error("escalated result state missing: " + escalationDiagnostics);
+
+console.log("iOS GeoReseaux exact lifecycle + touchcancel recovery + popup-result OpenLayers escalation bridge test passed");
