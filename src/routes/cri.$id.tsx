@@ -135,7 +135,7 @@ function CriEditor() {
     if (!cri || triedGps.current) return;
     if (!gps && !gpsLoading) {
       triedGps.current = true;
-      void captureGps();
+      void captureGps("defaut");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cri]);
@@ -196,16 +196,6 @@ function CriEditor() {
     return n;
   }
 
-  function cleanGeoAddress(text: string) {
-    return text
-      .split(",")
-      .map((part) => part.trim())
-      .filter((part) => {
-        const normalized = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-        return !/villefr.nche[\s-]*(de[\s-]*)?rouergue/.test(normalized);
-      })
-      .join(", ");
-  }
 
   // GPS
   async function captureGps(scope?: "A" | "B" | "defaut") {
@@ -214,8 +204,9 @@ function CriEditor() {
     try {
       const coords = await getCurrentPosition();
       const coordsStr = `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
-      // GPS principal pour le filigrane photo : premier capturé fait foi
-      setGps((prev) => prev ?? coords);
+      // Seule la localisation du défaut alimente le GPS principal du dossier.
+      // Les captures A/B restent isolées dans leurs champs respectifs.
+      if (!scope || scope === "defaut") setGps(coords);
       setDirty(true);
 
       // Écrit les coordonnées dans le champ texte de la sous-section
@@ -276,16 +267,19 @@ function CriEditor() {
 
   async function applyReverseGeocode(addr: Address, scope?: "A" | "B" | "defaut") {
     const full = fullStreetAddress(addr);
-    setAddress(addr);
-    setAddressStatus("resolved");
-    applyAddressToValues(addr);
-    setValues((prev) => {
-      const next = { ...prev };
-      if (scope === "A") next.adresseA = full;
-      else if (scope === "B") next.adresseB = full;
-      // Défaut : pas de champ Adresse, on ne remplit que Commune / CP / Voie / Numéro.
-      return next;
-    });
+
+    if (scope === "A" || scope === "B") {
+      // Point A/B : ne jamais écraser la localisation officielle du défaut.
+      setValues((prev) => ({
+        ...prev,
+        [scope === "A" ? "adresseA" : "adresseB"]: full,
+      }));
+    } else {
+      // Défaut : cette adresse est la localisation officielle du dossier.
+      setAddress(addr);
+      setAddressStatus("resolved");
+      applyAddressToValues(addr);
+    }
     setDirty(true);
   }
 
@@ -308,6 +302,14 @@ function CriEditor() {
     if (Number.isNaN(lat) || Number.isNaN(lon)) {
       setGpsError("Coordonnées invalides.");
       return;
+    }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      setGpsError("Coordonnées hors limites : latitude -90 à 90, longitude -180 à 180.");
+      return;
+    }
+    if (scope === "defaut") {
+      setGps({ latitude: lat, longitude: lon, capturedAt: new Date().toISOString() });
+      setDirty(true);
     }
     setGpsLoading(true);
     try {
@@ -669,7 +671,7 @@ function NAQuickButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       title="Insérer N/A sans ouvrir le clavier"
       aria-label="Insérer N/A"
-      className="ml-auto inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-border bg-background px-1.5 text-[10px] font-black text-muted-foreground hover:border-primary/50 hover:text-primary active:scale-95"
+      className="inline-flex h-10 min-w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-background px-2 text-xs font-black text-muted-foreground hover:border-primary/50 hover:text-primary active:scale-95"
     >
       N/A
     </button>
@@ -733,7 +735,7 @@ function FieldRow(props: {
           >
             {props.gpsLoading ? (
               <Loader2 className="h-3 w-3 animate-spin" />
-            ) : props.gps ? (
+            ) : props.coordsValue.trim() ? (
               <RefreshCw className="h-3 w-3" />
             ) : (
               <MapPin className="h-3 w-3" />
@@ -770,15 +772,19 @@ function FieldRow(props: {
           </div>
         )}
 
-        {(scope === "defaut" || props.gps) && (
+        {scope === "defaut" && (
           <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
             {props.gps?.accuracy && <span>±{Math.round(props.gps.accuracy)} m</span>}
-            {scope === "defaut" && <AddressStatusBadge status={props.addressStatus} />}
+            <AddressStatusBadge status={props.addressStatus} />
           </div>
         )}
       </div>
     );
   }
+
+  const quickNAAllowed =
+    (f.type === "text" || f.type === "textLong") &&
+    !["adresseA", "adresseB", "gpsCoordsA", "gpsCoordsB", "gpsCoordsDefaut", "commune", "codePostal", "nomVoie", "numeroVoie"].includes(f.id);
 
   const label = (
     <div className="mb-1 flex items-center gap-1">
@@ -786,10 +792,6 @@ function FieldRow(props: {
         {f.label}
         {f.required && <span className="ml-1 text-destructive">*</span>}
       </label>
-      {(f.type === "text" || f.type === "textLong") &&
-        !["adresseA", "adresseB", "gpsCoordsA", "gpsCoordsB", "gpsCoordsDefaut", "commune", "codePostal", "nomVoie", "numeroVoie"].includes(f.id) && (
-          <NAQuickButton onClick={() => props.onChange("N/A")} />
-        )}
     </div>
   );
 
@@ -867,14 +869,19 @@ function FieldRow(props: {
     return (
       <div id={`f-${f.id}`}>
         {label}
-        <DictationTextarea
-          value={(props.value as string) ?? ""}
-          onChange={(v) => props.onChange(v)}
-          example={f.example}
-          placeholder="Saisir, dicter ou reformuler avec l'IA…"
-          assist
-          assistContext={props.assistContext}
-        />
+        <div className="flex items-start gap-1.5">
+          <div className="min-w-0 flex-1">
+            <DictationTextarea
+              value={(props.value as string) ?? ""}
+              onChange={(v) => props.onChange(v)}
+              example={f.example}
+              placeholder="Saisir, dicter ou reformuler avec l'IA…"
+              assist
+              assistContext={props.assistContext}
+            />
+          </div>
+          {quickNAAllowed && <NAQuickButton onClick={() => props.onChange("N/A")} />}
+        </div>
       </div>
     );
   }
@@ -904,19 +911,6 @@ function FieldRow(props: {
       <div id={`f-${f.id}`}>
         {label}
         <div className="flex gap-1.5">
-          <button
-            type="button"
-            aria-pressed={isNA}
-            onClick={() => props.onChange(isNA ? undefined : "na")}
-            className={
-              "h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition active:scale-95 " +
-              (isNA
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-foreground hover:border-primary/40")
-            }
-          >
-            N/A
-          </button>
           <input
             id={`f-${f.id}-input`}
             type="number"
@@ -932,6 +926,19 @@ function FieldRow(props: {
             }}
             className="h-10 w-full rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           />
+          <button
+            type="button"
+            aria-pressed={isNA}
+            onClick={() => props.onChange(isNA ? undefined : "na")}
+            className={
+              "h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition active:scale-95 " +
+              (isNA
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-foreground hover:border-primary/40")
+            }
+          >
+            N/A
+          </button>
         </div>
       </div>
     );
@@ -952,12 +959,16 @@ function FieldRow(props: {
   return (
     <div id={`f-${f.id}`}>
       {label}
-      <input
-        type="text"
-        value={(props.value as string) ?? ""}
-        onChange={(e) => props.onChange(e.target.value)}
-        className="h-10 w-full rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
-      />
+      <div className="flex gap-1.5">
+        <input
+          id={`f-${f.id}-input`}
+          type="text"
+          value={(props.value as string) ?? ""}
+          onChange={(e) => props.onChange(e.target.value)}
+          className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+        />
+        {quickNAAllowed && <NAQuickButton onClick={() => props.onChange("N/A")} />}
+      </div>
     </div>
   );
 }

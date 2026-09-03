@@ -1,5 +1,6 @@
 import type { CriRecord } from "@/lib/cri/types";
 import { getPhoto } from "@/lib/photos/repository";
+import { cleanAddressText } from "@/lib/geo/address-format";
 
 // Libellés EXACTS issus du template officiel Orange (onglets PHOTOS OI / MESURES / RDSUR / PHOTOS OC / PLAN).
 // Ne JAMAIS modifier sans nouvelle version officielle.
@@ -57,12 +58,12 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
   const v = (id: string) => fmtValue(values[id]);
   const raw = (id: string) => esc(values[id] ?? "");
   const ref = raw("referenceOrange") || esc(cri.reference);
-  const commune = cleanGeoText(raw("commune") || esc(cri.address.commune ?? ""));
+  const commune = cleanAddressText(raw("commune") || esc(cri.address.commune ?? ""));
   const cp = raw("codePostal") || esc(cri.address.postalCode ?? "");
   const voie = raw("nomVoie") || esc(cri.address.street ?? "");
   const numero = raw("numeroVoie") || esc(cri.address.streetNumber ?? "");
-  const addressA = cleanGeoText(raw("adresseA"));
-  const addressB = cleanGeoText(raw("adresseB"));
+  const addressA = cleanAddressText(raw("adresseA"));
+  const addressB = cleanAddressText(raw("adresseB"));
   const gpsA = raw("gpsCoordsA");
   const gpsB = raw("gpsCoordsB");
 
@@ -271,17 +272,6 @@ ${photoPages("Photos SAV OC", ["photo_oc_defaut", "photo_oc_apres_def", "photo_o
 ${extraSlots.length ? photoPages("Photos supplémentaires (PHOTOS OI)", extraSlots) : ""}
 </body></html>`;
   return new Blob([html], { type: "text/html;charset=utf-8" });
-}
-
-function cleanGeoText(text: string): string {
-  return text
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => {
-      const n = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      return !/villefr.nche[\s-]*(de[\s-]*)?rouergue/.test(n);
-    })
-    .join(", ");
 }
 
 function blobToDataUrl(b: Blob): Promise<string> {

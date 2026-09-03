@@ -1,4 +1,5 @@
 import type { CriRecord } from "@/lib/cri/types";
+import { cleanAddressText } from "@/lib/geo/address-format";
 
 export interface CellMap {
   sheet: string;
@@ -62,19 +63,8 @@ function fmtCause(value: unknown, cri: CriRecord): string {
   return String(value);
 }
 
-function cleanGeoText(text: string): string {
-  return text
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => {
-      const normalized = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      return !/villefr.nche[\s-]*(de[\s-]*)?rouergue/.test(normalized);
-    })
-    .join(", ");
-}
-
 function fmtCleanText(value: unknown): string {
-  return cleanGeoText(String(value ?? ""));
+  return cleanAddressText(String(value ?? ""));
 }
 
 export const FIELD_CELLS: Record<string, CellMap> = {

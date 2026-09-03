@@ -138,9 +138,6 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
     fiche.getRow(17).height = 32;
     fiche.getRow(20).height = 22;
 
-    if (!cri.values?.gpsCoordsA && cri.gps) {
-      fiche.getCell("A20").value = `${cri.gps.latitude.toFixed(6)}, ${cri.gps.longitude.toFixed(6)}`;
-    }
     if (cri.values?.clientProvisoire === true || cri.values?.clientProvisoire === false) {
       fiche.getCell("C8").value = null;
     }
