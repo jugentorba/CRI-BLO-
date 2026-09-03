@@ -183,7 +183,9 @@ canvas.addEventListener('contextmenu', (event) => {
   geoDomTrusted = event.isTrusted === true && Boolean(event.originalEvent && event.originalEvent.isTrusted);
 });
 // This is the exact shape OpenLayers uses: a DOM contextmenu listener on the
-// viewport which forwards into map.handleBrowserEvent.
+// viewport which forwards into map.handleBrowserEvent. The iOS adapter should
+// keep the application DOM listener but deliver OpenLayers semantically/directly
+// so WKWebView never has to make a synthetic event behave like native browser input.
 canvas.addEventListener('contextmenu', hiddenBound);
 
 const contextBefore = Number((windowTarget.__cribloGeoDiagnosticsText().match(/Context events: (\d+)/) || [])[1] || 0);
@@ -199,13 +201,13 @@ touch("touchend", 91, 42);
 // fixture. Wait beyond it before judging whether contextmenu reached the app.
 await wait(130);
 if (geoDomCalls !== 1 || !geoDomTrusted) throw new Error('GeoReseaux DOM context handler was bypassed or untrusted: calls=' + geoDomCalls + ' trusted=' + geoDomTrusted);
-if (directMapCalls !== 1) throw new Error('OpenLayers viewport listener was not called exactly once through DOM: ' + directMapCalls);
+if (directMapCalls !== 1) throw new Error('OpenLayers semantic handler was not called exactly once: ' + directMapCalls);
 if (!directMapEvent || directMapEvent.type !== 'contextmenu' || directMapEvent.x !== 91 || directMapEvent.y !== 42 || !directMapEvent.trusted) {
-  throw new Error('OpenLayers DOM-forwarded event mismatch: ' + JSON.stringify(directMapEvent));
+  throw new Error('OpenLayers semantic event mismatch: ' + JSON.stringify(directMapEvent));
 }
 const directDiagnostics = windowTarget.__cribloGeoDiagnosticsText();
-if (!directDiagnostics.includes('OpenLayers direct: 0 / feature hits: 0 / recovery: OpenLayers-bound')) throw new Error('bridge incorrectly bypassed DOM with direct OpenLayers call: ' + directDiagnostics);
+if (!directDiagnostics.includes('OpenLayers direct: 1 / feature hits: 1 / recovery: OpenLayers-bound')) throw new Error('semantic OpenLayers adapter was not used: ' + directDiagnostics);
 const contextAfter = Number((directDiagnostics.match(/Context events: (\d+)/) || [])[1] || 0);
 if (contextAfter !== contextBefore + 1) throw new Error('GeoReseaux DOM contextmenu was not dispatched exactly once: ' + directDiagnostics);
 
-console.log("iOS GeoReseaux exact lifecycle + DOM-first hidden OpenLayers bridge test passed");
+console.log("iOS GeoReseaux exact lifecycle + semantic hidden OpenLayers bridge test passed");
