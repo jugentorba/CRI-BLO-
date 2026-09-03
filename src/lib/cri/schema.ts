@@ -118,7 +118,7 @@ export const CRI_SECTIONS: SectionDef[] = [
       },
       { id: "causePrincipaleAutre", label: "Précision si Autre", type: "text" },
       { id: "numTroncon", label: "N° du Tronçon", type: "text" },
-      { id: "transportDistribution", label: "Transport / Distribution", type: "select", options: ["Transport", "Distribution"] },
+      { id: "transportDistribution", label: "Type de tronçon", type: "select", options: ["Transport", "Distribution"] },
       { id: "typeCable", label: "Type de câble (ex : 24FO L1092 Modulo 6)", type: "text" },
       { id: "longueurCable", label: "Longueur câble (m)", type: "numberNA" },
     ],
