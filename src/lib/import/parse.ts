@@ -78,7 +78,6 @@ export async function parseCriXlsx(file: File): Promise<ImportResult> {
       { id: "codePostal", cell: "H12" },
       { id: "nomVoie", cell: "B13" },
       { id: "numeroVoie", cell: "B14" },
-      { id: "gpsCoordsDefaut", cell: "A20" },
     ];
     for (const e of extras) {
       const text = cellText(fiche.getCell(e.cell).value).trim();

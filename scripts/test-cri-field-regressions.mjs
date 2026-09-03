@@ -7,6 +7,11 @@ const xlsx = fs.readFileSync("src/lib/export/xlsx.ts", "utf8");
 const xlsxConfig = fs.readFileSync("src/lib/export/xlsx-config.ts", "utf8");
 const html = fs.readFileSync("src/lib/export/html.ts", "utf8");
 const addressSource = fs.readFileSync("src/lib/geo/address-format.ts", "utf8");
+const importer = fs.readFileSync("src/routes/importer.tsx", "utf8");
+const documents = fs.readFileSync("src/routes/documents.tsx", "utf8");
+const parse = fs.readFileSync("src/lib/import/parse.ts", "utf8");
+const updates = fs.readFileSync("src/lib/updates/github.ts", "utf8");
+const iosInfo = fs.readFileSync("scripts/patch-ios-info.mjs", "utf8");
 
 assert.match(route, /void captureGps\("defaut"\);/, "initial GPS must populate the default defect scope");
 assert.match(route, /if \(!scope \|\| scope === "defaut"\) setGps\(coords\);/, "A/B capture must not replace global defect GPS");
@@ -38,4 +43,14 @@ assert.ok(numberBlock.indexOf('<input') < numberBlock.indexOf('<button'), "numbe
 const textBlock = route.slice(route.lastIndexOf('return (\n    <div id={`f-${f.id}`}>'), route.indexOf('function AddrInput'));
 assert.match(textBlock, /<input[\s\S]*?<NAQuickButton/, "text N/A button must follow the input");
 
-console.log("CRI field/GPS/export regression checks passed");
+assert.match(importer, /new Blob\(\[await file\.arrayBuffer\(\)\]/, "generic importer must copy source bytes into IndexedDB");
+assert.match(importer, /blob,\s*\n\s*mimeType: file\.type,\s*\n\s*size: file\.size/, "generic importer must persist blob metadata");
+assert.doesNotMatch(documents, /openOtherDocFile/, "stored documents must not use the download-only open helper");
+assert.match(documents, /aria-label="Ouvrir"[\s\S]*?onClick=\{\(\) => setEditingDoc\(d\)\}/, "stored documents must open inside CRI-BLO");
+assert.match(documents, /!\/\\\.\(xlsx\|xlsm\|pdf\)\$\/i\.test\(file\.name\)/, "CRI conversion must be limited to XLSX/XLSM/PDF");
+assert.doesNotMatch(parse, /id: "gpsCoordsDefaut", cell: "A20"/, "Point A GPS cell must not populate defect GPS on import");
+assert.match(updates, /CRI_BLO_RELEASE_REPOSITORIES = \["jugentorba\/CRI-BLO-"\] as const/, "update checker must use the active CRI-BLO repository only");
+assert.doesNotMatch(updates, /jugentorba\/CRIBLO/, "legacy release repository must not override current releases");
+assert.match(iosInfo, /NSSpeechRecognitionUsageDescription/, "iOS speech dictation privacy description is required");
+
+console.log("CRI field/GPS/export/document/update regression checks passed");

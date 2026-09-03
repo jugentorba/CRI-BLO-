@@ -17,7 +17,6 @@ import { UniversalDocumentEditor } from "@/components/UniversalDocumentEditor";
 import {
   deleteOtherDoc,
   listOtherDocs,
-  openOtherDocFile,
   saveOtherDoc,
   type OtherDocRecord,
 } from "@/lib/docs/repository";
@@ -113,9 +112,9 @@ function Documents() {
       setError("Sélectionnez à nouveau le fichier avant de le traiter comme CRI BLO.");
       return;
     }
-    if (!/\.(xlsx|xlsm|pdf|docx)$/i.test(file.name)) {
+    if (!/\.(xlsx|xlsm|pdf)$/i.test(file.name)) {
       setError(
-        "Ce format ne peut pas être converti en CRI BLO (Excel .xlsx/.xlsm, PDF ou DOCX).",
+        "Ce format ne peut pas être converti en CRI BLO (Excel .xlsx/.xlsm ou PDF).",
       );
       return;
     }
@@ -322,11 +321,7 @@ function Documents() {
                       type="button"
                       aria-label="Ouvrir"
                       disabled={!d.blob}
-                      onClick={() => {
-                        if (!openOtherDocFile(d)) {
-                          setError("Fichier d'origine indisponible pour ce document.");
-                        }
-                      }}
+                      onClick={() => setEditingDoc(d)}
                       className="rounded-lg p-1 text-primary hover:bg-primary/10 disabled:opacity-30"
                     >
                       <ExternalLink className="h-3 w-3" />

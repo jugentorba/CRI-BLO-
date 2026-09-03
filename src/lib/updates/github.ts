@@ -1,7 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 
 export const CRI_BLO_VERSION = "0.1.0";
-export const CRI_BLO_RELEASE_REPOSITORIES = ["jugentorba/CRIBLO", "jugentorba/CRI-BLO-"] as const;
+export const CRI_BLO_RELEASE_REPOSITORIES = ["jugentorba/CRI-BLO-"] as const;
 
 interface GitHubReleaseAsset {
   name: string;

@@ -36,6 +36,10 @@ const entries = [
     "NSMicrophoneUsageDescription",
     "CRI BLO utilise le microphone uniquement pour la dictée vocale lorsque vous l'activez.",
   ],
+  [
+    "NSSpeechRecognitionUsageDescription",
+    "CRI BLO utilise la reconnaissance vocale uniquement pour transcrire la dictée que vous lancez.",
+  ],
 ];
 
 function xmlEscape(value) {
