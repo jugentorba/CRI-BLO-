@@ -1,0 +1,65 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/georeseaux-ios-semantic-longpress
+      - temp-supercool-export
+    paths:
+      - src/**
+      - plugins/criblo-native-browser/**
+      - capacitor.config.ts
+      - package.json
+      - package-lock.json
+      - .github/workflows/ios-unsigned-ipa.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build web app
+        run: npm run build
+      - name: Generate Capacitor iOS project
+        run: |
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+          test -f ios/App/App.xcodeproj/project.pbxproj
+      - name: Build unsigned device app
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/CRIBLODerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+          APP="$RUNNER_TEMP/CRIBLODerivedData/Build/Products/Release-iphoneos/App.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/CRI-BLO.app"
+          cd "$RUNNER_TEMP/ipa"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/CRI-BLO-GeoReseaux-iOS-unsigned.ipa" Payload
+          test -s "$GITHUB_WORKSPACE/CRI-BLO-GeoReseaux-iOS-unsigned.ipa"
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-GeoReseaux-iOS-unsigned
+          path: CRI-BLO-GeoReseaux-iOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
