@@ -1,14 +1,36 @@
 # GeoReseaux iOS long-press bridge
 
-Real-device diagnostics show that the native `UILongPressGestureRecognizer` reaches `.began` on time (haptic feedback is immediate), while `WKWebView.evaluateJavaScript(...)` may be delivered only after the touch has ended. The JavaScript bridge therefore must not depend on native-to-JS delivery time to establish the hold state.
+## Real-device finding
 
-Current strategy:
+Real-device diagnostics showed that the native `UILongPressGestureRecognizer` reaches `.began` on time (haptic feedback is immediate), while `WKWebView.evaluateJavaScript(...)` can be delivered only after the finger is released. The JavaScript bridge therefore does not depend on native-to-JavaScript callback timing to establish the hold state.
+
+## Current strategy
 
 1. A genuine trusted GeoReseaux `touchstart` starts a 600 ms in-page timer.
-2. The timer arms the long-press request while preserving the real target, coordinates and trusted touch source.
-3. Missing Android-style press-start state may be prepared before release.
-4. The genuine iOS `touchend`/mouse compatibility tail is allowed to run.
-5. After the genuine `click` finishes, one `contextmenu` is emitted last at the original hold coordinates.
-6. A delayed native bridge callback is suppressed so it cannot overwrite or duplicate the request. Native remains responsible for haptic feedback and as a backup arm signal.
+2. The timer arms the hold while preserving the real target, coordinates and trusted touch source.
+3. CRI-BLO presents the measured Android-compatible press/release lifecycle to application DOM listeners.
+4. After the genuine iOS release/click tail completes, exactly one `contextmenu` is delivered at the original hold coordinates.
+5. If the page contains an OpenLayers map, CRI-BLO recovers `Map.handleBrowserEvent.bind(map)` at document start.
+6. CRI-BLO does not rely on WKWebView treating a JavaScript-created `contextmenu` as native browser input for OpenLayers. The synthetic event still reaches application DOM listeners, while the OpenLayers map receives one semantic/direct `contextmenu` through the recovered map handler.
+7. A delayed native callback is suppressed so it cannot duplicate or overwrite the already armed trusted-JavaScript hold. Native remains responsible for haptic feedback and as a backup arm signal.
 
-The regression test must verify a short tap does not arm, a long hold does not emit contextmenu before release, contextmenu is last after the trusted click, and a delayed native callback cannot duplicate the event.
+## Automated verification
+
+The regression suite checks:
+
+- short taps do not become holds;
+- the long hold does not fire `contextmenu` before release;
+- Android-compatible event ordering is preserved;
+- the delayed native callback cannot duplicate the action;
+- application DOM `contextmenu` listeners still fire exactly once;
+- hidden/local OpenLayers map instances are recovered and receive one semantic/direct map event;
+- the integration fixture opens a popup on OpenLayers 6.15.1, 7.2.2 and 10.6.1;
+- GeoReseaux JavaScript/HTTP Android user-agent parity remains consistent.
+
+The unsigned iPhone Release build is compiled separately on a macOS GitHub Actions runner.
+
+## Still requires physical-device verification
+
+CI does not reproduce the complete production environment. Final validation must be performed on a real iPhone using the exact built IPA while logged into the real Orange GeoReseaux page. That test is the only way to confirm actual iOS/WKWebView finger gesture behavior, the current production GeoReseaux bundle, authenticated redirects/cookies, and the real popup/tool action together.
+
+If the physical-device hold still fails, open **More → Diagnostic GeoReseaux** immediately after the failed hold and capture the full diagnostic text before changing the code again.
