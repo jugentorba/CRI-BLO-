@@ -113,6 +113,17 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
   await workbook.xlsx.load(await loadTemplate());
 
   const fiche = getWorksheet(workbook, "FICHE SAV BLO");
+  const mesures = getWorksheet(workbook, "MESURES");
+
+  // Clean two accidental literals present in the bundled source workbook. They
+  // are template defects, not technician data, and must never leak into exports.
+  if (fiche && String(fiche.getCell("F12").value ?? "").trim() === "Codre postal") {
+    fiche.getCell("F12").value = "Code postal";
+  }
+  if (mesures && String(mesures.getCell("E14").value ?? "").trim() === "Hello") {
+    mesures.getCell("E14").value = null;
+  }
+
   const company = (cri.values?.company as string) ?? cri.technician.company ?? "";
   const lastName = (cri.values?.technicianName as string) ?? cri.technician.lastName ?? "";
   const companyAndName = [company, lastName].filter(Boolean).join(" — ");

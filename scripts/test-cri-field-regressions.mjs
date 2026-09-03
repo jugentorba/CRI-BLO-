@@ -3,6 +3,7 @@ import fs from "node:fs";
 import ts from "typescript";
 
 const route = fs.readFileSync("src/routes/cri.$id.tsx", "utf8");
+const schema = fs.readFileSync("src/lib/cri/schema.ts", "utf8");
 const xlsx = fs.readFileSync("src/lib/export/xlsx.ts", "utf8");
 const xlsxConfig = fs.readFileSync("src/lib/export/xlsx-config.ts", "utf8");
 const html = fs.readFileSync("src/lib/export/html.ts", "utf8");
@@ -16,6 +17,14 @@ const parse = fs.readFileSync("src/lib/import/parse.ts", "utf8");
 const updates = fs.readFileSync("src/lib/updates/github.ts", "utf8");
 const iosInfo = fs.readFileSync("scripts/patch-ios-info.mjs", "utf8");
 
+assert.match(schema, /id: "transportDistribution", label: "Type de tronçon"/, "UI must use the official Type de tronçon label");
+assert.doesNotMatch(route, /addr\.commune \?\? prev\.commune/, "new GPS address must not retain a stale commune");
+assert.doesNotMatch(route, /addr\.postalCode \?\? prev\.codePostal/, "new GPS address must not retain a stale postcode");
+assert.doesNotMatch(route, /addr\.street \?\? prev\.nomVoie/, "new GPS address must not retain a stale street");
+assert.doesNotMatch(route, /addr\.streetNumber \?\? prev\.numeroVoie/, "new GPS address must not retain a stale street number");
+assert.doesNotMatch(html, /defautLocaliseClient/, "PDF must not reintroduce an obsolete client-location field absent from the current template");
+assert.match(xlsx, /getCell\("F12"\)\.value = "Code postal"/, "XLSX export must correct the bundled Code postal typo");
+assert.match(xlsx, /getCell\("E14"\)\.value = null/, "XLSX export must remove the accidental MESURES Hello value");
 assert.match(route, /void captureGps\("defaut"\);/, "initial GPS must populate the default defect scope");
 assert.match(route, /if \(!scope \|\| scope === "defaut"\) setGps\(coords\);/, "A/B capture must not replace global defect GPS");
 assert.ok(route.includes("// Point A/B : ne jamais écraser la localisation officielle du défaut."), "A/B address isolation marker missing");

@@ -178,12 +178,15 @@ function CriEditor() {
   }, [cri, values, photos, gps, address, addressStatus, profile]);
 
   function applyAddressToValues(addr: Address) {
+    // A new defect GPS capture is authoritative. Missing pieces from the new
+    // reverse-geocoded address must clear old values instead of leaking a street,
+    // postcode or house number from the previous intervention location.
     setValues((prev) => ({
       ...prev,
-      commune: addr.commune ?? prev.commune ?? "",
-      codePostal: addr.postalCode ?? prev.codePostal ?? "",
-      nomVoie: addr.street ?? prev.nomVoie ?? "",
-      numeroVoie: addr.streetNumber ?? prev.numeroVoie ?? "",
+      commune: addr.commune ?? "",
+      codePostal: addr.postalCode ?? "",
+      nomVoie: addr.street ?? "",
+      numeroVoie: addr.streetNumber ?? "",
     }));
   }
 

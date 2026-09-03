@@ -204,8 +204,8 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
       </div>
     </div>
     <div class="grid2" style="margin-top:6px">
-      <div class="lab">En ligne Déf/Rép. localisé au :</div><div class="box">${v("defautLocalise")}</div>
-      <div class="lab">Chez le client Déf/Rép. localisé au :</div><div class="box">${v("defautLocaliseClient")}</div>
+      <div class="lab">Défaut/réparation localisé au :</div><div class="box">${v("defautLocalise")}</div>
+      <div class="lab"></div><div class="box" style="border:0"></div>
       <div class="lab">Référence NRO/PM/PB/CABLE :</div><div class="box span3">${raw("referenceContenant")}</div>
       <div class="lab">Cause principale du défaut :</div><div class="box span3">${v("causePrincipale")}</div>
       <div class="lab">N° du Tronçon :</div><div class="box">${raw("numTroncon")}</div>
