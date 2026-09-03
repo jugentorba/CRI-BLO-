@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "prebuild": "node scripts/patch-ios-georeseaux-native-passthrough.mjs",
+    "prebuild": "node scripts/patch-ios-georeseaux-native-passthrough.mjs && node scripts/patch-ios-georeseaux-hold-timing.mjs",
     "build": "vite build && node scripts_apkforge_postbuild.mjs",
     "build:dev": "vite build --mode development",
-    "test:ios-longpress-bridge": "node scripts/test-ios-longpress-bridge.mjs",
+    "test:ios-longpress-bridge": "node scripts/test-ios-longpress-held-context.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
