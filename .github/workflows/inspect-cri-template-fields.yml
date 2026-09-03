@@ -1,0 +1,44 @@
+name: Inspect CRI template fields
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - .github/workflows/inspect-cri-template-fields.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - name: Scan official Excel template
+        run: |
+          node --input-type=module <<'NODE'
+          import ExcelJS from 'exceljs';
+          import fs from 'node:fs';
+          const wb = new ExcelJS.Workbook();
+          await wb.xlsx.load(fs.readFileSync('public/cri_blo_template.xlsx'));
+          const terms = /\b(?:D1|D2|PT)\b|ARBRE|POTEAU|CHAMBRE|TRON[CÇ]ON|CONTENANT|C[ÂA]BLE/i;
+          for (const ws of wb.worksheets) {
+            const hits = [];
+            ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+              row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+                const value = cell.text?.trim?.() ?? String(cell.value ?? '').trim();
+                if (value && terms.test(value)) hits.push({ cell: cell.address, row: rowNumber, col: colNumber, value });
+              });
+            });
+            if (hits.length) {
+              console.log(`\n=== ${ws.name} ===`);
+              for (const hit of hits) console.log(`${hit.cell}: ${hit.value}`);
+            }
+          }
+          NODE
