@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
-      - name: Print exact template cells
+      - name: Print localization template cells
         run: |
           node --input-type=module <<'NODE'
           import ExcelJS from 'exceljs';
@@ -40,30 +40,15 @@ jobs:
             return '';
           }
 
-          const fiche = wb.getWorksheet('FICHE SAV BLO');
-          console.log('=== FICHE SAV BLO rows 24-55 ===');
-          for (let r = 24; r <= 55; r++) {
+          const ws = wb.getWorksheet('FICHE SAV BLO');
+          console.log('=== FICHE SAV BLO rows 1-23 ===');
+          for (let r = 1; r <= 23; r++) {
             const hits = [];
             for (let c = 1; c <= 12; c++) {
-              const cell = fiche.getCell(r, c);
+              const cell = ws.getCell(r, c);
               const text = printable(cell.value);
               if (text) hits.push(`${cell.address}=${JSON.stringify(text)}`);
             }
             if (hits.length) console.log(hits.join(' | '));
-          }
-
-          for (const sheetName of ['PHOTOS OI','MESURES','RDSUR','PHOTOS OC','PLAN']) {
-            const ws = wb.getWorksheet(sheetName);
-            if (!ws) continue;
-            console.log(`=== ${sheetName} text ===`);
-            for (let r = 1; r <= Math.min(ws.rowCount, 80); r++) {
-              const hits = [];
-              for (let c = 1; c <= Math.min(ws.columnCount || 12, 12); c++) {
-                const cell = ws.getCell(r,c);
-                const text = printable(cell.value);
-                if (text) hits.push(`${cell.address}=${JSON.stringify(text)}`);
-              }
-              if (hits.length) console.log(hits.join(' | '));
-            }
           }
           NODE
