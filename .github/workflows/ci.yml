@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - criblo-master-spec-v1
+      - temp-supercool-export
 
 concurrency:
   group: criblo-ci-${{ github.ref }}
