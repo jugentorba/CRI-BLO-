@@ -18,6 +18,7 @@ import {
   deleteOtherDoc,
   listOtherDocs,
   saveOtherDoc,
+  updateOtherDocFile,
   type OtherDocRecord,
 } from "@/lib/docs/repository";
 import { DOC_TYPES, type DetectionResult } from "@/lib/docs/registry";
@@ -184,6 +185,18 @@ function Documents() {
     }
   }
 
+  async function handleDocumentSaved(blob: Blob, fileName: string) {
+    if (!editingDoc) return;
+    try {
+      const updated = await updateOtherDocFile(editingDoc.id, blob, fileName);
+      setEditingDoc(updated);
+      setError(null);
+      await load();
+    } catch (e) {
+      setError((e as Error).message || "La modification n'a pas pu être conservée dans CRI-BLO.");
+    }
+  }
+
   const groups = Array.from(new Set(docs.map((d) => d.docType)));
 
   return (
@@ -347,7 +360,7 @@ function Documents() {
         <UniversalDocumentEditor
           document={{ name: editingDoc.fileName, mimeType: editingDoc.mimeType, blob: editingDoc.blob }}
           onClose={() => setEditingDoc(null)}
-          onSaved={() => setError(null)}
+          onSaved={handleDocumentSaved}
         />
       )}
     </AppShell>
