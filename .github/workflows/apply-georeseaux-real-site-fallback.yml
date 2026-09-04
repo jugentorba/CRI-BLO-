@@ -1,0 +1,34 @@
+name: Apply GeoReseaux real-site fallback patch
+
+on:
+  push:
+    branches:
+      - temp-supercool-export
+    paths:
+      - .github/workflows/apply-georeseaux-real-site-fallback.yml
+      - scripts/apply-georeseaux-real-site-fallback.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp-supercool-export
+      - name: Apply patch
+        run: python3 scripts/apply-georeseaux-real-site-fallback.py
+      - name: Commit generated source/test changes
+        run: |
+          if git diff --quiet; then
+            echo 'No generated changes.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/test-ios-longpress-bridge.mjs plugins/criblo-native-browser/ios/Sources/CRIBrowserPlugin/CRIBrowserPlugin.swift 2>/dev/null || true
+          git commit -m 'test: reproduce real GeoReseaux consumed context failure'
+          git push origin HEAD:temp-supercool-export
