@@ -1,0 +1,44 @@
+name: Apply GeoReseaux Android hold timing test
+
+on:
+  push:
+    branches:
+      - fix/georeseaux-android-hold-timing
+
+permissions:
+  contents: write
+
+jobs:
+  red-gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/georeseaux-android-hold-timing
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - name: Apply Android hold timing regression only
+        run: python3 scripts/apply-ios-android-hold-timing-test.py
+      - name: Verify new regression is RED on old production code
+        shell: bash
+        run: |
+          set +e
+          npm run test:ios-longpress-bridge > /tmp/red.log 2>&1
+          status=$?
+          cat /tmp/red.log
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: new Android hold timing regression unexpectedly passed before production fix"
+            exit 1
+          fi
+          grep -q "Android hold contextmenu did not fire before release" /tmp/red.log
+      - name: Commit failing regression
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/test-ios-longpress-bridge.mjs
+          git commit -m 'test: require contextmenu at Android hold threshold'
+          git push origin HEAD:fix/georeseaux-android-hold-timing
