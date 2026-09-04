@@ -2522,6 +2522,16 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var openLayersIntercepted = __cribloOpenLayersDomIntercepts > openLayersBefore;
         if (openLayersIntercepted || (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented)) {
           dispatched = invokeMapEngine(target, x, y, source) || dispatched;
+        } else if (__cribloMapRegistry.length) {
+          // A real GeoReseaux contextmenu handler may preventDefault() without
+          // opening the map popup. Give application DOM rendering one frame to
+          // settle; if no popup appeared, deliver the recovered OpenLayers Map
+          // semantic event instead of treating preventDefault() as success.
+          setTimeout(function () {
+            if (!popupChanged(before) && invokeMapEngine(target, x, y, source)) {
+              __cribloGeoDiag.lastResult = 'trusted-webkit-tail-openlayers-recovered';
+            }
+          }, 32);
         }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         __cribloGeoDiag.releaseCompletions++;
@@ -2601,6 +2611,12 @@ private final class CRIBrowserViewController: UIViewController, WKNavigationDele
         var openLayersIntercepted = __cribloOpenLayersDomIntercepts > openLayersBefore;
         if (openLayersIntercepted || (delta === 0 && !__cribloGeoDiag.syntheticContextPrevented)) {
           dispatched = invokeMapEngine(target, x, y, null) || dispatched;
+        } else if (__cribloMapRegistry.length) {
+          setTimeout(function () {
+            if (!popupChanged(before) && invokeMapEngine(target, x, y, null)) {
+              __cribloGeoDiag.lastResult = 'touchstart-timeout-openlayers-recovered';
+            }
+          }, 32);
         }
         __cribloGeoDiag.directTrustedHandlerFires += delta;
         setTimeout(function () {
