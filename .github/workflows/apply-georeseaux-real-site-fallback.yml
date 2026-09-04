@@ -19,8 +19,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: temp-supercool-export
-      - name: Apply patch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply regression patch
         run: python3 scripts/apply-georeseaux-real-site-fallback.py
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Prove real-site consumed-context regression is RED
+        run: npm run test:ios-longpress-bridge
       - name: Commit generated source/test changes
         run: |
           if git diff --quiet; then
