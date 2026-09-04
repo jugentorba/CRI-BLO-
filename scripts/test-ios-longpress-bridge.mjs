@@ -93,8 +93,9 @@ function touch(type, x, y) {
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Physical iPhone input arrives pointerdown before touchstart. The bridge must
-// present the exact measured WORKING Android order to GeoReseaux listeners:
-// touchstart -> pointerdown -> mousedown ... touchend -> pointerup -> mouseup -> click -> contextmenu.
+// present the WORKING Android hold timing measured on the real Android WebView:
+// the long-touch contextmenu occurs at the hold threshold while the finger is
+// still down. pointerup/touchend and any compatibility release tail happen later.
 pointer("pointerdown", 82, 31, 1);
 if (order.length !== 0) throw new Error("iOS pointerdown leaked to page before touchstart: " + order.join(","));
 touch("touchstart", 82, 31);
@@ -104,10 +105,13 @@ if (order.join(",") !== "touchstart,pointerdown,mousedown") throw new Error("mea
 const md = lifecycle.find((entry) => entry.name === "mousedown");
 if (!md || !md.trusted || !md.touchSource || md.which !== 1) throw new Error("mousedown trusted facade mismatch: " + JSON.stringify(md));
 await wait(625);
-if (context !== null) throw new Error("contextmenu fired while finger was still down: " + order.join(","));
+const holdExpected = "touchstart,pointerdown,mousedown,contextmenu";
+if (order.join(",") !== holdExpected) throw new Error("Android hold contextmenu did not fire before release: " + order.join(","));
+if (!context || !context.trusted || !context.prevented || !context.target || !context.pointerEvent || !context.touchSource || !context.originalTrusted) throw new Error("hold-time context facade mismatch: " + JSON.stringify(context));
+if (context.clientX !== 82 || context.clientY !== 31 || context.button !== 0 || context.buttons !== 0 || context.pointerType !== "touch") throw new Error("hold-time context shape mismatch: " + JSON.stringify(context));
 
 pointer("pointerup", 82, 31, 0);
-if (order.join(",") !== "touchstart,pointerdown,mousedown") throw new Error("iOS pointerup leaked to page before touchend: " + order.join(","));
+if (order.join(",") !== holdExpected) throw new Error("iOS pointerup leaked to page before touchend: " + order.join(","));
 touch("touchend", 82, 31);
 // Simulate the delayed native callback observed on the real iPhone. It must not
 // replace the already armed trusted-JS request.
@@ -117,14 +121,14 @@ await Promise.resolve();
 // synthesizing any missing mouse release tail. The unit gate must allow that
 // window instead of approving only the old immediate-completion behavior.
 await wait(130);
-const expected = "touchstart,pointerdown,mousedown,touchend,pointerup,mouseup,click,contextmenu";
+const expected = "touchstart,pointerdown,mousedown,contextmenu,touchend,pointerup,mouseup,click";
 if (order.join(",") !== expected) throw new Error("real-iPhone -> Android lifecycle mismatch: " + order.join(","));
+if (order.filter((name) => name === "contextmenu").length !== 1) throw new Error("hold emitted duplicate contextmenu: " + order.join(","));
 for (const name of ["mousedown", "mouseup", "click"]) {
   const event = lifecycle.find((entry) => entry.name === name);
   if (!event || !event.trusted || !event.touchSource || event.which !== 1) throw new Error(name + " facade mismatch: " + JSON.stringify(event));
 }
-if (!context || !context.trusted || !context.prevented || !context.target || !context.pointerEvent || !context.touchSource || !context.originalTrusted) throw new Error("context facade mismatch: " + JSON.stringify(context));
-if (context.clientX !== 82 || context.clientY !== 31 || context.button !== 0 || context.buttons !== 0 || context.pointerType !== "touch") throw new Error("context shape mismatch: " + JSON.stringify(context));
+if (!context || context.clientX !== 82 || context.clientY !== 31 || context.button !== 0 || context.buttons !== 0 || context.pointerType !== "touch") throw new Error("context shape changed after release: " + JSON.stringify(context));
 
 const diagnostics = windowTarget.__cribloGeoDiagnosticsText();
 if (!diagnostics.includes("JS trusted hold arms: 1")) throw new Error("trusted JS hold did not arm: " + diagnostics);
