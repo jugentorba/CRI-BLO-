@@ -1,0 +1,42 @@
+name: Apply GeoReseaux real-site consumed-context fix
+
+on:
+  push:
+    branches:
+      - fix/georeseaux-real-site-consumed-context
+    paths:
+      - .github/workflows/apply-georeseaux-real-site-consumed-context-fix.yml
+      - scripts/apply-georeseaux-real-site-consumed-context-fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/georeseaux-real-site-consumed-context
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Apply minimal production fix
+        run: python3 scripts/apply-georeseaux-real-site-consumed-context-fix.py
+      - name: Verify exact real-site regression turns GREEN
+        run: npm run test:ios-longpress-bridge
+      - name: Verify pan and touch cancellation
+        run: node scripts/test-ios-longpress-cancel.mjs
+      - name: Verify GeoReseaux UA parity
+        run: npm run test:ios-georeseaux-ua-parity
+      - name: Commit production fix and remove temporary applicator
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f scripts/apply-georeseaux-real-site-consumed-context-fix.py
+          rm -f .github/workflows/apply-georeseaux-real-site-consumed-context-fix.yml
+          git add -A
+          git commit -m 'fix: fall back to recovered OpenLayers after consumed contextmenu'
+          git push origin HEAD:fix/georeseaux-real-site-consumed-context
