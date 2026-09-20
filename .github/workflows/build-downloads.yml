@@ -30,7 +30,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Install web dependencies
+      - name: Install dependencies
         working-directory: source
         run: npm install --no-audit --no-fund
 
@@ -44,28 +44,11 @@ jobs:
           cd source
           zip -qr ../output/CRI-BLO-PWA.zip dist
 
-      - name: Install Capacitor Android wrapper
-        working-directory: source
-        run: npm install --no-save --no-audit --no-fund @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
-
       - name: Create Android project
         working-directory: source
         run: |
-          cat > capacitor.config.ts <<'EOF'
-          import type { CapacitorConfig } from '@capacitor/cli';
-
-          const config: CapacitorConfig = {
-            appId: 'com.criblo.app',
-            appName: 'CRI BLO',
-            webDir: 'dist',
-            server: {
-              androidScheme: 'https'
-            }
-          };
-
-          export default config;
-          EOF
           npx cap add android
+          npx cap sync android
 
       - name: Enable Android permissions
         run: |
