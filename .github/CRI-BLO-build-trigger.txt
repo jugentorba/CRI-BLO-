@@ -1,2 +1,3 @@
 Trigger CRI-BLO APK and PWA delivery build on 2026-09-20.
 Retry after dependency-install fix.
+Retry with CRI-BLO Capacitor 8 native build.
