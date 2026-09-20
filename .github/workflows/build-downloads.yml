@@ -1,0 +1,106 @@
+name: Build CRI-BLO Downloads
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-downloads:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CRI-BLO source
+        uses: actions/checkout@v4
+        with:
+          ref: criblo-master-spec-v1
+          path: source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install web dependencies
+        working-directory: source
+        run: npm ci --no-audit --no-fund
+
+      - name: Build PWA
+        working-directory: source
+        run: npm run build
+
+      - name: Package PWA
+        run: |
+          mkdir -p output
+          cd source
+          zip -qr ../output/CRI-BLO-PWA.zip dist
+
+      - name: Install Capacitor Android wrapper
+        working-directory: source
+        run: npm install --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+
+      - name: Create Android project
+        working-directory: source
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.criblo.app',
+            appName: 'CRI BLO',
+            webDir: 'dist',
+            server: {
+              androidScheme: 'https'
+            }
+          };
+
+          export default config;
+          EOF
+          npx cap add android
+
+      - name: Enable Android permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          permissions = [
+              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
+          ]
+          if "android.permission.ACCESS_FINE_LOCATION" not in text:
+              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
+          if "android:usesCleartextTraffic=" not in text:
+              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+          manifest.write_text(text)
+          PY
+
+      - name: Build Android APK
+        working-directory: source/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Collect APK
+        run: cp source/android/app/build/outputs/apk/debug/app-debug.apk output/CRI-BLO.apk
+
+      - name: Upload CRI-BLO files
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-downloads
+          path: |
+            output/CRI-BLO.apk
+            output/CRI-BLO-PWA.zip
+          if-no-files-found: error
+          retention-days: 30
