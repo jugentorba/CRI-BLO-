@@ -1,13 +1,15 @@
-name: Publish CRI-BLO PWA
+name: Publish CRI-BLO PWA + APK
 
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "downloads/**"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -19,27 +21,116 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Keep publishing the accepted working branch without merging the draft PR.
-      # This run publishes the iOS GPS and multi-photo reliability fixes.
-      - name: Checkout current CRI-BLO working branch
+      - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
         with:
           ref: criblo-master-spec-v1
+          path: source
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: source/package-lock.json
 
-      - name: Install dependencies
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install web dependencies
+        working-directory: source
         run: npm ci --no-audit --no-fund
 
       - name: Build PWA
+        working-directory: source
         run: npm run build
 
       - name: Add GitHub Pages SPA fallback
-        run: cp dist/index.html dist/404.html
+        run: cp source/dist/index.html source/dist/404.html
+
+      - name: Package downloadable PWA
+        run: |
+          cd source
+          zip -qr ../CRI-BLO-PWA.zip dist
+
+      - name: Install Capacitor Android wrapper
+        working-directory: source
+        run: npm install --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+
+      - name: Create Android project
+        working-directory: source
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.criblo.app',
+            appName: 'CRI BLO',
+            webDir: 'dist',
+            server: {
+              androidScheme: 'https'
+            }
+          };
+
+          export default config;
+          EOF
+          npx cap add android
+
+      - name: Enable camera and GPS permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          permissions = [
+              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
+          ]
+          marker = "<application"
+          if "android.permission.ACCESS_FINE_LOCATION" not in text:
+              text = text.replace(marker, "\n".join(permissions) + "\n\n    " + marker, 1)
+          if "android:usesCleartextTraffic=" not in text:
+              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+          manifest.write_text(text)
+          PY
+
+      - name: Build Android APK
+        working-directory: source/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Add APK and PWA download files
+        run: |
+          mkdir -p source/dist/downloads
+          cp source/android/app/build/outputs/apk/debug/app-debug.apk source/dist/downloads/CRI-BLO.apk
+          cp CRI-BLO-PWA.zip source/dist/downloads/CRI-BLO-PWA.zip
+
+      - name: Checkout download branch target
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: publish
+
+      - name: Publish download files to repository
+        run: |
+          mkdir -p publish/downloads
+          cp source/dist/downloads/CRI-BLO.apk publish/downloads/CRI-BLO.apk
+          cp source/dist/downloads/CRI-BLO-PWA.zip publish/downloads/CRI-BLO-PWA.zip
+          cd publish
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/CRI-BLO.apk downloads/CRI-BLO-PWA.zip
+          if ! git diff --cached --quiet; then
+            git commit -m "build: publish CRI-BLO APK and PWA downloads"
+            git push origin main
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -47,7 +138,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./source/dist
 
   deploy:
     environment:
