@@ -25,14 +25,14 @@ jobs:
           cache-dependency-path: source/package-lock.json
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Install web dependencies
         working-directory: source
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Build PWA
         working-directory: source
@@ -46,7 +46,7 @@ jobs:
 
       - name: Install Capacitor Android wrapper
         working-directory: source
-        run: npm install --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+        run: npm install --no-save --no-audit --no-fund @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
 
       - name: Create Android project
         working-directory: source
