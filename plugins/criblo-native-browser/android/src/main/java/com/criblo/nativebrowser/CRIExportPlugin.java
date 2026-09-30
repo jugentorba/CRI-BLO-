@@ -9,8 +9,10 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.util.Base64;
+import android.webkit.MimeTypeMap;
 
 import androidx.activity.result.ActivityResult;
+import androidx.core.content.FileProvider;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -19,6 +21,8 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.util.List;
 
@@ -38,6 +42,13 @@ public class CRIExportPlugin extends Plugin {
 
     private OutputStream activeOutput;
     private String activeFolderName;
+    private Uri activeDocumentUri;
+    private long activeBytesWritten;
+
+    private OutputStream activeOpenOutput;
+    private File activeOpenFile;
+    private String activeOpenMimeType;
+    private long activeOpenBytesWritten;
 
     @PluginMethod
     public void pickDirectory(PluginCall call) {
@@ -117,7 +128,10 @@ public class CRIExportPlugin extends Plugin {
      */
     @PluginMethod
     public synchronized void beginFile(PluginCall call) {
-        closeActiveOutput();
+        if (activeOutput != null) {
+            call.reject("Un export Android est déjà en cours.");
+            return;
+        }
 
         String fileName = safeFileName(call.getString("fileName"));
         String mimeType = call.getString("mimeType");
@@ -153,6 +167,8 @@ public class CRIExportPlugin extends Plugin {
             if (output == null) throw new IllegalStateException("openOutputStream returned null");
             activeOutput = output;
             activeFolderName = prefs().getString(KEY_FOLDER_NAME, folderDisplayName(treeUri));
+            activeDocumentUri = documentUri;
+            activeBytesWritten = 0;
 
             JSObject response = new JSObject();
             response.put("ready", true);
@@ -181,6 +197,8 @@ public class CRIExportPlugin extends Plugin {
                 if (output == null) throw firstError;
                 activeOutput = output;
                 activeFolderName = prefs().getString(KEY_FOLDER_NAME, folderDisplayName(treeUri));
+                activeDocumentUri = documentUri;
+                activeBytesWritten = 0;
 
                 JSObject response = new JSObject();
                 response.put("ready", true);
@@ -207,6 +225,7 @@ public class CRIExportPlugin extends Plugin {
         try {
             byte[] bytes = Base64.decode(dataBase64, Base64.DEFAULT);
             activeOutput.write(bytes);
+            activeBytesWritten += bytes.length;
             JSObject response = new JSObject();
             response.put("written", bytes.length);
             call.resolve(response);
@@ -223,14 +242,22 @@ public class CRIExportPlugin extends Plugin {
             return;
         }
         String folderName = activeFolderName;
+        Uri documentUri = activeDocumentUri;
+        long bytesWritten = activeBytesWritten;
         try {
             activeOutput.flush();
             activeOutput.close();
             activeOutput = null;
             activeFolderName = null;
+            activeDocumentUri = null;
+            activeBytesWritten = 0;
+
+            long fileSize = documentSize(documentUri);
             JSObject response = new JSObject();
             response.put("wrote", true);
             response.put("folderName", folderName);
+            response.put("bytesWritten", bytesWritten);
+            response.put("fileSize", fileSize);
             call.resolve(response);
         } catch (Exception error) {
             closeActiveOutput();
@@ -241,6 +268,119 @@ public class CRIExportPlugin extends Plugin {
     @PluginMethod
     public synchronized void abortFile(PluginCall call) {
         closeActiveOutput();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public synchronized void beginOpenFile(PluginCall call) {
+        if (activeOpenOutput != null) {
+            call.reject("Une ouverture de fichier est déjà en cours.");
+            return;
+        }
+
+        String fileName = safeFileName(call.getString("fileName"));
+        if (fileName == null) {
+            call.reject("Nom de fichier invalide.");
+            return;
+        }
+
+        try {
+            cleanupOpenCache();
+            File directory = new File(getContext().getCacheDir(), "criblo-open");
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw new IllegalStateException("Impossible de créer le cache CRI BLO.");
+            }
+
+            File file = new File(directory, fileName);
+            FileOutputStream output = new FileOutputStream(file, false);
+            activeOpenFile = file;
+            activeOpenOutput = output;
+            activeOpenMimeType = effectiveMimeType(call.getString("mimeType"), fileName);
+            activeOpenBytesWritten = 0;
+
+            JSObject response = new JSObject();
+            response.put("ready", true);
+            call.resolve(response);
+        } catch (Exception error) {
+            closeActiveOpenOutput(true);
+            call.reject("Impossible de préparer le fichier pour ouverture.", error);
+        }
+    }
+
+    @PluginMethod
+    public synchronized void appendOpenChunk(PluginCall call) {
+        if (activeOpenOutput == null) {
+            call.reject("Aucune ouverture de fichier Android en cours.");
+            return;
+        }
+        String dataBase64 = call.getString("dataBase64");
+        if (dataBase64 == null) {
+            call.reject("Données de fichier manquantes.");
+            return;
+        }
+
+        try {
+            byte[] bytes = Base64.decode(dataBase64, Base64.DEFAULT);
+            activeOpenOutput.write(bytes);
+            activeOpenBytesWritten += bytes.length;
+            JSObject response = new JSObject();
+            response.put("written", bytes.length);
+            call.resolve(response);
+        } catch (Exception error) {
+            closeActiveOpenOutput(true);
+            call.reject("Copie temporaire du fichier interrompue.", error);
+        }
+    }
+
+    @PluginMethod
+    public synchronized void finishOpenFile(PluginCall call) {
+        if (activeOpenOutput == null || activeOpenFile == null) {
+            call.reject("Aucune ouverture de fichier Android en cours.");
+            return;
+        }
+
+        File file = activeOpenFile;
+        String mimeType = activeOpenMimeType;
+        long bytesWritten = activeOpenBytesWritten;
+        try {
+            activeOpenOutput.flush();
+            activeOpenOutput.close();
+            activeOpenOutput = null;
+            activeOpenFile = null;
+            activeOpenMimeType = null;
+            activeOpenBytesWritten = 0;
+
+            long fileSize = file.length();
+            if (fileSize != bytesWritten) {
+                file.delete();
+                call.reject("Copie temporaire incomplète : taille du fichier incorrecte.");
+                return;
+            }
+
+            Uri uri = FileProvider.getUriForFile(
+                getContext(),
+                getContext().getPackageName() + ".criblo.files",
+                file
+            );
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mimeType);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject response = new JSObject();
+            response.put("opened", true);
+            response.put("bytesWritten", bytesWritten);
+            response.put("fileSize", fileSize);
+            call.resolve(response);
+        } catch (Exception error) {
+            closeActiveOpenOutput(false);
+            call.reject("Aucune application Android compatible n'a pu ouvrir ce fichier.", error);
+        }
+    }
+
+    @PluginMethod
+    public synchronized void abortOpenFile(PluginCall call) {
+        closeActiveOpenOutput(true);
         call.resolve();
     }
 
@@ -333,17 +473,74 @@ public class CRIExportPlugin extends Plugin {
         return name;
     }
 
+    private long documentSize(Uri documentUri) {
+        if (documentUri == null) return -1;
+        try (Cursor cursor = getContext().getContentResolver().query(
+            documentUri,
+            new String[] { DocumentsContract.Document.COLUMN_SIZE },
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+                return cursor.getLong(0);
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static String effectiveMimeType(String requested, String fileName) {
+        if (requested != null && !requested.isBlank() && !"application/octet-stream".equals(requested)) {
+            return requested;
+        }
+        int dot = fileName.lastIndexOf('.');
+        if (dot >= 0 && dot + 1 < fileName.length()) {
+            String extension = fileName.substring(dot + 1).toLowerCase();
+            String guessed = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+            if (guessed != null && !guessed.isBlank()) return guessed;
+        }
+        return "application/octet-stream";
+    }
+
+    private void cleanupOpenCache() {
+        File directory = new File(getContext().getCacheDir(), "criblo-open");
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        long cutoff = System.currentTimeMillis() - (24L * 60L * 60L * 1000L);
+        for (File file : files) {
+            if (file.isFile() && file.lastModified() < cutoff) {
+                try { file.delete(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private synchronized void closeActiveOpenOutput(boolean deletePartial) {
+        if (activeOpenOutput != null) {
+            try { activeOpenOutput.close(); } catch (Exception ignored) {}
+        }
+        if (deletePartial && activeOpenFile != null) {
+            try { activeOpenFile.delete(); } catch (Exception ignored) {}
+        }
+        activeOpenOutput = null;
+        activeOpenFile = null;
+        activeOpenMimeType = null;
+        activeOpenBytesWritten = 0;
+    }
+
     private synchronized void closeActiveOutput() {
         if (activeOutput != null) {
             try { activeOutput.close(); } catch (Exception ignored) {}
         }
         activeOutput = null;
         activeFolderName = null;
+        activeDocumentUri = null;
+        activeBytesWritten = 0;
     }
 
     @Override
     protected void handleOnDestroy() {
         closeActiveOutput();
+        closeActiveOpenOutput(true);
         super.handleOnDestroy();
     }
 }
