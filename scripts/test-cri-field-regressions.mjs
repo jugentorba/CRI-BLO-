@@ -93,7 +93,7 @@ assert.match(exportFolder, /finished\.fileSize !== expectedSize/, "Android expor
 assert.match(androidExport, /FileProvider\.getUriForFile/, "Android attachment opening must use a safe FileProvider URI");
 assert.match(androidExport, /getPackageName\(\) \+ "\\.fileprovider"/, "Android attachment opening must reuse the app FileProvider authority");
 assert.match(androidExport, /Intent\.ACTION_VIEW/, "Android attachment opening must launch a compatible installed app");
-assert.match(androidManifestPatch, /cache-path android:name="criblo_open" android:path="criblo-open\/"\//, "generated Android file_paths must expose only the CRI attachment cache");
+assert.match(androidManifestPatch, /cache-path android:name="criblo_open" android:path="criblo-open\/"\s*\/>/, "generated Android file_paths must expose only the CRI attachment cache");
 
 assert.match(xlsx, /verifySerializedValues\(output, expectedWrites\)/, "Excel export must verify CRI values after XLSX serialization");
 assert.match(xlsx, /writeChecked\(sheet, map\.cell, value, expectedWrites\)/, "mapped Excel values must participate in serialization verification");
