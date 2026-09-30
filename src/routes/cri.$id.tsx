@@ -87,6 +87,7 @@ function CriEditor() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [missing, setMissing] = useState<FieldDef[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [exportToast, setExportToast] = useState<{
@@ -380,7 +381,13 @@ function CriEditor() {
   }
 
   async function handleSaveDraft() {
-    await persist();
+    if (saving) return;
+    setSaving(true);
+    try {
+      await persist();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleExport(kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") {
@@ -589,16 +596,19 @@ function CriEditor() {
       {/* FAB : Enregistrer → ouvre l'écran de finalisation / export */}
       <button
         type="button"
-        onClick={async () => {
-          await handleSaveDraft();
+        disabled={saving}
+        onClick={() => {
+          // Réagit au premier tap : la vérification s'ouvre tout de suite,
+          // tandis que le brouillon est persisté une seule fois en arrière-plan.
           setReviewing(true);
+          void handleSaveDraft();
         }}
         aria-label="Enregistrer et finaliser"
         title="Enregistrer et finaliser"
-        className="fixed bottom-20 right-3 z-30 inline-flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground shadow-[var(--shadow-elevated)] transition active:scale-95"
+        className="fixed bottom-20 right-3 z-30 inline-flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground shadow-[var(--shadow-elevated)] transition active:scale-95 disabled:opacity-70"
       >
-        <Save className="h-3 w-3" />
-        Enregistrer
+        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+        {saving ? "Enregistrement…" : "Enregistrer"}
         {dirty && (
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-warning ring-2 ring-primary" />
         )}
