@@ -181,7 +181,7 @@ async function encodeSyncValue(value: unknown): Promise<unknown> {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (k === "handle") continue; // File System Access handles cannot be serialized.
+      if (k === "handle" || k === "aiApiKey") continue; // Handles and API secrets stay device-local.
       out[k] = await encodeSyncValue(v);
     }
     return out;
@@ -199,7 +199,10 @@ async function decodeSyncValue(value: unknown): Promise<unknown> {
   if (Array.isArray(value)) return Promise.all(value.map(decodeSyncValue));
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = await decodeSyncValue(v);
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "aiApiKey") continue; // Never restore API secrets from a cloud snapshot.
+      out[k] = await decodeSyncValue(v);
+    }
     return out;
   }
   return value;

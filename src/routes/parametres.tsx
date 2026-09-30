@@ -7,6 +7,7 @@ import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repo
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
@@ -26,6 +27,8 @@ function Parametres() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [aiTestBusy, setAiTestBusy] = useState(false);
+  const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void getProfile().then((p) => {
@@ -60,6 +63,34 @@ function Parametres() {
       /* annulé */
     } finally {
       setFolderBusy(false);
+    }
+  }
+
+  async function changeAiProvider(provider: AiProvider) {
+    if (!settings) return;
+    setAiTestMessage(null);
+    const preset = getAiProviderPreset(provider);
+    await patchSettings({
+      aiProvider: provider,
+      aiEndpoint: "",
+      aiApiKey: "",
+      aiModel: preset?.model ?? "",
+    });
+  }
+
+  async function testConfiguredAi() {
+    setAiTestBusy(true);
+    setAiTestMessage(null);
+    try {
+      const current = await getSettings();
+      const config = buildAiConfig(current);
+      if (!config) throw new Error("Choisissez d’abord un fournisseur IA.");
+      await testAiConnection(config);
+      setAiTestMessage(`${getAiProviderLabel(config.provider)} : connexion réussie ✓`);
+    } catch (e) {
+      setAiTestMessage(e instanceof Error ? e.message : "Test de connexion impossible.");
+    } finally {
+      setAiTestBusy(false);
     }
   }
 
@@ -162,12 +193,87 @@ function Parametres() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">IA indépendante</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Assistant IA</h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)] space-y-2">
-            <p className="text-xs text-muted-foreground">Utilisez votre propre endpoint compatible OpenAI. Si aucun endpoint n'est configuré, l'Assistant conserve son fonctionnement existant.</p>
-            <input value={settings.aiEndpoint ?? ""} onChange={e => patchSettings({ aiEndpoint: e.target.value })} placeholder="https://votre-endpoint/v1/chat/completions" className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs" />
-            <input value={settings.aiModel ?? "gpt-4o-mini"} onChange={e => patchSettings({ aiModel: e.target.value })} placeholder="Modèle" className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs" />
-            <input type="password" value={settings.aiApiKey ?? ""} onChange={e => patchSettings({ aiApiKey: e.target.value })} placeholder="Clé API (stockée localement)" className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs" />
+            <p className="text-xs text-muted-foreground">
+              Choisissez votre fournisseur puis saisissez sa clé API. La même configuration est utilisée par l’Assistant et l’assistant de commentaires CRI.
+            </p>
+            <label className="block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Fournisseur</label>
+            <select
+              value={settings.aiProvider ?? "none"}
+              onChange={(e) => void changeAiProvider(e.target.value as AiProvider)}
+              className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+            >
+              {AI_PROVIDER_OPTIONS.map((provider) => (
+                <option key={provider.id} value={provider.id}>{provider.label}</option>
+              ))}
+            </select>
+
+            {(settings.aiProvider ?? "none") !== "none" && (
+              <>
+                <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Clé API</label>
+                <input
+                  type="password"
+                  value={settings.aiApiKey ?? ""}
+                  onChange={(e) => {
+                    setAiTestMessage(null);
+                    void patchSettings({ aiApiKey: e.target.value });
+                  }}
+                  placeholder="Collez la clé API du fournisseur choisi"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
+                />
+
+                <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Modèle</label>
+                <input
+                  value={settings.aiModel ?? ""}
+                  onChange={(e) => {
+                    setAiTestMessage(null);
+                    void patchSettings({ aiModel: e.target.value });
+                  }}
+                  placeholder={getAiProviderPreset(settings.aiProvider ?? "none")?.model ?? "Nom du modèle"}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
+                />
+
+                {(settings.aiProvider ?? "none") === "custom" && (
+                  <>
+                    <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Endpoint compatible OpenAI</label>
+                    <input
+                      value={settings.aiEndpoint ?? ""}
+                      onChange={(e) => {
+                        setAiTestMessage(null);
+                        void patchSettings({ aiEndpoint: e.target.value });
+                      }}
+                      placeholder="https://votre-endpoint/v1/chat/completions"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
+                    />
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  disabled={aiTestBusy || !(settings.aiApiKey ?? "").trim()}
+                  onClick={() => void testConfiguredAi()}
+                  className="h-10 w-full rounded-xl border border-primary/40 bg-primary/5 text-xs font-bold text-primary disabled:opacity-50"
+                >
+                  {aiTestBusy ? "Test en cours…" : "Tester la connexion"}
+                </button>
+                {aiTestMessage && (
+                  <p className="rounded-lg bg-muted/50 p-2 text-[11px] text-foreground">{aiTestMessage}</p>
+                )}
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  La clé reste uniquement sur cet appareil : elle n’est ni intégrée dans l’APK ni incluse dans les sauvegardes OneDrive.
+                </p>
+              </>
+            )}
           </div>
         </section>
 

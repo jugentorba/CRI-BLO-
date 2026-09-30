@@ -1,4 +1,5 @@
 import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
+import type { AiProvider } from "@/lib/ai/independent";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
@@ -17,6 +18,7 @@ export interface AppSettings {
   cloudSyncEnabled?: boolean;
   cloudProvider?: "onedrive";
   lastSyncAt?: string;
+  aiProvider?: AiProvider;
   aiEndpoint?: string;
   aiApiKey?: string;
   aiModel?: string;
@@ -34,16 +36,20 @@ const DEFAULTS: AppSettings = {
   scale: 100,
   cloudSyncEnabled: false,
   cloudProvider: "onedrive",
+  aiProvider: "none",
   aiEndpoint: "",
   aiApiKey: "",
-  aiModel: "gpt-4o-mini",
+  aiModel: "",
   permissionsOnboardingDone: false,
 };
 
 export async function getSettings(): Promise<AppSettings> {
   return tx(STORE_SETTINGS, "readonly", async (s) => {
     const r = (await reqAsync(s.get("app"))) as AppSettings | undefined;
-    return { ...DEFAULTS, ...(r ?? {}) };
+    const merged = { ...DEFAULTS, ...(r ?? {}) };
+    // Migration douce des anciennes versions qui n’avaient qu’un endpoint personnalisé.
+    if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
+    return merged;
   });
 }
 
