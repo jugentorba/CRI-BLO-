@@ -24,7 +24,6 @@ jobs:
       - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
         with:
-          ref: criblo-master-spec-v1
           path: source
 
       - name: Setup Node
@@ -44,6 +43,18 @@ jobs:
       - name: Install dependencies
         working-directory: source
         run: npm install --no-audit --no-fund
+
+      - name: Prepare Capacitor Android wrapper
+        working-directory: source
+        run: |
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.criblo.app",
+            "appName": "CRI BLO",
+            "webDir": "dist"
+          }
+          JSON
 
       - name: Build PWA
         working-directory: source
