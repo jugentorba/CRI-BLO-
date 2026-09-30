@@ -32,14 +32,37 @@ export function AttachmentsSection({ criId }: { criId: string }) {
     }
   }
 
-  function handleOpen(a: AttachmentRecord) {
-    const url = URL.createObjectURL(a.blob);
-    const win = window.open(url, "_blank");
-    if (!win) {
-      // Certaines WebView bloquent l'ouverture : on retombe sur le téléchargement.
-      downloadBlob(a.name, a.blob);
+  async function handleOpen(a: AttachmentRecord) {
+    const mime = a.type || a.blob.type || "application/octet-stream";
+    const file = new File([a.blob], a.name, { type: mime });
+    const android = /Android/i.test(navigator.userAgent);
+    const browserPreviewable =
+      mime === "application/pdf" || mime.startsWith("image/") || mime.startsWith("text/");
+
+    // Sur Android, les fichiers Office/OTDR/etc. sont mieux remis au système
+    // afin qu'il propose directement l'application compatible installée.
+    if (android && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: a.name });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
     }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+    if (browserPreviewable) {
+      const url = URL.createObjectURL(a.blob);
+      const win = window.open(url, "_blank");
+      if (win) {
+        setTimeout(() => URL.revokeObjectURL(url), 120_000);
+        return;
+      }
+      URL.revokeObjectURL(url);
+    }
+
+    // Dernier recours : enregistre une copie locale que l'utilisateur peut
+    // ouvrir depuis Android Files / l'application associée.
+    downloadBlob(a.name, a.blob);
   }
 
   async function handleDelete(id: string) {
@@ -74,7 +97,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             </div>
             <button
               type="button"
-              onClick={() => handleOpen(a)}
+              onClick={() => void handleOpen(a)}
               className="min-w-0 flex-1 text-left"
               aria-label={`Ouvrir ${a.name}`}
             >
@@ -85,7 +108,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => handleOpen(a)}
+              onClick={() => void handleOpen(a)}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-primary transition active:scale-95"
               aria-label="Ouvrir le fichier"
             >
