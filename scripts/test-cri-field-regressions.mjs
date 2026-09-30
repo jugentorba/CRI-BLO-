@@ -91,7 +91,7 @@ assert.match(attachmentViewer, /openBlobWithNativeApp/, "supplementary files mus
 assert.match(exportFolder, /finished\.bytesWritten !== expectedSize/, "Android export must verify the exact bridge byte count");
 assert.match(exportFolder, /finished\.fileSize !== expectedSize/, "Android export must verify the final provider file size");
 assert.match(androidExport, /FileProvider\.getUriForFile/, "Android attachment opening must use a safe FileProvider URI");
-assert.match(androidExport, /getPackageName\(\) \+ "\\.fileprovider"/, "Android attachment opening must reuse the app FileProvider authority");
+assert.ok(androidExport.includes('getContext().getPackageName() + ".fileprovider"'), "Android attachment opening must reuse the app FileProvider authority");
 assert.match(androidExport, /Intent\.ACTION_VIEW/, "Android attachment opening must launch a compatible installed app");
 assert.match(androidManifestPatch, /cache-path android:name="criblo_open" android:path="criblo-open\/"\s*\/>/, "generated Android file_paths must expose only the CRI attachment cache");
 
