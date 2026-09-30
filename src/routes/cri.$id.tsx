@@ -386,12 +386,13 @@ function CriEditor() {
     setDirty(true);
   }
 
-  async function handleSaveDraft() {
-    if (saveInFlight.current) return;
+  async function handleSaveDraft(): Promise<boolean> {
+    if (saveInFlight.current) return false;
     saveInFlight.current = true;
     setSavingDraft(true);
     try {
       await persist();
+      return true;
     } finally {
       saveInFlight.current = false;
       setSavingDraft(false);
@@ -606,8 +607,8 @@ function CriEditor() {
         type="button"
         disabled={savingDraft}
         onClick={async () => {
-          await handleSaveDraft();
-          setReviewing(true);
+          const saved = await handleSaveDraft();
+          if (saved) setReviewing(true);
         }}
         aria-label="Enregistrer et finaliser"
         title="Enregistrer et finaliser"
