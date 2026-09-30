@@ -237,9 +237,20 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
     fiche.getRow(17).height = 32;
     fiche.getRow(20).height = 22;
 
-    // Si GPS A non fourni, utiliser la position capturée
-    if (!cri.values?.gpsCoordsA && cri.gps) {
-      fiche.getCell("A20").value = `${cri.gps.latitude.toFixed(6)}, ${cri.gps.longitude.toFixed(6)}`;
+    // Si GPS A n'est pas fourni, conserver en priorité les coordonnées
+    // explicitement saisies/capturées pour le défaut avant de retomber sur la
+    // position générique du CRI. Cela évite de perdre une valeur visible dans
+    // l'application lors de l'export Excel.
+    if (!cri.values?.gpsCoordsA) {
+      const defectGps =
+        typeof cri.values?.gpsCoordsDefaut === "string"
+          ? cri.values.gpsCoordsDefaut.trim()
+          : "";
+      if (defectGps) {
+        fiche.getCell("A20").value = defectGps;
+      } else if (cri.gps) {
+        fiche.getCell("A20").value = `${cri.gps.latitude.toFixed(6)}, ${cri.gps.longitude.toFixed(6)}`;
+      }
     }
 
     // Lignes radios oui/non : effacer la case opposée si une valeur est saisie
