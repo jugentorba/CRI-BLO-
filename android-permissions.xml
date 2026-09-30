@@ -1,34 +1,32 @@
 <!--
-  Paste the <uses-permission> entries below into:
+  Android manifest permission baseline for the native CRI-BLO build.
+  Copy the <uses-permission> entries below into:
     android/app/src/main/AndroidManifest.xml
-  (inside <manifest>, above the <application> tag)
+  inside <manifest>, above <application>.
 
-  This file is reference-only. It is NOT used by Capacitor directly.
-  The android/ folder is generated locally by `npx cap add android`.
+  Keep this list intentionally minimal. Runtime permission requests must be
+  performed sequentially by the app and handled through Android's native
+  permission dialogs.
 -->
 
-<!-- GPS — précis + approximatif -->
+<!-- Location: precise + approximate fallback -->
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-<!-- Caméra -->
+<!-- Camera -->
 <uses-permission android:name="android.permission.CAMERA" />
 <uses-feature android:name="android.hardware.camera" android:required="false" />
 
-<!-- Galerie / Photos (Android 13+ : médias granulaires) -->
-<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-<!-- Android 12 et antérieurs -->
-<uses-permission
-    android:name="android.permission.READ_EXTERNAL_STORAGE"
-    android:maxSdkVersion="32" />
-<uses-permission
-    android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-    android:maxSdkVersion="29" />
+<!-- Microphone: required only for CRI-BLO dictation/voice features -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-<!-- Réseau (offline-aware) -->
+<!-- Connectivity -->
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-<!-- Notifications (Android 13+) -->
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<!--
+  Do NOT add contacts, SMS, Bluetooth, background location, broad storage,
+  media-library or notification permissions unless a future native feature
+  genuinely requires them. Photo/file selection should use Android's system
+  picker / scoped APIs rather than broad storage access.
+-->

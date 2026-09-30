@@ -1,20 +1,49 @@
 import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { Network } from "@capacitor/network";
 
 export function useOnline(): boolean {
-  // Always start as `true` to match SSR output, then sync with the real value
-  // after mount. Reading `navigator.onLine` during render causes a hydration
-  // mismatch when the device is offline at first paint.
-  const [online, setOnline] = useState<boolean>(true);
+  // Start online to keep the initial render stable, then synchronize with the
+  // real browser/native network state immediately after mount.
+  const [online, setOnline] = useState(true);
+
   useEffect(() => {
-    if (typeof navigator !== "undefined") setOnline(navigator.onLine);
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    let cancelled = false;
+    let removeNativeListener: (() => Promise<void>) | undefined;
+
+    const browserOnline = () => setOnline(true);
+    const browserOffline = () => setOnline(false);
+
+    if (Capacitor.isNativePlatform()) {
+      void (async () => {
+        try {
+          const status = await Network.getStatus();
+          if (!cancelled) setOnline(status.connected);
+          const handle = await Network.addListener("networkStatusChange", (next) => {
+            if (!cancelled) setOnline(next.connected);
+          });
+          if (cancelled) {
+            await handle.remove();
+          } else {
+            removeNativeListener = () => handle.remove();
+          }
+        } catch {
+          if (!cancelled && typeof navigator !== "undefined") setOnline(navigator.onLine);
+        }
+      })();
+    } else {
+      if (typeof navigator !== "undefined") setOnline(navigator.onLine);
+      window.addEventListener("online", browserOnline);
+      window.addEventListener("offline", browserOffline);
+    }
+
     return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      cancelled = true;
+      window.removeEventListener("online", browserOnline);
+      window.removeEventListener("offline", browserOffline);
+      if (removeNativeListener) void removeNativeListener();
     };
   }, []);
+
   return online;
 }

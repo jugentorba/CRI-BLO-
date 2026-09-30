@@ -1,0 +1,1 @@
+Validation marker for direct GeoReseaux iOS handler build v5.

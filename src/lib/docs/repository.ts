@@ -56,8 +56,31 @@ export async function getOtherDoc(id: string): Promise<OtherDocRecord | undefine
   )) as OtherDocRecord | undefined;
 }
 
-/** Ouvre / enregistre le fichier d'origine conservé avec le document. */
-export function openOtherDocFile(record: OtherDocRecord): boolean {
+/**
+ * Remplace le fichier conservé après une modification dans l'éditeur CRI-BLO.
+ * L'identité, la détection et la date d'import restent inchangées.
+ */
+export async function updateOtherDocFile(
+  id: string,
+  blob: Blob,
+  fileName?: string,
+): Promise<OtherDocRecord> {
+  const current = await getOtherDoc(id);
+  if (!current) throw new Error("Document introuvable dans l'historique CRI-BLO.");
+
+  const next: OtherDocRecord = {
+    ...current,
+    fileName: fileName?.trim() || current.fileName,
+    blob,
+    mimeType: blob.type || current.mimeType,
+    size: blob.size,
+  };
+  await tx(STORE_OTHER_DOCS, "readwrite", (s) => reqAsync(s.put(next)));
+  return next;
+}
+
+/** Télécharge une copie du fichier conservé. L'ouverture dans l'app utilise UniversalDocumentEditor. */
+export function downloadOtherDocFile(record: OtherDocRecord): boolean {
   if (!record.blob) return false;
   const url = URL.createObjectURL(record.blob);
   const a = document.createElement("a");
