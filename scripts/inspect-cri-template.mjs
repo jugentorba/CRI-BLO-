@@ -22,8 +22,11 @@ function safeValue(cell) {
 
 for (const ws of workbook.worksheets) {
   console.log("\n=== SHEET " + ws.name + " ===");
-  const mergeKeys = Object.keys(ws._merges ?? {}).sort();
-  if (mergeKeys.length) console.log("MERGES: " + mergeKeys.join(", "));
+  const merges = Object.entries(ws._merges ?? {}).map(([key, value]) => {
+    const model = value?.model ?? {};
+    return key + ":" + JSON.stringify(model);
+  }).sort();
+  if (merges.length) console.log("MERGES: " + merges.join(" | "));
   const maxRow = ws.name === "FICHE SAV BLO" ? 60 : Math.min(ws.rowCount, 60);
   const maxCol = ws.name === "FICHE SAV BLO" ? 10 : Math.min(ws.columnCount, 12);
   for (let row = 1; row <= maxRow; row += 1) {
