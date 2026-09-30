@@ -1,0 +1,94 @@
+name: Build CRI-BLO Restore Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-restore-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare parallel Capacitor app
+        working-directory: source
+        run: |
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.criblo.restoretest",
+            "appName": "CRI BLO Restore Test",
+            "webDir": "dist"
+          }
+          JSON
+
+      - name: Build web app
+        working-directory: source
+        run: npm run build
+
+      - name: Create Android project
+        working-directory: source
+        run: |
+          rm -rf android
+          npx cap add android
+          npx cap sync android
+
+      - name: Enable Android permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          permissions = [
+              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
+              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
+          ]
+          if "android.permission.ACCESS_FINE_LOCATION" not in text:
+              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
+          if "android:usesCleartextTraffic=" not in text:
+              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+          manifest.write_text(text)
+          PY
+
+      - name: Build restore test APK
+        working-directory: source/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Collect APK
+        run: |
+          mkdir -p output
+          cp source/android/app/build/outputs/apk/debug/app-debug.apk output/CRI-BLO-Restore-Test.apk
+
+      - name: Upload restore test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-Restore-Test
+          path: output/CRI-BLO-Restore-Test.apk
+          if-no-files-found: error
+          retention-days: 30
