@@ -47,7 +47,7 @@ const PRESETS: Record<
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-6-luna",
+    model: "gpt-5.6-luna",
     protocol: "openai",
   },
   deepseek: {
