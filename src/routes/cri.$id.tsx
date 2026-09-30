@@ -89,6 +89,8 @@ function CriEditor() {
   const [dirty, setDirty] = useState(false);
   const [missing, setMissing] = useState<FieldDef[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const saveInFlight = useRef(false);
   const [exportToast, setExportToast] = useState<{
     fileName: string;
     blob: Blob;
@@ -385,7 +387,15 @@ function CriEditor() {
   }
 
   async function handleSaveDraft() {
-    await persist();
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSavingDraft(true);
+    try {
+      await persist();
+    } finally {
+      saveInFlight.current = false;
+      setSavingDraft(false);
+    }
   }
 
   async function handleExport(kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") {
@@ -594,16 +604,17 @@ function CriEditor() {
       {/* FAB : Enregistrer → ouvre l'écran de finalisation / export */}
       <button
         type="button"
+        disabled={savingDraft}
         onClick={async () => {
           await handleSaveDraft();
           setReviewing(true);
         }}
         aria-label="Enregistrer et finaliser"
         title="Enregistrer et finaliser"
-        className="fixed bottom-20 right-3 z-30 inline-flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground shadow-[var(--shadow-elevated)] transition active:scale-95"
+        className="fixed bottom-20 right-3 z-30 inline-flex h-10 items-center gap-1 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground shadow-[var(--shadow-elevated)] transition active:scale-95 disabled:cursor-wait disabled:opacity-70"
       >
-        <Save className="h-3 w-3" />
-        Enregistrer
+        {savingDraft ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+        {savingDraft ? "Enregistrement…" : "Enregistrer"}
         {dirty && (
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-warning ring-2 ring-primary" />
         )}
@@ -628,9 +639,9 @@ function CriEditor() {
               }, 350);
             }, 50);
           }}
-          onExport={(kind) => {
+          onExport={async (kind) => {
+            await handleExport(kind);
             setReviewing(false);
-            void handleExport(kind);
           }}
         />
       )}
