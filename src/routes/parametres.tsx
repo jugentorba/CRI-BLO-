@@ -72,7 +72,7 @@ function Parametres() {
     const preset = getAiProviderPreset(provider);
     await patchSettings({
       aiProvider: provider,
-      aiEndpoint: provider === "custom" ? "" : "",
+      aiEndpoint: "",
       aiModel: preset?.model ?? "",
     });
   }
@@ -269,7 +269,7 @@ function Parametres() {
                   <p className="rounded-lg bg-muted/50 p-2 text-[11px] text-foreground">{aiTestMessage}</p>
                 )}
                 <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  La clé est enregistrée localement sur cet appareil et n’est jamais intégrée dans l’APK.
+                  La clé reste uniquement sur cet appareil : elle n’est ni intégrée dans l’APK ni incluse dans les sauvegardes OneDrive.
                 </p>
               </>
             )}
