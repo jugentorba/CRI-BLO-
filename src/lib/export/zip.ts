@@ -51,5 +51,13 @@ export async function buildZipExport(
   }
 
 
-  return await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+  // Génère d'abord un buffer complet : sur Android/WebView c'est plus fiable
+  // qu'un Blob produit directement pendant la compression, surtout pour les
+  // archives volumineuses avec photos et pièces jointes.
+  const bytes = await zip.generateAsync({
+    type: "uint8array",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  });
+  return new Blob([bytes], { type: "application/zip" });
 }
