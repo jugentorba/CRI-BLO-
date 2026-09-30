@@ -1,0 +1,23 @@
+name: Inspect CRI Excel template
+
+on:
+  push:
+    branches:
+      - criblo-master-spec-v1
+    paths:
+      - .github/workflows/inspect-cri-excel.yml
+      - scripts/inspect-cri-template.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: node scripts/inspect-cri-template.mjs
