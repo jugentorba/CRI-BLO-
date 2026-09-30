@@ -119,5 +119,11 @@ export async function buildZipExport(
 
   const output = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
   if (output.size === 0) throw new Error("ZIP vide : export annulé.");
+
+  // Validate the final bytes, not only JSZip's in-memory file list. This catches
+  // a malformed archive before it reaches Android Files or the native writer.
+  const reopened = await JSZip.loadAsync(await output.arrayBuffer(), { checkCRC32: true });
+  verifyFlatZip(reopened, 1 + exportedExtraPhotos + attachments.length);
+
   return output;
 }
