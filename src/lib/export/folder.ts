@@ -54,10 +54,14 @@ export function downloadBlob(fileName: string, data: Blob) {
   const a = document.createElement("a");
   a.href = url;
   a.download = fileName;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 1000);
+
+  // Android/WebView peut continuer à lire le blob bien après le click.
+  // Révoquer l'URL au bout d'une seconde peut tronquer les gros ZIP/XLSX.
+  // On retire le DOM tout de suite, mais on garde l'URL assez longtemps pour
+  // que le gestionnaire de téléchargement ait fini de copier les octets.
+  setTimeout(() => a.remove(), 0);
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
 }
