@@ -14,7 +14,6 @@ jobs:
       - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
         with:
-          ref: criblo-master-spec-v1
           path: source
 
       - name: Setup Node
