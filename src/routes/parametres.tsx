@@ -73,6 +73,7 @@ function Parametres() {
     await patchSettings({
       aiProvider: provider,
       aiEndpoint: "",
+      aiApiKey: "",
       aiModel: preset?.model ?? "",
     });
   }
