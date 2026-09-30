@@ -29,6 +29,53 @@ function getWorksheet(workbook: ExcelJS.Workbook, requestedName: string) {
   );
 }
 
+interface ExpectedCellWrite {
+  sheet: string;
+  cell: string;
+  value: string;
+}
+
+function cellString(cell: ExcelJS.Cell): string {
+  const value = cell.value;
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if ("text" in value && typeof value.text === "string") return value.text;
+    if ("result" in value && value.result !== null && value.result !== undefined) {
+      return String(value.result);
+    }
+  }
+  return String(value);
+}
+
+function writeChecked(
+  sheet: ExcelJS.Worksheet,
+  cell: string,
+  value: string,
+  expected: ExpectedCellWrite[],
+): void {
+  sheet.getCell(cell).value = value;
+  expected.push({ sheet: sheet.name, cell, value });
+}
+
+async function verifySerializedValues(
+  output: Awaited<ReturnType<ExcelJS.Workbook["xlsx"]["writeBuffer"]>>,
+  expected: ExpectedCellWrite[],
+): Promise<void> {
+  const check = new ExcelJS.Workbook();
+  await check.xlsx.load(output);
+  for (const item of expected) {
+    const sheet = getWorksheet(check, item.sheet);
+    if (!sheet) throw new Error(`Export Excel invalide : onglet « ${item.sheet} » absent.`);
+    const actual = cellString(sheet.getCell(item.cell));
+    if (actual !== item.value) {
+      throw new Error(
+        `Export Excel incomplet : ${item.sheet}!${item.cell} n'a pas conservé la valeur du CRI.`,
+      );
+    }
+  }
+}
+
 function sniffSupportedImage(buffer: ArrayBuffer): "png" | "jpeg" | null {
   const bytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 12));
   if (
@@ -114,6 +161,7 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
 
   const fiche = getWorksheet(workbook, "FICHE SAV BLO");
   const mesures = getWorksheet(workbook, "MESURES");
+  const expectedWrites: ExpectedCellWrite[] = [];
 
   // Clean two accidental literals present in the bundled source workbook. They
   // are template defects, not technician data, and must never leak into exports.
@@ -127,17 +175,17 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
   const company = (cri.values?.company as string) ?? cri.technician.company ?? "";
   const lastName = (cri.values?.technicianName as string) ?? cri.technician.lastName ?? "";
   const companyAndName = [company, lastName].filter(Boolean).join(" — ");
-  if (fiche && companyAndName) fiche.getCell("B4").value = companyAndName;
+  if (fiche && companyAndName) writeChecked(fiche, "B4", companyAndName, expectedWrites);
 
   if (fiche) {
     const commune = (cri.values?.commune as string) || cri.address.commune;
     const postalCode = (cri.values?.codePostal as string) || cri.address.postalCode;
     const street = (cri.values?.nomVoie as string) || cri.address.street;
     const streetNumber = (cri.values?.numeroVoie as string) || cri.address.streetNumber;
-    if (commune) fiche.getCell("B12").value = commune;
-    if (postalCode) fiche.getCell("H12").value = postalCode;
-    if (street) fiche.getCell("B13").value = street;
-    if (streetNumber) fiche.getCell("B14").value = streetNumber;
+    if (commune) writeChecked(fiche, "B12", String(commune), expectedWrites);
+    if (postalCode) writeChecked(fiche, "H12", String(postalCode), expectedWrites);
+    if (street) writeChecked(fiche, "B13", String(street), expectedWrites);
+    if (streetNumber) writeChecked(fiche, "B14", String(streetNumber), expectedWrites);
 
     ["A17", "F17", "A20", "F20", "A22", "F22", "A24", "F24"].forEach((cell) => {
       fiche.getCell(cell).alignment = {
@@ -162,7 +210,8 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
     if (!sheet) continue;
     const raw = cri.values?.[fieldId];
     if (raw === undefined || raw === null || raw === "") continue;
-    sheet.getCell(map.cell).value = map.format ? map.format(raw, cri) : String(raw);
+    const value = map.format ? map.format(raw, cri) : String(raw);
+    writeChecked(sheet, map.cell, value, expectedWrites);
   }
 
   for (const slot of sortPhotoSlots(Object.keys(cri.photos ?? {}))) {
@@ -190,6 +239,7 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
   }
 
   const output = await workbook.xlsx.writeBuffer();
+  await verifySerializedValues(output, expectedWrites);
   return new Blob([output], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
