@@ -21,7 +21,7 @@ const attachmentsRepository = fs.readFileSync("src/lib/attachments/repository.ts
 const attachmentViewer = fs.readFileSync("src/components/cri/AttachmentViewer.tsx", "utf8");
 const exportFolder = fs.readFileSync("src/lib/export/folder.ts", "utf8");
 const androidExport = fs.readFileSync("plugins/criblo-native-browser/android/src/main/java/com/criblo/nativebrowser/CRIExportPlugin.java", "utf8");
-const androidManifest = fs.readFileSync("plugins/criblo-native-browser/android/src/main/AndroidManifest.xml", "utf8");
+const androidManifestPatch = fs.readFileSync("scripts/patch-android-manifest.mjs", "utf8");
 
 assert.match(schema, /id: "transportDistribution", label: "Type de tronçon"/, "UI must use the official Type de tronçon label");
 assert.doesNotMatch(route, /addr\.commune \?\? prev\.commune/, "new GPS address must not retain a stale commune");
@@ -91,8 +91,9 @@ assert.match(attachmentViewer, /openBlobWithNativeApp/, "supplementary files mus
 assert.match(exportFolder, /finished\.bytesWritten !== expectedSize/, "Android export must verify the exact bridge byte count");
 assert.match(exportFolder, /finished\.fileSize !== expectedSize/, "Android export must verify the final provider file size");
 assert.match(androidExport, /FileProvider\.getUriForFile/, "Android attachment opening must use a safe FileProvider URI");
+assert.match(androidExport, /getPackageName\(\) \+ "\\.fileprovider"/, "Android attachment opening must reuse the app FileProvider authority");
 assert.match(androidExport, /Intent\.ACTION_VIEW/, "Android attachment opening must launch a compatible installed app");
-assert.match(androidManifest, /androidx\.core\.content\.FileProvider/, "Android FileProvider must be registered in the manifest");
+assert.match(androidManifestPatch, /cache-path android:name="criblo_open" android:path="criblo-open\/"\//, "generated Android file_paths must expose only the CRI attachment cache");
 
 assert.match(xlsx, /verifySerializedValues\(output, expectedWrites\)/, "Excel export must verify CRI values after XLSX serialization");
 assert.match(xlsx, /writeChecked\(sheet, map\.cell, value, expectedWrites\)/, "mapped Excel values must participate in serialization verification");
