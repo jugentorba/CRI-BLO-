@@ -39,3 +39,26 @@ for (const ws of workbook.worksheets) {
     if (parts.length) console.log(parts.join(" | "));
   }
 }
+
+
+const config = fs.readFileSync("src/lib/export/xlsx-config.ts", "utf8");
+const mapped = [...config.matchAll(/^\s{2}([A-Za-z0-9_]+):\s*\{\s*sheet:\s*"([^"]+)",\s*cell:\s*"([^"]+)"/gm)]
+  .map((match) => ({ field: match[1], sheet: match[2], cell: match[3] }));
+
+console.log("\n=== FIELD MAPPING TARGETS ===");
+for (const item of mapped) {
+  const ws = workbook.getWorksheet(item.sheet);
+  if (!ws) {
+    console.log(item.field + " -> " + item.sheet + "!" + item.cell + " [MISSING SHEET]");
+    continue;
+  }
+  const cell = ws.getCell(item.cell);
+  const master = cell.isMerged && cell.master ? cell.master.address : "";
+  const original = safeValue(cell).trim();
+  console.log(
+    item.field + " -> " + item.sheet + "!" + item.cell +
+    " | original=" + JSON.stringify(original) +
+    " | merged=" + String(cell.isMerged) +
+    " | master=" + JSON.stringify(master)
+  );
+}
