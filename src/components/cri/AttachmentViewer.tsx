@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Download, FileQuestion, Loader2, X } from "lucide-react";
+import { Download, ExternalLink, FileQuestion, Loader2, X } from "lucide-react";
 import ExcelJS from "exceljs";
 import type { AttachmentRecord } from "@/lib/attachments/repository";
-import { downloadBlob } from "@/lib/export/folder";
+import { downloadBlob, isNativeExternalOpenSupported, openBlobWithNativeApp } from "@/lib/export/folder";
 
 type Preview =
   | { kind: "image"; url: string }
@@ -107,6 +107,22 @@ export function AttachmentViewer({
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openingExternal, setOpeningExternal] = useState(false);
+  const nativeOpen = isNativeExternalOpenSupported();
+
+  async function openExternal() {
+    if (!nativeOpen || openingExternal) return;
+    setOpeningExternal(true);
+    setError(null);
+    try {
+      const opened = await openBlobWithNativeApp(file.name, file.blob);
+      if (!opened) {
+        setError("Aucune application Android compatible n'a pu ouvrir ce fichier.");
+      }
+    } finally {
+      setOpeningExternal(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -140,6 +156,21 @@ export function AttachmentViewer({
             Fichier enregistré dans ce dossier
           </div>
         </div>
+        {nativeOpen && (
+          <button
+            type="button"
+            disabled={openingExternal}
+            onClick={() => void openExternal()}
+            className="rounded-full p-2 text-primary disabled:opacity-50"
+            aria-label="Ouvrir avec une application Android"
+          >
+            {openingExternal ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ExternalLink className="h-4 w-4" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => downloadBlob(file.name, file.blob)}
@@ -214,9 +245,23 @@ export function AttachmentViewer({
             <FileQuestion className="mx-auto mb-2 h-8 w-8 text-primary" />
             <p className="text-sm font-bold">Aperçu indisponible pour ce format</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Le fichier est bien conservé dans le dossier. Enregistrez une copie pour l'ouvrir avec
-              une application compatible.
+              Le fichier est bien conservé dans ce CRI, même si sa source USB n'est plus connectée.
             </p>
+            {nativeOpen && (
+              <button
+                type="button"
+                disabled={openingExternal}
+                onClick={() => void openExternal()}
+                className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground disabled:opacity-50"
+              >
+                {openingExternal ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-4 w-4" />
+                )}
+                Ouvrir avec une application
+              </button>
+            )}
           </div>
         )}
       </main>
