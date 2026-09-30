@@ -359,7 +359,7 @@ public class CRIExportPlugin extends Plugin {
 
             Uri uri = FileProvider.getUriForFile(
                 getContext(),
-                getContext().getPackageName() + ".criblo.files",
+                getContext().getPackageName() + ".fileprovider",
                 file
             );
             Intent intent = new Intent(Intent.ACTION_VIEW);
