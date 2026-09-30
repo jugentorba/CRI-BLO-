@@ -16,6 +16,12 @@ const documentEditor = fs.readFileSync("src/components/UniversalDocumentEditor.t
 const parse = fs.readFileSync("src/lib/import/parse.ts", "utf8");
 const updates = fs.readFileSync("src/lib/updates/github.ts", "utf8");
 const iosInfo = fs.readFileSync("scripts/patch-ios-info.mjs", "utf8");
+const review = fs.readFileSync("src/components/cri/ReviewDialog.tsx", "utf8");
+const attachmentsRepository = fs.readFileSync("src/lib/attachments/repository.ts", "utf8");
+const attachmentViewer = fs.readFileSync("src/components/cri/AttachmentViewer.tsx", "utf8");
+const exportFolder = fs.readFileSync("src/lib/export/folder.ts", "utf8");
+const androidExport = fs.readFileSync("plugins/criblo-native-browser/android/src/main/java/com/criblo/nativebrowser/CRIExportPlugin.java", "utf8");
+const androidManifest = fs.readFileSync("plugins/criblo-native-browser/android/src/main/AndroidManifest.xml", "utf8");
 
 assert.match(schema, /id: "transportDistribution", label: "Type de tronçon"/, "UI must use the official Type de tronçon label");
 assert.doesNotMatch(route, /addr\.commune \?\? prev\.commune/, "new GPS address must not retain a stale commune");
@@ -72,5 +78,49 @@ assert.match(iosInfo, /NSSpeechRecognitionUsageDescription/, "iOS speech dictati
 assert.match(zip, /Photo_supplementaire_\$\{number\}/, "supplementary OI photos must be exported as individual ZIP files");
 assert.match(zip, /verifyFlatZip\(zip, 1 \+ exportedExtraPhotos \+ attachments\.length\)/, "ZIP verification must count supplementary photos and files");
 assert.doesNotMatch(zip, /zip\.folder\(/, "ZIP export must not create supplementary subfolders");
+assert.match(zip, /JSZip\.loadAsync\(await output\.arrayBuffer\(\), \{ checkCRC32: true \}\)/, "final ZIP bytes must be CRC-checked before Android save");
+
+assert.match(route, /const saveInFlight = useRef\(false\)/, "save button must have a synchronous in-flight guard");
+assert.match(route, /disabled=\{savingDraft\}/, "save button must disable while the first save is running");
+assert.match(route, /await handleExport\(kind\);\s*setReviewing\(false\);/, "review must wait for export completion before closing");
+assert.match(review, /disabled=\{!ready \|\| exporting !== null\}/, "all export buttons must lock during export");
+assert.match(review, /await onExport\(kind\)/, "review export must await the real export operation");
+
+assert.match(attachmentsRepository, /new Blob\(\[await file\.arrayBuffer\(\)\], \{ type \}\)/, "supplementary USB files must be copied into CRI local storage immediately");
+assert.match(attachmentViewer, /openBlobWithNativeApp/, "supplementary files must expose native Android opening");
+assert.match(exportFolder, /finished\.bytesWritten !== expectedSize/, "Android export must verify the exact bridge byte count");
+assert.match(exportFolder, /finished\.fileSize !== expectedSize/, "Android export must verify the final provider file size");
+assert.match(androidExport, /FileProvider\.getUriForFile/, "Android attachment opening must use a safe FileProvider URI");
+assert.match(androidExport, /Intent\.ACTION_VIEW/, "Android attachment opening must launch a compatible installed app");
+assert.match(androidManifest, /androidx\.core\.content\.FileProvider/, "Android FileProvider must be registered in the manifest");
+
+assert.match(xlsx, /verifySerializedValues\(output, expectedWrites\)/, "Excel export must verify CRI values after XLSX serialization");
+assert.match(xlsx, /writeChecked\(sheet, map\.cell, value, expectedWrites\)/, "mapped Excel values must participate in serialization verification");
+
+const schemaModuleSource = ts.transpileModule(schema, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+}).outputText;
+const schemaModule = await import(`data:text/javascript;base64,${Buffer.from(schemaModuleSource).toString("base64")}`);
+const mappedFieldIds = new Set(
+  [...xlsxConfig.matchAll(/^\s{2}([A-Za-z0-9_]+):\s*\{\s*sheet:/gm)].map((match) => match[1]),
+);
+const handledOutsideFieldMap = new Set([
+  "company",
+  "technicianName",
+  "commune",
+  "codePostal",
+  "nomVoie",
+  "numeroVoie",
+  "defautLocaliseAutre",
+  "causePrincipaleAutre",
+  // The official workbook has Point A/B GPS cells but no separate defect-GPS cell.
+  "gpsCoordsDefaut",
+]);
+const missingExcelMappings = schemaModule
+  .allFields()
+  .filter((field) => field.type !== "photo" && field.type !== "gpsCapture")
+  .filter((field) => !mappedFieldIds.has(field.id) && !handledOutsideFieldMap.has(field.id))
+  .map((field) => field.id);
+assert.deepEqual(missingExcelMappings, [], "every CRI form field with an Excel destination must be handled");
 
 console.log("CRI field/GPS/export/document/update regression checks passed");
