@@ -31,4 +31,15 @@ if (!xml.includes('android.hardware.camera')) {
 }
 
 await writeFile(manifestPath, xml, "utf8");
+
+const filePathsPath = "android/app/src/main/res/xml/file_paths.xml";
+let filePathsXml = await readFile(filePathsPath, "utf8");
+if (!filePathsXml.includes('android:name="criblo_open"')) {
+  filePathsXml = filePathsXml.replace(
+    /<\/paths>/,
+    '    <cache-path android:name="criblo_open" android:path="criblo-open/" />\n</paths>',
+  );
+  await writeFile(filePathsPath, filePathsXml, "utf8");
+}
+
 console.log(`CRI-BLO Android manifest ready (${missing.length} permission entries added).`);
