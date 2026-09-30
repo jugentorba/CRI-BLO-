@@ -20,14 +20,21 @@ function uid(): string {
 }
 
 export async function addAttachment(criId: string, file: File): Promise<AttachmentRecord> {
+  // Force la lecture complète pendant que la source est encore disponible
+  // (USB, fournisseur Android Documents, stockage externe, etc.). On persiste
+  // ensuite une vraie copie locale dans IndexedDB, jamais une référence vers
+  // le fichier d'origine.
+  const bytes = await file.arrayBuffer();
+  const type = file.type || "application/octet-stream";
+  const localBlob = new Blob([bytes], { type });
   const record: AttachmentRecord = {
     id: `${criId}/${uid()}`,
     criId,
     name: file.name,
-    size: file.size,
-    type: file.type || "application/octet-stream",
+    size: localBlob.size,
+    type,
     createdAt: new Date().toISOString(),
-    blob: file,
+    blob: localBlob,
   };
   await tx(STORE_ATTACHMENTS, "readwrite", (s) => reqAsync(s.add(record)));
   return record;
