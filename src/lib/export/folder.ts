@@ -10,8 +10,17 @@ interface NativeExportPlugin {
   getDirectory(): Promise<{ selected?: boolean; name?: string }>;
   beginFile(options: { fileName: string; mimeType: string }): Promise<{ ready?: boolean; folderName?: string }>;
   appendChunk(options: { dataBase64: string }): Promise<{ written?: number }>;
-  finishFile(): Promise<{ wrote?: boolean; folderName?: string }>;
+  finishFile(): Promise<{
+    wrote?: boolean;
+    folderName?: string;
+    bytesWritten?: number;
+    fileSize?: number;
+  }>;
   abortFile(): Promise<void>;
+  beginOpenFile(options: { fileName: string; mimeType: string }): Promise<{ ready?: boolean }>;
+  appendOpenChunk(options: { dataBase64: string }): Promise<{ written?: number }>;
+  finishOpenFile(): Promise<{ opened?: boolean; bytesWritten?: number; fileSize?: number }>;
+  abortOpenFile(): Promise<void>;
 }
 
 export interface PickedExportFolder {
@@ -98,8 +107,19 @@ async function writeFileToAndroidFolder(
 
     const finished = await CRIExport.finishFile();
     begun = false;
+    const expectedSize = data.size;
+    if (finished.wrote !== true || finished.bytesWritten !== expectedSize) {
+      throw new Error("Export Android incomplet : nombre d'octets incorrect.");
+    }
+    if (
+      typeof finished.fileSize === "number" &&
+      finished.fileSize >= 0 &&
+      finished.fileSize !== expectedSize
+    ) {
+      throw new Error("Export Android incomplet : taille du fichier incorrecte.");
+    }
     return {
-      wrote: finished.wrote === true,
+      wrote: true,
       folderName: finished.folderName ?? start.folderName ?? directory.name,
     };
   } catch {
@@ -111,6 +131,55 @@ async function writeFileToAndroidFolder(
       }
     }
     return { wrote: false };
+  }
+}
+
+export function isNativeExternalOpenSupported(): boolean {
+  return isAndroidNative();
+}
+
+export async function openBlobWithNativeApp(fileName: string, data: Blob): Promise<boolean> {
+  if (!isAndroidNative()) return false;
+
+  let begun = false;
+  try {
+    const start = await CRIExport.beginOpenFile({
+      fileName,
+      mimeType: data.type || "application/octet-stream",
+    });
+    if (!start.ready) return false;
+    begun = true;
+
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    const chunkSize = 192 * 1024;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+      const result = await CRIExport.appendOpenChunk({ dataBase64: bytesToBase64(chunk) });
+      if (result.written !== chunk.length) {
+        throw new Error("Copie temporaire Android incomplète.");
+      }
+    }
+
+    const finished = await CRIExport.finishOpenFile();
+    begun = false;
+    if (finished.opened !== true || finished.bytesWritten !== data.size) return false;
+    if (
+      typeof finished.fileSize === "number" &&
+      finished.fileSize >= 0 &&
+      finished.fileSize !== data.size
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    if (begun) {
+      try {
+        await CRIExport.abortOpenFile();
+      } catch {
+        /* best effort */
+      }
+    }
+    return false;
   }
 }
 
