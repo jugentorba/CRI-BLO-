@@ -5,6 +5,7 @@ import { getAzureClientId, isOneDriveConfigured, setRuntimeAzureClientId } from 
 import { getCurrentAccount, login, logout } from "@/lib/onedrive/auth";
 import { ensureAppFolders, getSignedInProfile } from "@/lib/onedrive/graph";
 import { drainQueue, queueSize } from "@/lib/onedrive/queue";
+import { markCloudBackupDirty } from "@/lib/cloud/auto-backup";
 
 export function OneDriveSection({
   settings,
@@ -54,7 +55,8 @@ export function OneDriveSection({
       await login();
       await ensureAppFolders();
       await refreshStatus();
-      const next = await saveSettings({ cloudSyncEnabled: true, cloudProvider: "onedrive" });
+      const next = await saveSettings({ cloudSyncEnabled: true, cloudProvider: "onedrive", cloudAutoBackupEnabled: true });
+      markCloudBackupDirty();
       onSettings(next);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Connexion Microsoft impossible.");
