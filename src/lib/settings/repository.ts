@@ -16,7 +16,7 @@ export interface AppSettings {
   /** Custom scale in percent, 80–110. Defaults to 100. */
   scale: number;
   cloudSyncEnabled?: boolean;
-  cloudProvider?: "onedrive";
+  cloudProvider?: "onedrive" | "google-drive";
   lastSyncAt?: string;
   aiProvider?: AiProvider;
   aiEndpoint?: string;
