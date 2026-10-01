@@ -34,23 +34,19 @@ jobs:
 
       - name: Install dependencies
         working-directory: source
-        run: npm install --no-audit --no-fund
-
-      - name: Prepare Capacitor Android wrapper
-        working-directory: source
-        run: |
-          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
-          cat > capacitor.config.json <<'JSON'
-          {
-            "appId": "com.criblo.app",
-            "appName": "CRI BLO",
-            "webDir": "dist"
-          }
-          JSON
+        run: npm ci --no-audit --no-fund
 
       - name: Build PWA
         working-directory: source
         run: npm run build
+
+      - name: Validate unified app
+        working-directory: source
+        run: |
+          npx tsc --noEmit
+          npm run test:cri-regressions
+          node scripts/test-local-backup.mjs
+          node scripts/test-release-workflows.mjs
 
       - name: Package PWA
         run: |
@@ -64,24 +60,9 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Enable Android permissions
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
-          text = manifest.read_text()
-          permissions = [
-              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
-          ]
-          if "android.permission.ACCESS_FINE_LOCATION" not in text:
-              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
-          if "android:usesCleartextTraffic=" not in text:
-              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-          manifest.write_text(text)
-          PY
+      - name: Apply native permissions and file provider
+        working-directory: source
+        run: node scripts/patch-android-manifest.mjs
 
       - name: Build Android APK
         working-directory: source/android

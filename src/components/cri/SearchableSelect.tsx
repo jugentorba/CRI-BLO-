@@ -25,11 +25,16 @@ export function SearchableSelect({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  const selectableOptions = useMemo(
+    () => (options.includes("N/A") ? options : ["N/A", ...options]),
+    [options],
+  );
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return options;
+    if (!query.trim()) return selectableOptions;
     const q = query.trim().toLowerCase();
-    return options.filter((o) => o.toLowerCase().includes(q));
-  }, [options, query]);
+    return selectableOptions.filter((o) => o.toLowerCase().includes(q));
+  }, [selectableOptions, query]);
 
   return (
     <div ref={ref} className="relative">

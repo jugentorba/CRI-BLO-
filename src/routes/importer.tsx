@@ -94,6 +94,12 @@ function Importer() {
 
   async function keepInOtherHistory() {
     if (!detection || !pending) return;
+    const file = fileRef.current;
+    if (!file) {
+      setError("Sélectionnez à nouveau le fichier avant de l'enregistrer.");
+      return;
+    }
+    const blob = new Blob([await file.arrayBuffer()], { type: file.type });
     await saveOtherDoc({
       docType: detection.type,
       fileName: pending.name,
@@ -101,6 +107,9 @@ function Importer() {
       confidence: detection.confidence,
       reasons: detection.reasons,
       textPreview: detection.textPreview,
+      blob,
+      mimeType: file.type,
+      size: file.size,
     });
     setSaved(true);
   }

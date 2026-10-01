@@ -20,21 +20,20 @@ function uid(): string {
 }
 
 export async function addAttachment(criId: string, file: File): Promise<AttachmentRecord> {
-  // Force la lecture complète pendant que la source est encore disponible
-  // (USB, fournisseur Android Documents, stockage externe, etc.). On persiste
-  // ensuite une vraie copie locale dans IndexedDB, jamais une référence vers
-  // le fichier d'origine.
-  const bytes = await file.arrayBuffer();
+  // Read the bytes now and persist an independent Blob. Keeping the File object
+  // itself can leave mobile WebViews tied to the temporary document-provider URI
+  // (USB key, Downloads provider, cloud provider, etc.). The copied Blob remains
+  // available in the CRI dossier after the original source is disconnected.
   const type = file.type || "application/octet-stream";
-  const localBlob = new Blob([bytes], { type });
+  const blob = new Blob([await file.arrayBuffer()], { type });
   const record: AttachmentRecord = {
     id: `${criId}/${uid()}`,
     criId,
     name: file.name,
-    size: localBlob.size,
+    size: blob.size,
     type,
     createdAt: new Date().toISOString(),
-    blob: localBlob,
+    blob,
   };
   await tx(STORE_ATTACHMENTS, "readwrite", (s) => reqAsync(s.add(record)));
   return record;
@@ -44,9 +43,7 @@ export async function listAttachments(criId: string): Promise<AttachmentRecord[]
   const all = (await tx(STORE_ATTACHMENTS, "readonly", (s) =>
     reqAsync(s.getAll()),
   )) as AttachmentRecord[];
-  return all
-    .filter((a) => a.criId === criId)
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  return all.filter((a) => a.criId === criId).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 }
 
 export async function deleteAttachment(id: string): Promise<void> {

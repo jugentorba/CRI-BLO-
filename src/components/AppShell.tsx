@@ -2,7 +2,6 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { Home, History, Settings, ChevronLeft, Bot, Globe } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { PermissionSetupDialog } from "@/components/PermissionSetupDialog";
 
 const navItems = [
   { to: "/", label: "Accueil", icon: Home },
@@ -24,7 +23,6 @@ export function AppShell({ title, subtitle, children, showBack = false }: AppShe
 
   return (
     <div className="cri-app flex min-h-screen flex-col bg-background">
-      <PermissionSetupDialog />
       <header className="sticky top-0 z-30 border-b border-border/60 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
         <div className="mx-auto flex h-16 w-full max-w-3xl items-center gap-3 px-4">
           {showBack ? (

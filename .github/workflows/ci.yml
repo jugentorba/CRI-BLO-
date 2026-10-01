@@ -1,0 +1,168 @@
+name: CRI-BLO CI
+
+on:
+  push:
+    branches:
+      - main
+      - criblo-master-spec-v1
+
+concurrency:
+  group: criblo-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install locked dependencies from public npm
+        run: npm ci --no-audit --no-fund
+
+      - name: Build PWA
+        run: npm run build
+
+      - name: Lint source
+        run: npm run lint
+
+      - name: Test iOS long-press bridge
+        run: npm run test:ios-longpress-bridge
+
+      - name: Test GeoReseaux HTTP/JS Android identity parity
+        run: npm run test:ios-georeseaux-ua-parity
+
+      - name: Test CRI GPS, address and N/A regressions
+        run: npm run test:cri-regressions
+
+      - name: Upload PWA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-PWA
+          path: dist/
+          if-no-files-found: error
+
+  android-debug-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install locked dependencies from public npm
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Apply CRI-BLO native permissions
+        run: node scripts/patch-android-manifest.mjs
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build Android debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-Android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios-simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install locked dependencies from public npm
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Generate iOS project
+        run: npx cap add ios
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Apply CRI-BLO iOS privacy permissions
+        run: node scripts/patch-ios-info.mjs
+
+      - name: Build iOS simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/ios-device-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          rm -rf Payload CRI-BLO-iOS-unsigned.ipa
+          mkdir -p Payload
+          cp -R ios-device-build/Build/Products/Debug-iphoneos/App.app Payload/App.app
+          zip -qry CRI-BLO-iOS-unsigned.ipa Payload
+          test -s CRI-BLO-iOS-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-iOS-unsigned
+          path: CRI-BLO-iOS-unsigned.ipa
+          if-no-files-found: error

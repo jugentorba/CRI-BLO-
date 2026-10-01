@@ -35,3 +35,8 @@ dist-ssr
 *.jks
 *.keystore
 release-signing/
+
+# Generated native wrappers and packaging output
+android/
+ios/
+dist-apkforge/

@@ -2,16 +2,7 @@ import { useRef, useState } from "react";
 import { Download, Upload, ShieldCheck } from "lucide-react";
 import { exportSyncSnapshot, importSyncSnapshot } from "@/lib/db";
 
-function downloadBlob(name: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
+import { saveLocalBackup } from "@/lib/backup/local";
 
 export function LocalBackupSection() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -24,7 +15,7 @@ export function LocalBackupSection() {
     try {
       const blob = await exportSyncSnapshot();
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      downloadBlob(`CRI-BLO-Backup-${stamp}.json`, blob);
+      await saveLocalBackup(`CRI-BLO-Backup-${stamp}.json`, blob);
       setMessage(`Sauvegarde créée (${Math.max(1, Math.round(blob.size / 1024))} Ko).`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Sauvegarde impossible.");

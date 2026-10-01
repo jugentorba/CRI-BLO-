@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertTriangle, Download, X, ChevronRight, Camera, FileArchive } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Download, X, ChevronRight, Camera, FileArchive, Loader2 } from "lucide-react";
 import { CRI_SECTIONS, type FieldDef, type SectionDef } from "@/lib/cri/schema";
 import { isFieldVisible, isSectionVisible } from "@/lib/cri/visibility";
 import { getPhoto } from "@/lib/photos/repository";
@@ -12,7 +12,7 @@ interface Props {
   criId: string;
   onClose: () => void;
   onJump: (field: FieldDef) => void;
-  onExport: (kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") => void;
+  onExport: (kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") => Promise<void>;
 }
 
 function extraPhotoNumber(slot: string): number | null {
@@ -101,6 +101,17 @@ function validate(values: Record<string, unknown>): string[] {
 
 export function ReviewDialog({ values, photos, gps, criId, onClose, onJump, onExport }: Props) {
   const [showAll, setShowAll] = useState(false);
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | "zip-xlsx" | "zip-pdf" | null>(null);
+
+  async function runExport(kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") {
+    if (exporting) return;
+    setExporting(kind);
+    try {
+      await onExport(kind);
+    } finally {
+      setExporting(null);
+    }
+  }
   const visibleSections = buildReviewSections(photos).filter((s) =>
     isSectionVisible(
       s.fields.map((f) => f.id),
@@ -288,38 +299,38 @@ export function ReviewDialog({ values, photos, gps, criId, onClose, onJump, onEx
         <div className="grid grid-cols-2 gap-1.5">
           <button
             type="button"
-            disabled={!ready}
-            onClick={() => onExport("xlsx")}
+            disabled={!ready || exporting !== null}
+            onClick={() => void runExport("xlsx")}
             className="inline-flex h-10 items-center justify-center gap-1 rounded-lg bg-primary px-2 text-xs font-bold text-primary-foreground transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Download className="h-3 w-3" />
+            {exporting === "xlsx" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
             Excel
           </button>
           <button
             type="button"
-            disabled={!ready}
-            onClick={() => onExport("pdf")}
+            disabled={!ready || exporting !== null}
+            onClick={() => void runExport("pdf")}
             className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border-2 border-primary bg-primary/10 px-2 text-xs font-bold text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Download className="h-3 w-3" />
+            {exporting === "pdf" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
             PDF
           </button>
           <button
             type="button"
-            disabled={!ready}
-            onClick={() => onExport("zip-xlsx")}
+            disabled={!ready || exporting !== null}
+            onClick={() => void runExport("zip-xlsx")}
             className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-primary/40 bg-card px-2 text-xs font-bold text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <FileArchive className="h-3 w-3" />
+            {exporting === "zip-xlsx" ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileArchive className="h-3 w-3" />}
             ZIP avec Excel
           </button>
           <button
             type="button"
-            disabled={!ready}
-            onClick={() => onExport("zip-pdf")}
+            disabled={!ready || exporting !== null}
+            onClick={() => void runExport("zip-pdf")}
             className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-primary/40 bg-card px-2 text-xs font-bold text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <FileArchive className="h-3 w-3" />
+            {exporting === "zip-pdf" ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileArchive className="h-3 w-3" />}
             ZIP avec PDF
           </button>
         </div>

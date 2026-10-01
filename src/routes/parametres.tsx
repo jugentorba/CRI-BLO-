@@ -1,22 +1,38 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Building2, UserCircle2, FolderOpen, Save, Camera, ImageIcon, Languages, Zap, Sun, Moon, Monitor, Rows3, LayoutGrid, Minimize2 } from "lucide-react";
+import {
+  Building2,
+  UserCircle2,
+  FolderOpen,
+  Save,
+  Camera,
+  ImageIcon,
+  Languages,
+  Zap,
+  Sun,
+  Moon,
+  Monitor,
+  Rows3,
+  LayoutGrid,
+  Minimize2,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { AppUpdateSection } from "@/components/AppUpdateSection";
 import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
-import { OneDriveSection } from "@/components/OneDriveSection";
 import { GoogleDriveSection } from "@/components/GoogleDriveSection";
 import { LocalBackupSection } from "@/components/LocalBackupSection";
-import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
 import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
-import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
+import { OneDriveSection } from "@/components/OneDriveSection";
+import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
+import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS } from "@/lib/ai/gemini";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
     meta: [
       { title: "Paramètres — CRI BLO Assistant" },
-      { name: "description", content: "Profil, photos, dossier export." },
+      { name: "description", content: "Profil, photos, synchronisation et mises à jour." },
     ],
   }),
   component: Parametres,
@@ -30,27 +46,24 @@ function Parametres() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [aiTestBusy, setAiTestBusy] = useState(false);
-  const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    void getProfile().then((p) => {
-      setCompany(p?.company ?? "");
-      setLastName(p?.lastName ?? "");
+    void getProfile().then((profile) => {
+      setCompany(profile?.company ?? "");
+      setLastName(profile?.lastName ?? "");
     });
     void getSettings().then(setSettings);
   }, []);
 
-  async function saveAll(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveAll(event: React.FormEvent) {
+    event.preventDefault();
     await saveProfile({ company: company.trim(), lastName: lastName.trim() });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
 
   async function patchSettings(patch: Partial<AppSettings>) {
-    const next = await saveSettings(patch);
-    setSettings(next);
+    setSettings(await saveSettings(patch));
   }
 
   async function chooseFolder() {
@@ -58,55 +71,49 @@ function Parametres() {
       alert("Votre navigateur ne supporte pas le choix de dossier. Les exports seront téléchargés.");
       return;
     }
+
     setFolderBusy(true);
     try {
-      const h = await pickExportFolder();
-      if (h) setSettings(await getSettings());
+      const handle = await pickExportFolder();
+      if (handle) setSettings(await getSettings());
     } catch {
-      /* annulé */
+      /* Sélecteur annulé. */
     } finally {
       setFolderBusy(false);
     }
   }
 
-  async function changeAiProvider(provider: AiProvider) {
-    if (!settings) return;
-    setAiTestMessage(null);
-    const preset = getAiProviderPreset(provider);
-    await patchSettings({
-      aiProvider: provider,
-      aiEndpoint: "",
-      aiApiKey: "",
-      aiModel: preset?.model ?? "",
-    });
+  if (!settings) {
+    return (
+      <AppShell title="Paramètres" showBack>
+        <div />
+      </AppShell>
+    );
   }
-
-  async function testConfiguredAi() {
-    setAiTestBusy(true);
-    setAiTestMessage(null);
-    try {
-      const current = await getSettings();
-      const config = buildAiConfig(current);
-      if (!config) throw new Error("Choisissez d’abord un fournisseur IA.");
-      await testAiConnection(config);
-      setAiTestMessage(`${getAiProviderLabel(config.provider)} : connexion réussie ✓`);
-    } catch (e) {
-      setAiTestMessage(e instanceof Error ? e.message : "Test de connexion impossible.");
-    } finally {
-      setAiTestBusy(false);
-    }
-  }
-
-  if (!settings) return <AppShell title="Paramètres" showBack><div /></AppShell>;
 
   return (
     <AppShell title="Paramètres" subtitle="Profil et préférences" showBack>
       <form onSubmit={saveAll} className="space-y-6">
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Profil technicien</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Profil technicien
+          </h2>
           <div className="space-y-3">
-            <Field icon={Building2} label="Entreprise" value={company} onChange={setCompany} placeholder="Ex : Circet" />
-            <Field icon={UserCircle2} label="Nom du technicien" value={lastName} onChange={setLastName} placeholder="Ex : Dupont" autoCapitalize="words" />
+            <Field
+              icon={Building2}
+              label="Entreprise"
+              value={company}
+              onChange={setCompany}
+              placeholder="Ex : Circet"
+            />
+            <Field
+              icon={UserCircle2}
+              label="Nom du technicien"
+              value={lastName}
+              onChange={setLastName}
+              placeholder="Ex : Dupont"
+              autoCapitalize="words"
+            />
           </div>
           <button
             type="submit"
@@ -117,36 +124,42 @@ function Parametres() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Saisie</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Saisie
+          </h2>
           <Toggle
             icon={Zap}
             label="Auto Save"
             description="Sauvegarder automatiquement pendant l'édition."
             checked={settings.autoSave}
-            onChange={(v) => patchSettings({ autoSave: v })}
+            onChange={(value) => void patchSettings({ autoSave: value })}
           />
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Photos</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Photos
+          </h2>
           <Toggle
             icon={ImageIcon}
             label="Sauvegarder dans la galerie"
             description="Télécharger chaque photo dans la galerie du téléphone."
             checked={settings.saveToGallery}
-            onChange={(v) => patchSettings({ saveToGallery: v })}
+            onChange={(value) => void patchSettings({ saveToGallery: value })}
           />
           <Toggle
             icon={Camera}
             label="Watermark"
-            description="Apposer date, heure et adresse complète sur chaque photo."
+            description="Apposer date, heure, GPS et adresse disponible sur chaque photo."
             checked={settings.watermark}
-            onChange={(v) => patchSettings({ watermark: v })}
+            onChange={(value) => void patchSettings({ watermark: value })}
           />
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Export</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Export
+          </h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
             <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-foreground">
               <FolderOpen className="h-4 w-4 text-primary" /> Dossier CRI BLO
@@ -161,10 +174,14 @@ function Parametres() {
             <button
               type="button"
               disabled={folderBusy}
-              onClick={chooseFolder}
+              onClick={() => void chooseFolder()}
               className="mt-3 h-11 w-full rounded-xl border border-border bg-background text-sm font-semibold text-foreground transition active:scale-95 disabled:opacity-50"
             >
-              {settings.exportFolderName ? "Changer le dossier CRI BLO" : "Choisir le dossier CRI BLO"}
+              {folderBusy
+                ? "Ouverture…"
+                : settings.exportFolderName
+                  ? "Changer le dossier CRI BLO"
+                  : "Choisir le dossier CRI BLO"}
             </button>
           </div>
         </section>
@@ -229,105 +246,108 @@ function Parametres() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Assistant IA</h2>
-          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)] space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Choisissez votre fournisseur puis saisissez sa clé API. La même configuration est utilisée par l’Assistant et l’assistant de commentaires CRI.
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Assistant IA — Gemini
+          </h2>
+          <div className="space-y-3 rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              CRI-BLO utilise directement votre clé Gemini personnelle. Aucun endpoint à configurer et aucune clé n'est intégrée à l'APK. La clé saisie ici reste dans les données locales de l'application.
             </p>
-            <label className="block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Fournisseur</label>
-            <select
-              value={settings.aiProvider ?? "none"}
-              onChange={(e) => void changeAiProvider(e.target.value as AiProvider)}
-              className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
-            >
-              {AI_PROVIDER_OPTIONS.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.label}</option>
-              ))}
-            </select>
 
-            {(settings.aiProvider ?? "none") !== "none" && (
-              <>
-                <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Clé API</label>
-                <input
-                  type="password"
-                  value={settings.aiApiKey ?? ""}
-                  onChange={(e) => {
-                    setAiTestMessage(null);
-                    void patchSettings({ aiApiKey: e.target.value });
-                  }}
-                  placeholder="Collez la clé API du fournisseur choisi"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-                />
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Clé Gemini
+              </span>
+              <input
+                type="password"
+                value={settings.aiApiKey ?? ""}
+                onChange={(event) =>
+                  void patchSettings({
+                    aiProvider: "gemini",
+                    aiEndpoint: "",
+                    aiApiKey: event.target.value,
+                    aiModel: settings.aiModel?.startsWith("gemini-")
+                      ? settings.aiModel
+                      : DEFAULT_GEMINI_MODEL,
+                  })
+                }
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="AIza…"
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
 
-                <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Modèle</label>
-                <input
-                  value={settings.aiModel ?? ""}
-                  onChange={(e) => {
-                    setAiTestMessage(null);
-                    void patchSettings({ aiModel: e.target.value });
-                  }}
-                  placeholder={getAiProviderPreset(settings.aiProvider ?? "none")?.model ?? "Nom du modèle"}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-                />
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Modèle
+              </span>
+              <select
+                value={
+                  FREE_GEMINI_MODELS.some((model) => model.id === settings.aiModel)
+                    ? settings.aiModel
+                    : DEFAULT_GEMINI_MODEL
+                }
+                onChange={(event) =>
+                  void patchSettings({
+                    aiProvider: "gemini",
+                    aiEndpoint: "",
+                    aiModel: event.target.value,
+                  })
+                }
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+              >
+                {FREE_GEMINI_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-                {(settings.aiProvider ?? "none") === "custom" && (
-                  <>
-                    <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Endpoint compatible OpenAI</label>
-                    <input
-                      value={settings.aiEndpoint ?? ""}
-                      onChange={(e) => {
-                        setAiTestMessage(null);
-                        void patchSettings({ aiEndpoint: e.target.value });
-                      }}
-                      placeholder="https://votre-endpoint/v1/chat/completions"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-                    />
-                  </>
-                )}
-
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/5 px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                {settings.aiApiKey?.trim()
+                  ? "Gemini configuré sur cet appareil."
+                  : "Ajoutez une clé Gemini pour activer l'IA en ligne."}
+              </div>
+              {settings.aiApiKey?.trim() && (
                 <button
                   type="button"
-                  disabled={aiTestBusy || !(settings.aiApiKey ?? "").trim()}
-                  onClick={() => void testConfiguredAi()}
-                  className="h-10 w-full rounded-xl border border-primary/40 bg-primary/5 text-xs font-bold text-primary disabled:opacity-50"
+                  onClick={() =>
+                    void patchSettings({
+                      aiProvider: "gemini",
+                      aiEndpoint: "",
+                      aiApiKey: "",
+                      aiModel: DEFAULT_GEMINI_MODEL,
+                    })
+                  }
+                  className="shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-[10px] font-bold text-foreground active:scale-95"
                 >
-                  {aiTestBusy ? "Test en cours…" : "Tester la connexion"}
+                  Effacer la clé
                 </button>
-                {aiTestMessage && (
-                  <p className="rounded-lg bg-muted/50 p-2 text-[11px] text-foreground">{aiTestMessage}</p>
-                )}
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  La clé reste uniquement sur cet appareil : elle n’est ni intégrée dans l’APK ni incluse dans les sauvegardes OneDrive.
-                </p>
-              </>
-            )}
+              )}
+            </div>
           </div>
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Apparence</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Apparence
+          </h2>
           <div className="rounded-2xl border border-border/60 bg-card p-3 shadow-[var(--shadow-card)]">
             <div className="grid grid-cols-3 gap-2">
               {([
-                { v: "system", label: "Système", Icon: Monitor },
-                { v: "light", label: "Clair", Icon: Sun },
-                { v: "dark", label: "Sombre", Icon: Moon },
-              ] as const).map(({ v, label, Icon }) => {
-                const active = settings.theme === v;
+                { value: "system", label: "Système", Icon: Monitor },
+                { value: "light", label: "Clair", Icon: Sun },
+                { value: "dark", label: "Sombre", Icon: Moon },
+              ] as const).map(({ value, label, Icon }) => {
+                const active = settings.theme === value;
                 return (
                   <button
-                    key={v}
+                    key={value}
                     type="button"
-                    onClick={() => patchSettings({ theme: v })}
+                    onClick={() => void patchSettings({ theme: value })}
                     className={
                       "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg border text-xs font-semibold transition active:scale-95 " +
                       (active
@@ -345,20 +365,22 @@ function Parametres() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Densité d'affichage</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Densité d'affichage
+          </h2>
           <div className="rounded-2xl border border-border/60 bg-card p-3 shadow-[var(--shadow-card)]">
             <div className="grid grid-cols-3 gap-2">
               {([
-                { v: "comfortable", label: "Confortable", Icon: LayoutGrid },
-                { v: "compact", label: "Compacte", Icon: Rows3 },
-                { v: "very-compact", label: "Très compacte", Icon: Minimize2 },
-              ] as const).map(({ v, label, Icon }) => {
-                const active = settings.density === v;
+                { value: "comfortable", label: "Confortable", Icon: LayoutGrid },
+                { value: "compact", label: "Compacte", Icon: Rows3 },
+                { value: "very-compact", label: "Très compacte", Icon: Minimize2 },
+              ] as const).map(({ value, label, Icon }) => {
+                const active = settings.density === value;
                 return (
                   <button
-                    key={v}
+                    key={value}
                     type="button"
-                    onClick={() => patchSettings({ density: v })}
+                    onClick={() => void patchSettings({ density: value })}
                     className={
                       "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg border text-[11px] font-semibold transition active:scale-95 " +
                       (active
@@ -372,6 +394,7 @@ function Parametres() {
                 );
               })}
             </div>
+
             <div className="mt-4">
               <div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-foreground">
                 <span>Échelle personnalisée</span>
@@ -383,7 +406,7 @@ function Parametres() {
                 max={130}
                 step={5}
                 value={settings.scale}
-                onChange={(e) => patchSettings({ scale: Number(e.target.value) })}
+                onChange={(event) => void patchSettings({ scale: Number(event.target.value) })}
                 className="w-full accent-[color:var(--color-primary)]"
               />
               <div className="mt-1 flex justify-between text-[10px] uppercase text-muted-foreground">
@@ -393,7 +416,7 @@ function Parametres() {
               </div>
               <button
                 type="button"
-                onClick={() => patchSettings({ scale: 100 })}
+                onClick={() => void patchSettings({ scale: 100 })}
                 className="mt-2 h-9 w-full rounded-lg border border-border bg-background text-xs font-semibold text-foreground transition active:scale-95"
               >
                 Réinitialiser à 100%
@@ -403,14 +426,18 @@ function Parametres() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Langue</h2>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Langue
+          </h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
               <Languages className="h-4 w-4 text-primary" /> Langue de l'application
             </div>
             <select
               value={settings.language}
-              onChange={(e) => patchSettings({ language: e.target.value as "fr" | "en" })}
+              onChange={(event) =>
+                void patchSettings({ language: event.target.value as "fr" | "en" })
+              }
               className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
             >
               <option value="fr">Français</option>
@@ -418,9 +445,13 @@ function Parametres() {
             </select>
           </div>
         </section>
+
+        <AppUpdateSection />
       </form>
 
-      <p className="mt-8 text-center text-xs text-muted-foreground">CRI BLO Assistant · Orange France</p>
+      <p className="mt-8 text-center text-xs text-muted-foreground">
+        CRI BLO Assistant · Orange France
+      </p>
     </AppShell>
   );
 }
@@ -436,7 +467,7 @@ function Field({
   icon: typeof Building2;
   label: string;
   value: string;
-  onChange: (v: string) => void;
+  onChange: (value: string) => void;
   placeholder?: string;
   autoCapitalize?: string;
 }) {
@@ -447,7 +478,7 @@ function Field({
       </label>
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         autoCapitalize={autoCapitalize}
         className="mt-1.5 h-11 w-full rounded-lg border border-border bg-background px-3 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
@@ -467,7 +498,7 @@ function Toggle({
   label: string;
   description: string;
   checked: boolean;
-  onChange: (v: boolean) => void;
+  onChange: (value: boolean) => void;
 }) {
   return (
     <label className="mb-3 flex cursor-pointer items-center gap-2.5 rounded-xl border border-border/60 bg-card p-3 shadow-[var(--shadow-card)]">
@@ -481,7 +512,7 @@ function Toggle({
       <input
         type="checkbox"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={(event) => onChange(event.target.checked)}
         className="sr-only"
       />
       <span

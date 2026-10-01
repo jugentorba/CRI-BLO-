@@ -16,6 +16,7 @@ export const APP_FOLDERS = {
   drafts: "Drafts",
   excel: "Excel Exports",
   zip: "ZIP Packages",
+  browser: "Browser",
 } as const;
 
 export function isOneDriveConfigured(): boolean {

@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+import { createRequire } from 'node:module';
+const require=createRequire(import.meta.url);
+const exports={};let settings={},calls=[];
+const code=ts.transpileModule(fs.readFileSync('src/lib/ai/comment.functions.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+vm.runInNewContext(code,{exports,require(name){
+ if(name.includes('settings/repository'))return {getSettings:async()=>settings};
+ if(name.includes('ai/gemini'))return {DEFAULT_GEMINI_MODEL:'test-model',callGemini:async x=>{calls.push(x);return 'Repaired cable';}};
+ return require(name);
+}});
+let result=await exports.improveComment({data:{notes:'Cable repaired',style:'simple'}});
+assert.equal(result.ok,false);assert.equal(calls.length,0);
+settings={aiApiKey:'test-key',aiModel:'test-model'};
+result=await exports.improveComment({data:{notes:'Cable repaired',style:'simple',context:'DOS 123'}});
+assert.equal(result.ok,true,'Configured Gemini must work for CRI comments too');
+assert.equal(result.text,'Repaired cable');assert.equal(calls.length,1);assert.match(calls[0].prompt,/DOS 123/);
+console.log('Comment assistant: missing-key and configured-key cases passed');

@@ -1,6 +1,6 @@
 // Offline-first upload queue for OneDrive.
-// Persists pending uploads in IndexedDB (via STORE_SETTINGS) so the app can
-// resume synchronization when the network comes back.
+// Pending uploads live in IndexedDB so network loss or app interruption does
+// not remove evidence before OneDrive confirms a successful upload.
 
 import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
 import { uploadFile, ensureAppFolders } from "./graph";
@@ -13,7 +13,7 @@ export type QueueKind = "excel" | "zip" | "draft" | "attachment";
 export interface QueueItem {
   id: string;
   kind: QueueKind;
-  path: string; // Path inside AppFolder, e.g. "Excel Exports/CRI_BLO_...xlsx"
+  path: string;
   blob: Blob;
   addedAt: string;
   status: "pending" | "syncing" | "error";
@@ -28,16 +28,15 @@ interface QueueRecord {
 }
 
 async function readQueue(): Promise<QueueItem[]> {
-  const r = await tx(STORE_SETTINGS, "readonly", async (s) => {
-    const v = (await reqAsync(s.get(QUEUE_KEY))) as QueueRecord | undefined;
-    return v?.items ?? [];
+  return tx(STORE_SETTINGS, "readonly", async (store) => {
+    const value = (await reqAsync(store.get(QUEUE_KEY))) as QueueRecord | undefined;
+    return value?.items ?? [];
   });
-  return r;
 }
 
 async function writeQueue(items: QueueItem[]): Promise<void> {
-  await tx(STORE_SETTINGS, "readwrite", (s) =>
-    reqAsync(s.put({ id: QUEUE_KEY, items } satisfies QueueRecord)),
+  await tx(STORE_SETTINGS, "readwrite", (store) =>
+    reqAsync(store.put({ id: QUEUE_KEY, items } satisfies QueueRecord)),
   );
   try {
     window.dispatchEvent(new CustomEvent("criblo:onedrive-queue", { detail: items.length }));
@@ -59,15 +58,26 @@ export async function enqueueUpload(
 ): Promise<void> {
   const path = `${folderFor(kind)}/${fileName}`;
   const items = await readQueue();
-  const item: QueueItem = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  const existingIndex = items.findIndex((item) => item.path === path);
+  const replacement: QueueItem = {
+    id:
+      existingIndex >= 0
+        ? items[existingIndex].id
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     kind,
     path,
     blob,
     addedAt: new Date().toISOString(),
     status: "pending",
   };
-  items.push(item);
+
+  if (existingIndex >= 0) {
+    // Same cloud destination: keep one queue entry and use the newest local
+    // content. This prevents duplicate retries/exports from stacking up.
+    items[existingIndex] = replacement;
+  } else {
+    items.push(replacement);
+  }
   await writeQueue(items);
 }
 
@@ -92,33 +102,38 @@ export async function drainQueue(): Promise<{ uploaded: number; failed: number }
   draining = true;
   let uploaded = 0;
   let failed = 0;
+
   try {
     await ensureAppFolders();
     let items = await readQueue();
     while (items.length) {
       const [next, ...rest] = items;
       try {
+        // We intentionally do not persist a destructive "done" state before
+        // uploadFile resolves. If the app dies mid-upload, the item remains and
+        // can safely retry the same OneDrive path on the next drain.
         await uploadFile(next.path, next.blob);
         items = rest;
         await writeQueue(items);
-        uploaded++;
-      } catch (e) {
-        // Mark as errored and stop draining to avoid tight retry loops.
+        uploaded += 1;
+      } catch (error) {
         const errored: QueueItem = {
           ...next,
           status: "error",
-          error: e instanceof Error ? e.message : String(e),
+          error: error instanceof Error ? error.message : String(error),
         };
         await writeQueue([errored, ...rest]);
-        failed++;
+        failed += 1;
         break;
       }
     }
+
     if (uploaded > 0) {
       await saveSettings({ lastSyncAt: new Date().toISOString() });
     }
   } finally {
     draining = false;
   }
+
   return { uploaded, failed };
 }

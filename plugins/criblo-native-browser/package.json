@@ -1,0 +1,23 @@
+{
+  "name": "@criblo/native-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CRI-BLO owned native in-app browser for Android and iOS.",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "ios/Sources/",
+    "Package.swift"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

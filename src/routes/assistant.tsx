@@ -13,6 +13,7 @@ import {
   User,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { askAssistant } from "@/lib/ai/assistant.functions";
 import { translateNotes } from "@/lib/ai/glossary";
 import {
   appendExchange,
@@ -24,8 +25,6 @@ import {
 } from "@/lib/ai/chats";
 import { useOnline } from "@/hooks/use-online";
 import { cn } from "@/lib/utils";
-import { getSettings } from "@/lib/settings/repository";
-import { buildAiConfig, callIndependentAi } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/assistant")({
   head: () => ({
@@ -111,25 +110,17 @@ function Assistant() {
               .map((m) => `${m.role === "user" ? "Note" : "Réponse"} : ${m.text}`)
               .join("\n")}\n\nNouvelle demande : ${clean}`
           : clean;
-        const settings = await getSettings();
-        const aiConfig = buildAiConfig(settings);
-        if (!aiConfig) {
-          setError("Aucun fournisseur IA configuré — moteur local utilisé.");
+        const res = await askAssistant({
+          data: { text: context.slice(0, 6000), inputLang, outputLang, tone },
+        });
+        if (res.ok) output = res.text;
+        else {
+          setError(res.message);
           output = outputLang === "fr" ? translateNotes(clean) : "";
-        } else {
-          output = await callIndependentAi(
-            aiConfig,
-            `Langue d'entrée : ${inputLang}. Langue de sortie : ${outputLang}. Ton : ${tone}.\n\n${context.slice(0, 6000)}`,
-            {
-              system:
-                "Tu es l'assistant de rédaction CRI BLO. N'invente aucune information. Conserve exactement les références, nombres, distances et noms de lieux. Réponds uniquement avec le texte final demandé.",
-            },
-          );
         }
       }
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : "Assistant indisponible.";
-      setError(`${detail} — texte mis en forme hors-ligne.`);
+    } catch {
+      setError("Assistant indisponible — texte mis en forme hors-ligne.");
       output = outputLang === "fr" ? translateNotes(clean) : "";
     } finally {
       setBusy(false);
