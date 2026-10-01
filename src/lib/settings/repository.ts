@@ -17,6 +17,8 @@ export interface AppSettings {
   scale: number;
   cloudSyncEnabled?: boolean;
   cloudProvider?: "onedrive" | "google-drive";
+  cloudAutoBackupEnabled?: boolean;
+  cloudAutoBackupIntervalHours?: number;
   lastSyncAt?: string;
   aiProvider?: AiProvider;
   aiEndpoint?: string;
@@ -35,7 +37,9 @@ const DEFAULTS: AppSettings = {
   density: "comfortable",
   scale: 100,
   cloudSyncEnabled: false,
-  cloudProvider: "onedrive",
+  cloudProvider: "google-drive",
+  cloudAutoBackupEnabled: false,
+  cloudAutoBackupIntervalHours: 6,
   aiProvider: "none",
   aiEndpoint: "",
   aiApiKey: "",
