@@ -9,9 +9,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+      VITE_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
-      - name: Verify permanent signing secrets
+      - name: Verify permanent signing and Google configuration
         env:
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SP: ${{ secrets.ANDROID_STORE_PASSWORD }}
           KA: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -21,6 +25,7 @@ jobs:
           test -n "$SP" || { echo "Missing ANDROID_STORE_PASSWORD"; exit 1; }
           test -n "$KA" || { echo "Missing ANDROID_KEY_ALIAS"; exit 1; }
           test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
+          test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "Missing repository variable GOOGLE_WEB_CLIENT_ID"; exit 1; }
 
       - name: Checkout CRI-BLO
         uses: actions/checkout@v4
