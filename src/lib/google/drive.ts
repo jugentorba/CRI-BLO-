@@ -3,16 +3,16 @@ import { getGoogleAccessToken } from "./auth";
 const DRIVE = "https://www.googleapis.com/drive/v3";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 
-async function headers(json = false): Promise<HeadersInit> {
-  const token = await getGoogleAccessToken();
+async function headers(json = false, interactive = true): Promise<HeadersInit> {
+  const token = await getGoogleAccessToken(interactive);
   return {
     Authorization: `Bearer ${token}`,
     ...(json ? { "Content-Type": "application/json" } : {}),
   };
 }
 
-async function findFile(name: string): Promise<string | null> {
-  const h = await headers();
+async function findFile(name: string, interactive = true): Promise<string | null> {
+  const h = await headers(false, interactive);
   const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and 'appDataFolder' in parents and trashed=false`);
   const res = await fetch(`${DRIVE}/files?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=10`, { headers: h });
   if (!res.ok) throw new Error(`Google Drive list failed [${res.status}]`);
@@ -20,8 +20,8 @@ async function findFile(name: string): Promise<string | null> {
   return j.files?.[0]?.id ?? null;
 }
 
-async function createUploadSession(name: string, mimeType: string, existingId: string | null): Promise<string> {
-  const h = await headers(true);
+async function createUploadSession(name: string, mimeType: string, existingId: string | null, interactive = true): Promise<string> {
+  const h = await headers(true, interactive);
   const url = existingId
     ? `${UPLOAD}/files/${existingId}?uploadType=resumable`
     : `${UPLOAD}/files?uploadType=resumable`;
@@ -40,9 +40,9 @@ async function createUploadSession(name: string, mimeType: string, existingId: s
   return location;
 }
 
-export async function uploadGoogleDriveFile(name: string, blob: Blob): Promise<void> {
-  const existingId = await findFile(name);
-  const session = await createUploadSession(name, blob.type || "application/octet-stream", existingId);
+export async function uploadGoogleDriveFile(name: string, blob: Blob, interactive = true): Promise<void> {
+  const existingId = await findFile(name, interactive);
+  const session = await createUploadSession(name, blob.type || "application/octet-stream", existingId, interactive);
   const chunkSize = 8 * 1024 * 1024;
   let offset = 0;
   while (offset < blob.size) {
@@ -64,10 +64,10 @@ export async function uploadGoogleDriveFile(name: string, blob: Blob): Promise<v
   }
 }
 
-export async function downloadGoogleDriveFile(name: string): Promise<Blob> {
-  const id = await findFile(name);
+export async function downloadGoogleDriveFile(name: string, interactive = true): Promise<Blob> {
+  const id = await findFile(name, interactive);
   if (!id) throw new Error("Aucune sauvegarde CRI BLO trouvée dans Google Drive.");
-  const h = await headers();
+  const h = await headers(false, interactive);
   const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: h });
   if (!res.ok) throw new Error(`Google Drive download failed [${res.status}]`);
   return res.blob();
