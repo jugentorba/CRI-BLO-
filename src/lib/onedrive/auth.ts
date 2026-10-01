@@ -79,7 +79,7 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function getAccessToken(): Promise<string> {
+export async function getAccessToken(interactive = true): Promise<string> {
   const pca = await getPca();
   const account = pca.getActiveAccount() ?? pca.getAllAccounts()[0] ?? null;
   if (!account) throw new Error("Aucun compte Microsoft connecté.");
@@ -87,6 +87,7 @@ export async function getAccessToken(): Promise<string> {
     const res = await pca.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
     return res.accessToken;
   } catch {
+    if (!interactive) throw new Error("Connexion Microsoft requise.");
     const res = await pca.acquireTokenPopup({ scopes: GRAPH_SCOPES, account });
     return res.accessToken;
   }
