@@ -4,6 +4,7 @@ import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repo
 import { getGoogleClientId, isGoogleDriveConfigured, setRuntimeGoogleClientId } from "@/lib/google/config";
 import { getGoogleProfile, loginGoogleDrive, logoutGoogleDrive } from "@/lib/google/auth";
 import { uploadGoogleDeviceSnapshot, restoreGoogleDeviceSnapshot } from "@/lib/google/sync";
+import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
 
 export function GoogleDriveSection({
   settings,
@@ -44,7 +45,8 @@ export function GoogleDriveSection({
     try {
       await loginGoogleDrive();
       await refresh();
-      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true });
+      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true, cloudAutoBackupEnabled: true });
+      markCloudBackupDirty();
       onSettings(next);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Connexion Google impossible.");
@@ -65,7 +67,8 @@ export function GoogleDriveSection({
     setMessage(null);
     try {
       const r = await uploadGoogleDeviceSnapshot();
-      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true, lastSyncAt: r.at });
+      clearCloudBackupDirty();
+      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true, cloudAutoBackupEnabled: true, lastSyncAt: r.at });
       onSettings(next);
       setMessage(`Sauvegarde Google Drive terminée (${Math.max(1, Math.round(r.size / 1024))} Ko).`);
     } catch (e) {
