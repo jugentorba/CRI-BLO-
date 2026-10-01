@@ -1,0 +1,134 @@
+name: Build CRI-BLO Signed Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify permanent signing secrets
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KS" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
+          test -n "$SP" || { echo "Missing ANDROID_STORE_PASSWORD"; exit 1; }
+          test -n "$KA" || { echo "Missing ANDROID_KEY_ALIAS"; exit 1; }
+          test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
+
+      - name: Checkout CRI-BLO
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare Capacitor Android wrapper
+        working-directory: source
+        run: |
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.criblo.app",
+            "appName": "CRI BLO",
+            "webDir": "dist"
+          }
+          JSON
+          npm run build
+          rm -rf android
+          npx cap add android
+          npx cap sync android
+
+      - name: Set monotonically increasing app version
+        working-directory: source
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          VERSION_CODE=$((1000 + RUN_NUMBER))
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          p = Path("android/app/build.gradle")
+          s = p.read_text()
+          code = 1000 + int(os.environ["RUN_NUMBER"])
+          s = re.sub(r"versionCode\s+\d+", f"versionCode {code}", s)
+          s = re.sub(r'versionName\s+"[^"]+"', f'versionName "2.0.{code}"', s)
+          p.write_text(s)
+          print(f"CRI BLO versionCode={code}")
+          PY
+
+      - name: Enable Android permissions
+        working-directory: source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          permissions = [
+              '    <uses-permission android:name="android.permission.CAMERA" />',
+              '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
+              '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
+          ]
+          if "android.permission.ACCESS_FINE_LOCATION" not in text:
+              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
+          if "android:usesCleartextTraffic=" not in text:
+              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+          manifest.write_text(text)
+          PY
+
+      - name: Decode permanent signing key
+        working-directory: source
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/criblo-release.jks
+
+      - name: Build signed release APK
+        working-directory: source/android
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon             -Pandroid.injected.signing.store.file="$PWD/criblo-release.jks"             -Pandroid.injected.signing.store.password="$STORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$KEY_ALIAS"             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Verify APK is signed
+        working-directory: source
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner" verify --verbose "$APK"
+
+      - name: Collect signed APK
+        run: |
+          mkdir -p output
+          cp source/android/app/build/outputs/apk/release/app-release.apk output/CRI-BLO-SIGNED.apk
+
+      - name: Upload signed production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRI-BLO-SIGNED
+          path: output/CRI-BLO-SIGNED.apk
+          if-no-files-found: error
+          retention-days: 30

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Cloud, CloudOff, LogIn, LogOut, RefreshCw, AlertTriangle } from "lucide-react";
+import { Cloud, CloudOff, LogIn, LogOut, RefreshCw, AlertTriangle, Save } from "lucide-react";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
-import { isOneDriveConfigured } from "@/lib/onedrive/config";
+import { getAzureClientId, isOneDriveConfigured, setRuntimeAzureClientId } from "@/lib/onedrive/config";
 import { getCurrentAccount, login, logout } from "@/lib/onedrive/auth";
 import { ensureAppFolders, getSignedInProfile } from "@/lib/onedrive/graph";
 import { drainQueue, queueSize } from "@/lib/onedrive/queue";
+import { markCloudBackupDirty } from "@/lib/cloud/auto-backup";
 
 export function OneDriveSection({
   settings,
@@ -13,7 +14,8 @@ export function OneDriveSection({
   settings: AppSettings;
   onSettings: (s: AppSettings) => void;
 }) {
-  const configured = isOneDriveConfigured();
+  const [configured, setConfigured] = useState(isOneDriveConfigured());
+  const [clientId, setClientId] = useState(getAzureClientId());
   const [account, setAccount] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "connect" | "disconnect" | "sync">(null);
   const [pending, setPending] = useState(0);
@@ -34,6 +36,13 @@ export function OneDriveSection({
     if (configured) void refreshStatus();
   }, [configured]);
 
+  async function saveClientId() {
+    setRuntimeAzureClientId(clientId);
+    const ok = isOneDriveConfigured();
+    setConfigured(ok);
+    setErr(ok ? null : "Client ID Microsoft manquant.");
+  }
+
   async function toggleSync(enabled: boolean) {
     const next = await saveSettings({ cloudSyncEnabled: enabled, cloudProvider: "onedrive" });
     onSettings(next);
@@ -46,7 +55,8 @@ export function OneDriveSection({
       await login();
       await ensureAppFolders();
       await refreshStatus();
-      const next = await saveSettings({ cloudSyncEnabled: true, cloudProvider: "onedrive" });
+      const next = await saveSettings({ cloudSyncEnabled: true, cloudProvider: "onedrive", cloudAutoBackupEnabled: true });
+      markCloudBackupDirty();
       onSettings(next);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Connexion Microsoft impossible.");
@@ -93,8 +103,7 @@ export function OneDriveSection({
           <div>
             <div className="font-semibold">Configuration OneDrive requise</div>
             <div className="mt-0.5 opacity-80">
-              Un administrateur doit renseigner <code>VITE_AZURE_CLIENT_ID</code> (enregistrement
-              d'application Azure) pour activer la synchronisation OneDrive.
+              Collez le Client ID Microsoft/Azure de CRI BLO. Il s’agit d’un identifiant OAuth public, pas d’un mot de passe.
             </div>
           </div>
         </div>
@@ -104,6 +113,26 @@ export function OneDriveSection({
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
           <Cloud className="h-4 w-4 text-primary" /> Microsoft OneDrive
         </div>
+
+        {!configured && (
+          <div className="mb-3 flex gap-2">
+            <input
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="Microsoft / Azure Client ID"
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => void saveClientId()}
+              className="flex h-10 items-center gap-1 rounded-xl border border-border px-3 text-xs font-bold"
+            >
+              <Save className="h-3.5 w-3.5" /> Enregistrer
+            </button>
+          </div>
+        )}
 
         {/* ON / OFF */}
         <label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-background p-3">

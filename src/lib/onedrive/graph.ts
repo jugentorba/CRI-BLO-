@@ -6,14 +6,14 @@ import { APP_FOLDERS } from "./config";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
-async function authHeaders(): Promise<HeadersInit> {
-  const token = await getAccessToken();
+async function authHeaders(interactive = true): Promise<HeadersInit> {
+  const token = await getAccessToken(interactive);
   return { Authorization: `Bearer ${token}` };
 }
 
 // PUT small file (<= 4 MB) via /content endpoint on the app folder.
-async function uploadSmall(path: string, blob: Blob): Promise<void> {
-  const headers = await authHeaders();
+async function uploadSmall(path: string, blob: Blob, interactive = true): Promise<void> {
+  const headers = await authHeaders(interactive);
   const url = `${GRAPH}/me/drive/special/approot:/${encodeURI(path)}:/content`;
   const res = await fetch(url, {
     method: "PUT",
@@ -27,8 +27,8 @@ async function uploadSmall(path: string, blob: Blob): Promise<void> {
 }
 
 // Large-file upload session for files > 4 MB (typical ZIP packages).
-async function uploadLarge(path: string, blob: Blob): Promise<void> {
-  const headers = await authHeaders();
+async function uploadLarge(path: string, blob: Blob, interactive = true): Promise<void> {
+  const headers = await authHeaders(interactive);
   const sessionRes = await fetch(
     `${GRAPH}/me/drive/special/approot:/${encodeURI(path)}:/createUploadSession`,
     {
@@ -64,11 +64,11 @@ async function uploadLarge(path: string, blob: Blob): Promise<void> {
   }
 }
 
-export async function uploadFile(path: string, blob: Blob): Promise<void> {
+export async function uploadFile(path: string, blob: Blob, interactive = true): Promise<void> {
   if (blob.size > 4 * 1024 * 1024) {
-    return uploadLarge(path, blob);
+    return uploadLarge(path, blob, interactive);
   }
-  return uploadSmall(path, blob);
+  return uploadSmall(path, blob, interactive);
 }
 
 // Ensure Drafts/, Excel Exports/, ZIP Packages/ exist inside the app root folder.

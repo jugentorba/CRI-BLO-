@@ -9,10 +9,10 @@ export async function cloudSyncAvailable(): Promise<boolean> {
   return isOneDriveConfigured() && !!(await getCurrentAccount());
 }
 
-export async function uploadDeviceSnapshot(): Promise<{ size: number; at: string }> {
+export async function uploadDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {
   if (!(await cloudSyncAvailable())) throw new Error("Connectez votre compte OneDrive dans Paramètres.");
   const blob = await exportSyncSnapshot();
-  await uploadFile(SYNC_PATH, blob);
+  await uploadFile(SYNC_PATH, blob, interactive);
   return { size: blob.size, at: new Date().toISOString() };
 }
 

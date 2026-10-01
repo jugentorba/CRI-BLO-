@@ -6,7 +6,10 @@ import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
-import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { GoogleDriveSection } from "@/components/GoogleDriveSection";
+import { LocalBackupSection } from "@/components/LocalBackupSection";
+import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
+import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
 import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/parametres")({
@@ -166,16 +169,49 @@ function Parametres() {
           </div>
         </section>
 
+        <LocalBackupSection />
+
         <OneDriveSection settings={settings} onSettings={setSettings} />
+
+        <GoogleDriveSection settings={settings} onSettings={setSettings} />
 
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Synchronisation multi-appareils</h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="text-xs text-muted-foreground">Sauvegardez vos données Criblo dans votre OneDrive puis restaurez-les sur votre téléphone ou tablette connectés au même compte.</p>
+            <p className="text-xs text-muted-foreground">Sauvegardez vos données CRI BLO dans le fournisseur cloud sélectionné (Google Drive recommandé ou OneDrive), puis restaurez-les sur un autre appareil.</p>
+            <label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Fournisseur principal</label>
+            <select
+              value={settings.cloudProvider ?? "google-drive"}
+              onChange={(e) => {
+                markCloudBackupDirty();
+                void patchSettings({ cloudProvider: e.target.value as "google-drive" | "onedrive", cloudSyncEnabled: true });
+              }}
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs"
+            >
+              <option value="google-drive">Google Drive (recommandé)</option>
+              <option value="onedrive">Microsoft OneDrive</option>
+            </select>
+            <label className="mt-3 flex items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-foreground">Sauvegarde automatique</div>
+                <div className="text-[10px] text-muted-foreground">
+                  Quand des données ont changé, sauvegarde au maximum une fois toutes les {settings.cloudAutoBackupIntervalHours ?? 6} h. Aucun pop-up de connexion automatique.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!settings.cloudAutoBackupEnabled}
+                onChange={(e) => {
+                  if (e.target.checked) markCloudBackupDirty();
+                  void patchSettings({ cloudAutoBackupEnabled: e.target.checked, cloudSyncEnabled: e.target.checked || settings.cloudSyncEnabled });
+                }}
+                className="h-4 w-4 accent-[color:var(--color-primary)]"
+              />
+            </label>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" disabled={syncBusy} onClick={async () => {
                 setSyncBusy(true); setSyncMessage(null);
-                try { const r = await uploadDeviceSnapshot(); setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`); await patchSettings({ cloudSyncEnabled: true, lastSyncAt: r.at }); }
+                try { const r = await uploadDeviceSnapshot(); clearCloudBackupDirty(); setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`); await patchSettings({ cloudSyncEnabled: true, lastCloudBackupAt: r.at }); }
                 catch (e) { setSyncMessage(e instanceof Error ? e.message : "Synchronisation impossible."); }
                 finally { setSyncBusy(false); }
               }} className="h-10 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-50">{syncBusy ? "…" : "Sauvegarder dans le cloud"}</button>
@@ -187,7 +223,7 @@ function Parametres() {
                 finally { setSyncBusy(false); }
               }} className="h-10 rounded-xl border border-border bg-background text-xs font-bold disabled:opacity-50">Restaurer du cloud</button>
             </div>
-            {settings.lastSyncAt && <div className="mt-2 text-[10px] text-muted-foreground">Dernière synchro : {new Date(settings.lastSyncAt).toLocaleString("fr-FR")}</div>}
+            {settings.lastCloudBackupAt && <div className="mt-2 text-[10px] text-muted-foreground">Dernière sauvegarde complète : {new Date(settings.lastCloudBackupAt).toLocaleString("fr-FR")}</div>}
             {syncMessage && <div className="mt-2 rounded-lg bg-primary/5 p-2 text-[10px] text-muted-foreground">{syncMessage}</div>}
           </div>
         </section>

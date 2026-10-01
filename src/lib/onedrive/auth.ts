@@ -4,7 +4,7 @@
 import type { AccountInfo, PublicClientApplication } from "@azure/msal-browser";
 import {
   AZURE_AUTHORITY,
-  AZURE_CLIENT_ID,
+  getAzureClientId,
   GRAPH_SCOPES,
   currentRedirectUri,
   isOneDriveConfigured,
@@ -15,7 +15,7 @@ let pcaPromise: Promise<PublicClientApplication> | null = null;
 async function getPca(): Promise<PublicClientApplication> {
   if (!isOneDriveConfigured()) {
     throw new Error(
-      "Configuration OneDrive requise : Azure Client ID manquant (VITE_AZURE_CLIENT_ID).",
+      "Configuration OneDrive requise : renseignez le Client ID Microsoft dans Paramètres.",
     );
   }
   if (!pcaPromise) {
@@ -23,7 +23,7 @@ async function getPca(): Promise<PublicClientApplication> {
       const { PublicClientApplication } = await import("@azure/msal-browser");
       const pca = new PublicClientApplication({
         auth: {
-          clientId: AZURE_CLIENT_ID,
+          clientId: getAzureClientId(),
           authority: AZURE_AUTHORITY,
           redirectUri: currentRedirectUri(),
         },
@@ -79,7 +79,7 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function getAccessToken(): Promise<string> {
+export async function getAccessToken(interactive = true): Promise<string> {
   const pca = await getPca();
   const account = pca.getActiveAccount() ?? pca.getAllAccounts()[0] ?? null;
   if (!account) throw new Error("Aucun compte Microsoft connecté.");
@@ -87,6 +87,7 @@ export async function getAccessToken(): Promise<string> {
     const res = await pca.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
     return res.accessToken;
   } catch {
+    if (!interactive) throw new Error("Connexion Microsoft requise.");
     const res = await pca.acquireTokenPopup({ scopes: GRAPH_SCOPES, account });
     return res.accessToken;
   }
