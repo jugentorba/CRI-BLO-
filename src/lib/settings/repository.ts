@@ -20,6 +20,7 @@ export interface AppSettings {
   cloudAutoBackupEnabled?: boolean;
   cloudAutoBackupIntervalHours?: number;
   lastSyncAt?: string;
+  lastCloudBackupAt?: string;
   aiProvider?: AiProvider;
   aiEndpoint?: string;
   aiApiKey?: string;
