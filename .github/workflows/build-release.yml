@@ -70,13 +70,13 @@ jobs:
         env:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
-          VERSION_CODE=$((1000 + RUN_NUMBER))
+          VERSION_CODE=$((10000 + RUN_NUMBER))
           python3 - <<'PY'
           import os, re
           from pathlib import Path
           p = Path("android/app/build.gradle")
           s = p.read_text()
-          code = 1000 + int(os.environ["RUN_NUMBER"])
+          code = 10000 + int(os.environ["RUN_NUMBER"])
           s = re.sub(r"versionCode\s+\d+", f"versionCode {code}", s)
           s = re.sub(r'versionName\s+"[^"]+"', f'versionName "2.0.{code}"', s)
           p.write_text(s)
