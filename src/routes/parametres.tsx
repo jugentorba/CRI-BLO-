@@ -211,7 +211,7 @@ function Parametres() {
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" disabled={syncBusy} onClick={async () => {
                 setSyncBusy(true); setSyncMessage(null);
-                try { const r = await uploadDeviceSnapshot(); clearCloudBackupDirty(); setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`); await patchSettings({ cloudSyncEnabled: true, lastSyncAt: r.at }); }
+                try { const r = await uploadDeviceSnapshot(); clearCloudBackupDirty(); setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`); await patchSettings({ cloudSyncEnabled: true, lastCloudBackupAt: r.at }); }
                 catch (e) { setSyncMessage(e instanceof Error ? e.message : "Synchronisation impossible."); }
                 finally { setSyncBusy(false); }
               }} className="h-10 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-50">{syncBusy ? "…" : "Sauvegarder dans le cloud"}</button>
@@ -223,7 +223,7 @@ function Parametres() {
                 finally { setSyncBusy(false); }
               }} className="h-10 rounded-xl border border-border bg-background text-xs font-bold disabled:opacity-50">Restaurer du cloud</button>
             </div>
-            {settings.lastSyncAt && <div className="mt-2 text-[10px] text-muted-foreground">Dernière synchro : {new Date(settings.lastSyncAt).toLocaleString("fr-FR")}</div>}
+            {settings.lastCloudBackupAt && <div className="mt-2 text-[10px] text-muted-foreground">Dernière sauvegarde complète : {new Date(settings.lastCloudBackupAt).toLocaleString("fr-FR")}</div>}
             {syncMessage && <div className="mt-2 rounded-lg bg-primary/5 p-2 text-[10px] text-muted-foreground">{syncMessage}</div>}
           </div>
         </section>
