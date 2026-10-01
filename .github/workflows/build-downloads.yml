@@ -10,6 +10,9 @@ permissions:
 jobs:
   build-downloads:
     runs-on: ubuntu-latest
+    env:
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+      VITE_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
       - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
