@@ -70,9 +70,9 @@ Production APK updates must always use the same permanent signing key through:
 Required GitHub Actions secrets:
 
 - `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_STORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
+
+The key alias is fixed to `criblo`, and the same strong password is used for the PKCS12 store and private key.
 
 Never commit the keystore or its passwords to the repository.
 
