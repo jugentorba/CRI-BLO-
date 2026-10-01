@@ -119,7 +119,16 @@ async function runTx<T>(
         result = r;
       })
       .catch(reject);
-    transaction.oncomplete = () => resolve(result);
+    transaction.oncomplete = () => {
+      if (mode === "readwrite") {
+        try {
+          window.dispatchEvent(new CustomEvent("criblo:data-changed", { detail: { store } }));
+        } catch {
+          /* noop */
+        }
+      }
+      resolve(result);
+    };
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
   });
