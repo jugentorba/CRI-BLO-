@@ -1,8 +1,8 @@
 import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
-import type { AiProvider } from "@/lib/ai/independent";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
+export type AiProvider = "gemini";
 
 export interface AppSettings {
   id: "app";
@@ -19,14 +19,19 @@ export interface AppSettings {
   cloudProvider?: "onedrive" | "google-drive";
   cloudAutoBackupEnabled?: boolean;
   cloudAutoBackupIntervalHours?: number;
-  lastSyncAt?: string;
   lastCloudBackupAt?: string;
+  lastSyncAt?: string;
+  /** CRI-BLO's personal AI provider. */
   aiProvider?: AiProvider;
+  /** Legacy field retained only so older local records can be migrated safely. */
   aiEndpoint?: string;
+  /** User-supplied Gemini API key. Never supplied by the build or committed to GitHub. */
   aiApiKey?: string;
   aiModel?: string;
   permissionsOnboardingDone?: boolean;
 }
+
+const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
 
 const DEFAULTS: AppSettings = {
   id: "app",
@@ -41,26 +46,37 @@ const DEFAULTS: AppSettings = {
   cloudProvider: "google-drive",
   cloudAutoBackupEnabled: false,
   cloudAutoBackupIntervalHours: 6,
-  aiProvider: "none",
+  aiProvider: "gemini",
   aiEndpoint: "",
   aiApiKey: "",
-  aiModel: "",
+  aiModel: DEFAULT_GEMINI_MODEL,
   permissionsOnboardingDone: false,
 };
+
+function normalizeAiSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    aiProvider: "gemini",
+    // Old custom/OpenAI-compatible endpoints are intentionally retired. This
+    // prevents a stale endpoint from silently bypassing the Gemini setup shown
+    // in Settings on upgraded installations.
+    aiEndpoint: "",
+    aiModel: settings.aiModel?.startsWith("gemini-")
+      ? settings.aiModel
+      : DEFAULT_GEMINI_MODEL,
+  };
+}
 
 export async function getSettings(): Promise<AppSettings> {
   return tx(STORE_SETTINGS, "readonly", async (s) => {
     const r = (await reqAsync(s.get("app"))) as AppSettings | undefined;
-    const merged = { ...DEFAULTS, ...(r ?? {}) };
-    // Migration douce des anciennes versions qui n’avaient qu’un endpoint personnalisé.
-    if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
-    return merged;
+    return normalizeAiSettings({ ...DEFAULTS, ...(r ?? {}) });
   });
 }
 
 export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
-  const next: AppSettings = { ...current, ...patch, id: "app" };
+  const next: AppSettings = normalizeAiSettings({ ...current, ...patch, id: "app" });
   await tx(STORE_SETTINGS, "readwrite", (s) => reqAsync(s.put(next)));
   try {
     window.dispatchEvent(new CustomEvent("criblo:settings", { detail: next }));

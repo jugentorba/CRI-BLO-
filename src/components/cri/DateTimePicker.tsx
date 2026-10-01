@@ -26,6 +26,7 @@ export function DateTimePicker({
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PickerMode>("date");
   const [draft, setDraft] = useState<Date>(() => parseDate(value) ?? new Date());
+  const isNA = value === "N/A" || value === "na";
 
   useEffect(() => {
     if (!open) return;
@@ -33,16 +34,18 @@ export function DateTimePicker({
   }, [open, value]);
 
   const displayDate = useMemo(() => {
+    if (isNA) return "N/A";
     const date = parseDate(value);
     if (!date) return datePlaceholder;
     return formatDate(date);
-  }, [value, datePlaceholder]);
+  }, [value, datePlaceholder, isNA]);
 
   const displayTime = useMemo(() => {
+    if (isNA) return "N/A";
     const date = parseDate(value);
     if (!date) return timePlaceholder;
     return formatTime(date);
-  }, [value, timePlaceholder]);
+  }, [value, timePlaceholder, isNA]);
 
   function commit() {
     onChange(draft.toISOString());
@@ -86,6 +89,20 @@ export function DateTimePicker({
           </span>
         </button>
       </div>
+
+      <button
+        type="button"
+        aria-pressed={isNA}
+        onClick={() => onChange(isNA ? undefined : "N/A")}
+        className={cn(
+          "h-9 w-full rounded-lg border text-xs font-bold transition active:scale-[0.99]",
+          isNA
+            ? "border-muted-foreground bg-muted-foreground text-background"
+            : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-primary",
+        )}
+      >
+        N/A
+      </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
@@ -309,7 +326,7 @@ function ClockButton({
 }
 
 function parseDate(value?: string): Date | undefined {
-  if (!value) return undefined;
+  if (!value || value === "N/A" || value === "na") return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date;
 }

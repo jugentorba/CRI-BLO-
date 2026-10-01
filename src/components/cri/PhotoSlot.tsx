@@ -1,11 +1,36 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, Image as ImageIcon, Eye, RefreshCw, Trash2, Pencil, FolderOpen } from "lucide-react";
-import { deletePhoto, getPhoto, savePhoto } from "@/lib/photos/repository";
+import {
+  Camera,
+  Image as ImageIcon,
+  Eye,
+  RefreshCw,
+  Trash2,
+  Pencil,
+  FolderOpen,
+} from "lucide-react";
+import {
+  deletePhoto,
+  getPhoto,
+  replacePhotoEvidence,
+  savePhoto,
+} from "@/lib/photos/repository";
 import { watermarkImage } from "@/lib/photos/watermark";
 import { downloadBlob } from "@/lib/export/folder";
 import { PhotoAnnotator } from "@/components/cri/PhotoAnnotator";
-import type { Address } from "@/lib/cri/types";
+import type { Address, GpsCoords } from "@/lib/cri/types";
 import { TimestampCamera } from "@/components/cri/TimestampCamera";
+
+function captureDateFromFile(file: File): Date {
+  if (Number.isFinite(file.lastModified) && file.lastModified > 0) {
+    const date = new Date(file.lastModified);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return new Date();
+}
+
+function coordinateText(gps: GpsCoords | null | undefined): string | undefined {
+  return gps ? `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}` : undefined;
+}
 
 export function PhotoSlot({
   criId,
@@ -13,6 +38,7 @@ export function PhotoSlot({
   label,
   hint,
   address,
+  gps,
   watermarkEnabled,
   saveToGallery,
   hasPhoto,
@@ -23,6 +49,7 @@ export function PhotoSlot({
   label: string;
   hint?: string;
   address: Address;
+  gps?: GpsCoords | null;
   watermarkEnabled: boolean;
   saveToGallery: boolean;
   hasPhoto: boolean;
@@ -32,22 +59,22 @@ export function PhotoSlot({
   const [viewing, setViewing] = useState(false);
   const [annotating, setAnnotating] = useState<Blob | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const camRef = useRef<HTMLInputElement>(null);
-  const galRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let url: string | null = null;
     if (hasPhoto) {
-      void getPhoto(criId, slot).then((p) => {
-        if (p) {
-          url = URL.createObjectURL(p.blob);
+      void getPhoto(criId, slot).then((photo) => {
+        if (photo) {
+          url = URL.createObjectURL(photo.blob);
           setPreview(url);
         }
       });
     } else {
       setPreview(null);
     }
+
     return () => {
       if (url) URL.revokeObjectURL(url);
     };
@@ -56,16 +83,31 @@ export function PhotoSlot({
   async function handleFile(file: File | undefined) {
     if (!file) return;
     const scrollY = window.scrollY;
-    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
-    const blob = watermarkEnabled && isImage
-      ? await watermarkImage(file, { date: new Date(), address })
-      : file;
-    await savePhoto(criId, slot, blob);
+    const capturedAt = captureDateFromFile(file);
+    const isImage =
+      file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
+    const evidenceBlob =
+      watermarkEnabled && isImage
+        ? await watermarkImage(file, {
+            date: capturedAt,
+            address,
+            coordinates: coordinateText(gps),
+          })
+        : file;
+
+    await savePhoto(criId, slot, evidenceBlob, {
+      originalBlob: file,
+      capturedAt: capturedAt.toISOString(),
+      gps: gps ?? null,
+      address,
+      watermarked: watermarkEnabled && isImage,
+    });
     onChange(true);
-    if (saveToGallery) {
-      downloadBlob(`${slot}-${Date.now()}.jpg`, blob);
+
+    if (saveToGallery && isImage) {
+      downloadBlob(`${slot}-${capturedAt.toISOString().replace(/[:.]/g, "-")}.jpg`, evidenceBlob);
     }
-    // Restore scroll position after camera/gallery return (iOS/Android may jump).
+
     requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
     setTimeout(() => window.scrollTo({ top: scrollY }), 120);
   }
@@ -77,14 +119,13 @@ export function PhotoSlot({
   }
 
   async function openAnnotate() {
-    const p = await getPhoto(criId, slot);
-    if (p) setAnnotating(p.blob);
+    const photo = await getPhoto(criId, slot);
+    if (photo) setAnnotating(photo.blob);
   }
 
   async function handleAnnotatedSave(edited: Blob) {
-    await savePhoto(criId, slot, edited);
+    await replacePhotoEvidence(criId, slot, edited);
     setAnnotating(null);
-    // Force preview refresh.
     onChange(false);
     setTimeout(() => onChange(true), 0);
   }
@@ -103,48 +144,41 @@ export function PhotoSlot({
             onClick={() => setViewing(true)}
             className="block w-full overflow-hidden rounded-lg border border-border"
           >
-            <img src={preview} alt={label} loading="lazy" decoding="async" className="h-40 w-full object-cover" />
+            <img
+              src={preview}
+              alt={label}
+              loading="lazy"
+              decoding="async"
+              className="h-40 w-full object-cover"
+            />
           </button>
           <div className="grid grid-cols-2 gap-2">
             <SlotBtn icon={Eye} label="Voir" onClick={() => setViewing(true)} />
             <SlotBtn icon={Pencil} label="Annoter" onClick={() => void openAnnotate()} primary />
-            <SlotBtn
-              icon={RefreshCw}
-              label="Remplacer"
-              onClick={() => setCameraOpen(true)}
-            />
-            <SlotBtn icon={Trash2} label="Supprimer" onClick={handleDelete} danger />
+            <SlotBtn icon={RefreshCw} label="Remplacer" onClick={() => setCameraOpen(true)} />
+            <SlotBtn icon={Trash2} label="Supprimer" onClick={() => void handleDelete()} danger />
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-1.5">
-          <SlotBtn icon={Camera} label="Camera" onClick={() => setCameraOpen(true)} primary />
-          <SlotBtn icon={ImageIcon} label="Galerie" onClick={() => galRef.current?.click()} />
+          <SlotBtn icon={Camera} label="Caméra" onClick={() => setCameraOpen(true)} primary />
+          <SlotBtn icon={ImageIcon} label="Galerie" onClick={() => galleryRef.current?.click()} />
           <SlotBtn icon={FolderOpen} label="Fichiers" onClick={() => fileRef.current?.click()} />
         </div>
       )}
 
       <input
-        ref={camRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
-      />
-      <input
-        ref={galRef}
+        ref={galleryRef}
         type="file"
         accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
         className="hidden"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
+        onChange={(event) => void handleFile(event.target.files?.[0])}
       />
-      {/* Sélecteur Android complet : Galerie, Téléchargements, Fichiers, Documents, Drive… */}
       <input
         ref={fileRef}
         type="file"
         className="hidden"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
+        onChange={(event) => void handleFile(event.target.files?.[0])}
       />
 
       {viewing && preview && (
@@ -158,15 +192,20 @@ export function PhotoSlot({
         </div>
       )}
 
-
       <TimestampCamera
         open={cameraOpen}
         address={address}
         watermarkEnabled={watermarkEnabled}
         saveToGallery={saveToGallery}
         onCancel={() => setCameraOpen(false)}
-        onCapture={async (blob) => {
-          await savePhoto(criId, slot, blob);
+        onCapture={async (capture) => {
+          await savePhoto(criId, slot, capture.evidenceBlob, {
+            originalBlob: capture.originalBlob,
+            capturedAt: capture.capturedAt,
+            gps: capture.gps,
+            address: capture.address,
+            watermarked: capture.watermarked,
+          });
           onChange(true);
         }}
       />
@@ -175,7 +214,7 @@ export function PhotoSlot({
         <PhotoAnnotator
           blob={annotating}
           onCancel={() => setAnnotating(null)}
-          onSave={(b) => void handleAnnotatedSave(b)}
+          onSave={(blob) => void handleAnnotatedSave(blob)}
         />
       )}
     </div>

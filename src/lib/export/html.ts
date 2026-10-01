@@ -1,5 +1,6 @@
 import type { CriRecord } from "@/lib/cri/types";
 import { getPhoto } from "@/lib/photos/repository";
+import { cleanAddressText } from "@/lib/geo/address-format";
 
 // Libellés EXACTS issus du template officiel Orange (onglets PHOTOS OI / MESURES / RDSUR / PHOTOS OC / PLAN).
 // Ne JAMAIS modifier sans nouvelle version officielle.
@@ -25,7 +26,8 @@ const OFFICIAL_PHOTO_LABELS: Record<string, string> = {
 };
 
 function esc(v: unknown): string {
-  return String(v ?? "")
+  const text = v === "na" || v === "N/A" ? "N/A" : String(v ?? "");
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -34,7 +36,7 @@ function esc(v: unknown): string {
 function fmtValue(v: unknown): string {
   if (v === true) return "Oui";
   if (v === false) return "Non";
-  if (v === "na") return "N/A";
+  if (v === "na" || v === "N/A") return "N/A";
   if (v == null || v === "") return "";
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
     const d = new Date(v);
@@ -56,12 +58,12 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
   const v = (id: string) => fmtValue(values[id]);
   const raw = (id: string) => esc(values[id] ?? "");
   const ref = raw("referenceOrange") || esc(cri.reference);
-  const commune = cleanGeoText(raw("commune") || esc(cri.address.commune ?? ""));
+  const commune = cleanAddressText(raw("commune") || esc(cri.address.commune ?? ""));
   const cp = raw("codePostal") || esc(cri.address.postalCode ?? "");
   const voie = raw("nomVoie") || esc(cri.address.street ?? "");
   const numero = raw("numeroVoie") || esc(cri.address.streetNumber ?? "");
-  const addressA = cleanGeoText(raw("adresseA"));
-  const addressB = cleanGeoText(raw("adresseB"));
+  const addressA = cleanAddressText(raw("adresseA"));
+  const addressB = cleanAddressText(raw("adresseB"));
   const gpsA = raw("gpsCoordsA");
   const gpsB = raw("gpsCoordsB");
 
@@ -202,8 +204,8 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
       </div>
     </div>
     <div class="grid2" style="margin-top:6px">
-      <div class="lab">En ligne Déf/Rép. localisé au :</div><div class="box">${v("defautLocalise")}</div>
-      <div class="lab">Chez le client Déf/Rép. localisé au :</div><div class="box">${v("defautLocaliseClient")}</div>
+      <div class="lab">Défaut/réparation localisé au :</div><div class="box">${v("defautLocalise")}</div>
+      <div class="lab"></div><div class="box" style="border:0"></div>
       <div class="lab">Référence NRO/PM/PB/CABLE :</div><div class="box span3">${raw("referenceContenant")}</div>
       <div class="lab">Cause principale du défaut :</div><div class="box span3">${v("causePrincipale")}</div>
       <div class="lab">N° du Tronçon :</div><div class="box">${raw("numTroncon")}</div>
@@ -270,17 +272,6 @@ ${photoPages("Photos SAV OC", ["photo_oc_defaut", "photo_oc_apres_def", "photo_o
 ${extraSlots.length ? photoPages("Photos supplémentaires (PHOTOS OI)", extraSlots) : ""}
 </body></html>`;
   return new Blob([html], { type: "text/html;charset=utf-8" });
-}
-
-function cleanGeoText(text: string): string {
-  return text
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => {
-      const n = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      return !/villefr.nche[\s-]*(de[\s-]*)?rouergue/.test(n);
-    })
-    .join(", ");
 }
 
 function blobToDataUrl(b: Blob): Promise<string> {

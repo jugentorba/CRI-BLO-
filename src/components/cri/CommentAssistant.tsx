@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, Loader2, CloudOff, Cloud, RefreshCw, Check } from "lucide-react";
-import { composeOfflineComment, STYLE_INSTRUCTIONS, SYSTEM_PROMPT, type CommentStyle, type CommentContext } from "@/lib/ai/glossary";
+import { improveComment } from "@/lib/ai/comment.functions";
+import { composeOfflineComment, type CommentStyle, type CommentContext } from "@/lib/ai/glossary";
 import { rememberPattern, topPatterns } from "@/lib/ai/patterns";
 import { useOnline } from "@/hooks/use-online";
 import { cn } from "@/lib/utils";
-import { getSettings } from "@/lib/settings/repository";
-import { buildAiConfig, callIndependentAi } from "@/lib/ai/independent";
 
 const STYLES: { id: CommentStyle; label: string }[] = [
   { id: "simple", label: "Simple" },
@@ -50,33 +49,22 @@ export function CommentAssistant({
         .filter(([, v]) => v !== undefined && v !== null && v !== "")
         .map(([k, v]) => `${k}: ${String(v)}`)
         .join("\n");
-      const settings = await getSettings();
-      const aiConfig = buildAiConfig(settings);
-      if (!aiConfig) {
+      const res = await improveComment({
+        data: { notes, style: nextStyle, context: ctxLines || undefined, patterns },
+      });
+      if (lastKey.current !== key) return;
+      if (res.ok) {
+        setResult(res.text);
+        setSource("ia");
+      } else {
         setResult(offlineText);
         setSource("local");
-        setError("Aucun fournisseur IA configuré — rédaction hors-ligne utilisée.");
-        return;
+        setError(`${res.message} — rédaction hors-ligne utilisée.`);
       }
-      const prompt = [
-        STYLE_INSTRUCTIONS[nextStyle],
-        ctxLines ? `Contexte CRI BLO :\n${ctxLines}` : "",
-        patterns.length
-          ? `Exemples de formulations déjà utilisées (style seulement, ne copie aucune donnée) :\n${patterns.join("\n")}`
-          : "",
-        `Notes brutes :\n${notes}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      const aiText = await callIndependentAi(aiConfig, prompt, { system: SYSTEM_PROMPT });
-      if (lastKey.current !== key) return;
-      setResult(aiText);
-      setSource("ia");
-    } catch (e) {
+    } catch {
       setResult(composeOfflineComment(notes, nextStyle, context ?? {}));
       setSource("local");
-      const detail = e instanceof Error ? e.message : "Assistant en ligne injoignable.";
-      setError(`${detail} — rédaction hors-ligne utilisée.`);
+      setError("Assistant en ligne injoignable — rédaction hors-ligne utilisée.");
     } finally {
       setLoading(false);
     }

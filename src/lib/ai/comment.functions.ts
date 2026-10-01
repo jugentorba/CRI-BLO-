@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { callGemini, DEFAULT_GEMINI_MODEL } from "@/lib/ai/gemini";
+import { getSettings } from "@/lib/settings/repository";
 
 const schema = z.object({
   notes: z.string().min(1).max(4000),
@@ -7,13 +9,21 @@ const schema = z.object({
   patterns: z.array(z.string().max(500)).max(8).optional(),
 });
 
-// The APK is a client-only bundle and must never contain a private AI key.
-// CommentAssistant falls back to the local composition engine on failure.
+// Credentials remain device-local, shared with the main assistant.
 export async function improveComment(input: { data: z.infer<typeof schema> }) {
-  schema.parse(input.data);
-  return {
-    ok: false as const,
-    status: 401,
-    message: "Assistant IA en ligne indisponible dans la version APK.",
-  };
+  const data = schema.parse(input.data);
+  const settings = await getSettings();
+  const apiKey = settings.aiApiKey?.trim();
+  if (!apiKey) return { ok: false as const, status: 401, message: "Ajoutez votre clé Gemini dans Paramètres > Assistant IA." };
+  try {
+    const text = await callGemini({
+      apiKey,
+      model: settings.aiModel || DEFAULT_GEMINI_MODEL,
+      prompt: `Style : ${data.style}\nNotes : ${data.notes}\nContexte : ${data.context ?? ""}`,
+      systemInstruction: "Rédige un commentaire CRI BLO en français. N'invente aucun fait. Conserve exactement les références, nombres, mesures et lieux. Réponds uniquement avec le commentaire final.",
+    });
+    return { ok: true as const, status: 200, text };
+  } catch (error) {
+    return { ok: false as const, status: 503, message: error instanceof Error ? error.message : "Gemini indisponible." };
+  }
 }
