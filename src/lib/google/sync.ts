@@ -9,12 +9,12 @@ export async function googleDriveSyncAvailable(): Promise<boolean> {
   return isGoogleDriveConfigured() && !!(await getGoogleProfile());
 }
 
-export async function uploadGoogleDeviceSnapshot(): Promise<{ size: number; at: string }> {
+export async function uploadGoogleDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {
   if (!(await googleDriveSyncAvailable())) {
     throw new Error("Connectez votre compte Google Drive dans Paramètres.");
   }
   const blob = await exportSyncSnapshot();
-  await uploadGoogleDriveFile(SYNC_FILE, blob);
+  await uploadGoogleDriveFile(SYNC_FILE, blob, interactive);
   return { size: blob.size, at: new Date().toISOString() };
 }
 
