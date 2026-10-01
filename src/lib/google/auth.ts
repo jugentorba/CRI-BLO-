@@ -100,8 +100,15 @@ export async function loginGoogleDrive(): Promise<string> {
   return requestToken("select_account");
 }
 
-export async function getGoogleAccessToken(): Promise<string> {
-  return cachedToken() ?? requestToken("");
+export async function getGoogleAccessToken(interactive = true): Promise<string> {
+  const token = cachedToken();
+  if (token) return token;
+  if (!interactive) throw new Error("Connexion Google requise.");
+  return requestToken("");
+}
+
+export function hasCachedGoogleAccessToken(): boolean {
+  return !!cachedToken();
 }
 
 export async function logoutGoogleDrive(): Promise<void> {
