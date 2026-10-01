@@ -128,9 +128,9 @@ export async function logoutGoogleDrive(): Promise<void> {
   }
 }
 
-export async function getGoogleProfile(): Promise<{ email: string; name: string } | null> {
+export async function getGoogleProfile(interactive = true): Promise<{ email: string; name: string } | null> {
   try {
-    const token = await getGoogleAccessToken();
+    const token = await getGoogleAccessToken(interactive);
     const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${token}` },
     });
