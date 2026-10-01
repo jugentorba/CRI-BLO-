@@ -94,7 +94,7 @@ jobs:
         with:
           name: CRI-BLO-debug-test
           path: |
-            output/CRI-BLO.apk
+            output/CRI-BLO-TEST-DEBUG.apk
             output/CRI-BLO-PWA.zip
           if-no-files-found: error
           retention-days: 30
