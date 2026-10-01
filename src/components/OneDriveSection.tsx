@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Cloud, CloudOff, LogIn, LogOut, RefreshCw, AlertTriangle, Save } from "lucide-react";
+import { Cloud, CloudOff, LogIn, LogOut, RefreshCw, AlertTriangle } from "lucide-react";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
-import { getAzureClientId, isOneDriveConfigured, setRuntimeAzureClientId } from "@/lib/onedrive/config";
+import { isOneDriveConfigured } from "@/lib/onedrive/config";
 import { getCurrentAccount, login, logout } from "@/lib/onedrive/auth";
 import { ensureAppFolders, getSignedInProfile } from "@/lib/onedrive/graph";
 import { drainQueue, queueSize } from "@/lib/onedrive/queue";
@@ -14,8 +14,7 @@ export function OneDriveSection({
   settings: AppSettings;
   onSettings: (s: AppSettings) => void;
 }) {
-  const [configured, setConfigured] = useState(isOneDriveConfigured());
-  const [clientId, setClientId] = useState(getAzureClientId());
+  const configured = isOneDriveConfigured();
   const [account, setAccount] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "connect" | "disconnect" | "sync">(null);
   const [pending, setPending] = useState(0);
@@ -35,13 +34,6 @@ export function OneDriveSection({
   useEffect(() => {
     if (configured) void refreshStatus();
   }, [configured]);
-
-  async function saveClientId() {
-    setRuntimeAzureClientId(clientId);
-    const ok = isOneDriveConfigured();
-    setConfigured(ok);
-    setErr(ok ? null : "Client ID Microsoft manquant.");
-  }
 
   async function toggleSync(enabled: boolean) {
     const next = await saveSettings({ cloudSyncEnabled: enabled, cloudProvider: "onedrive" });
@@ -103,7 +95,7 @@ export function OneDriveSection({
           <div>
             <div className="font-semibold">Configuration OneDrive requise</div>
             <div className="mt-0.5 opacity-80">
-              Collez le Client ID Microsoft/Azure de CRI BLO. Il s’agit d’un identifiant OAuth public, pas d’un mot de passe.
+              La configuration Microsoft appartient à l'application CRI BLO. L'utilisateur n'a rien à saisir.
             </div>
           </div>
         </div>
@@ -114,25 +106,6 @@ export function OneDriveSection({
           <Cloud className="h-4 w-4 text-primary" /> Microsoft OneDrive
         </div>
 
-        {!configured && (
-          <div className="mb-3 flex gap-2">
-            <input
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              placeholder="Microsoft / Azure Client ID"
-              autoCapitalize="none"
-              autoCorrect="off"
-              className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-xs"
-            />
-            <button
-              type="button"
-              onClick={() => void saveClientId()}
-              className="flex h-10 items-center gap-1 rounded-xl border border-border px-3 text-xs font-bold"
-            >
-              <Save className="h-3.5 w-3.5" /> Enregistrer
-            </button>
-          </div>
-        )}
 
         {/* ON / OFF */}
         <label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
@@ -198,7 +171,7 @@ export function OneDriveSection({
               className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-bold text-primary-foreground transition active:scale-95 disabled:opacity-50"
             >
               <LogIn className="h-4 w-4" />
-              {busy === "connect" ? "Connexion…" : "Connecter OneDrive"}
+              {busy === "connect" ? "Connexion…" : "Connecter mon OneDrive"}
             </button>
           ) : (
             <>
