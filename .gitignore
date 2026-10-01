@@ -30,3 +30,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Android signing material (never commit)
+*.jks
+*.keystore
+release-signing/

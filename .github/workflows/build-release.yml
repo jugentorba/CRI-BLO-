@@ -17,13 +17,9 @@ jobs:
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          SP: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
           KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$KS" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
-          test -n "$SP" || { echo "Missing ANDROID_STORE_PASSWORD"; exit 1; }
-          test -n "$KA" || { echo "Missing ANDROID_KEY_ALIAS"; exit 1; }
           test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
           test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "Missing repository variable GOOGLE_WEB_CLIENT_ID"; exit 1; }
 
@@ -111,29 +107,39 @@ jobs:
       - name: Build signed release APK
         working-directory: source/android
         env:
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon             -Pandroid.injected.signing.store.file="$PWD/criblo-release.jks"             -Pandroid.injected.signing.store.password="$STORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$KEY_ALIAS"             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$PWD/criblo-release.jks" \
+            -Pandroid.injected.signing.store.password="$KEY_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="criblo" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
-      - name: Verify APK is signed
+      - name: Verify APK signature and certificate
         working-directory: source
         run: |
           APK="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
-          "${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner" verify --verbose "$APK"
+          APKSIGNER="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$APKSIGNER" verify --print-certs "$APK" | tee android/app/build/outputs/apk/release/signing-certificate.txt
+          sha256sum "$APK" | tee android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256
 
       - name: Collect signed APK
         run: |
           mkdir -p output
           cp source/android/app/build/outputs/apk/release/app-release.apk output/CRI-BLO-SIGNED.apk
+          cp source/android/app/build/outputs/apk/release/signing-certificate.txt output/signing-certificate.txt
+          cp source/android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256 output/CRI-BLO-SIGNED.sha256
 
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
         with:
           name: CRI-BLO-SIGNED
-          path: output/CRI-BLO-SIGNED.apk
+          path: |
+            output/CRI-BLO-SIGNED.apk
+            output/signing-certificate.txt
+            output/CRI-BLO-SIGNED.sha256
           if-no-files-found: error
           retention-days: 30
