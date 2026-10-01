@@ -122,6 +122,7 @@ async function runTx<T>(
     transaction.oncomplete = () => {
       if (mode === "readwrite") {
         try {
+          if (store !== STORE_SETTINGS) localStorage.setItem("criblo.cloudBackupDirty", "1");
           window.dispatchEvent(new CustomEvent("criblo:data-changed", { detail: { store } }));
         } catch {
           /* noop */
