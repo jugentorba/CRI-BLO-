@@ -1,29 +1,12 @@
 // OneDrive / Microsoft Graph configuration.
-// The Azure Client ID is public OAuth metadata. It can come from the build
-// environment or be entered once in CRI BLO settings on the device.
+// OAuth Client ID belongs to the CRI BLO application build.
+// End users only sign in with their own Microsoft account.
 
-const ENV_AZURE_CLIENT_ID =
+const AZURE_CLIENT_ID =
   (import.meta.env.VITE_AZURE_CLIENT_ID as string | undefined)?.trim() || "";
 
-const STORAGE_KEY = "criblo.azureClientId";
-
 export function getAzureClientId(): string {
-  if (ENV_AZURE_CLIENT_ID) return ENV_AZURE_CLIENT_ID;
-  try {
-    return localStorage.getItem(STORAGE_KEY)?.trim() || "";
-  } catch {
-    return "";
-  }
-}
-
-export function setRuntimeAzureClientId(value: string): void {
-  try {
-    const v = value.trim();
-    if (v) localStorage.setItem(STORAGE_KEY, v);
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* noop */
-  }
+  return AZURE_CLIENT_ID;
 }
 
 export const AZURE_AUTHORITY = "https://login.microsoftonline.com/common";
@@ -36,7 +19,7 @@ export const APP_FOLDERS = {
 } as const;
 
 export function isOneDriveConfigured(): boolean {
-  return getAzureClientId().length > 0;
+  return AZURE_CLIENT_ID.length > 0;
 }
 
 export function currentRedirectUri(): string {
