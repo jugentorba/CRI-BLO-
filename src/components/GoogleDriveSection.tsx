@@ -68,7 +68,7 @@ export function GoogleDriveSection({
     try {
       const r = await uploadGoogleDeviceSnapshot();
       clearCloudBackupDirty();
-      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true, cloudAutoBackupEnabled: true, lastSyncAt: r.at });
+      const next = await saveSettings({ cloudProvider: "google-drive", cloudSyncEnabled: true, cloudAutoBackupEnabled: true, lastCloudBackupAt: r.at });
       onSettings(next);
       setMessage(`Sauvegarde Google Drive terminée (${Math.max(1, Math.round(r.size / 1024))} Ko).`);
     } catch (e) {
