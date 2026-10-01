@@ -6,7 +6,9 @@ import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
-import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { GoogleDriveSection } from "@/components/GoogleDriveSection";
+import { LocalBackupSection } from "@/components/LocalBackupSection";
+import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
 import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/parametres")({
@@ -166,12 +168,16 @@ function Parametres() {
           </div>
         </section>
 
+        <LocalBackupSection />
+
         <OneDriveSection settings={settings} onSettings={setSettings} />
+
+        <GoogleDriveSection settings={settings} onSettings={setSettings} />
 
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Synchronisation multi-appareils</h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="text-xs text-muted-foreground">Sauvegardez vos données Criblo dans votre OneDrive puis restaurez-les sur votre téléphone ou tablette connectés au même compte.</p>
+            <p className="text-xs text-muted-foreground">Sauvegardez vos données CRI BLO dans le fournisseur cloud sélectionné (OneDrive ou Google Drive), puis restaurez-les sur un autre appareil.</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" disabled={syncBusy} onClick={async () => {
                 setSyncBusy(true); setSyncMessage(null);
