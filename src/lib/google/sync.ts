@@ -5,12 +5,12 @@ import { downloadGoogleDriveFile, uploadGoogleDriveFile } from "./drive";
 
 const SYNC_FILE = "criblo-device-sync.json";
 
-export async function googleDriveSyncAvailable(): Promise<boolean> {
-  return isGoogleDriveConfigured() && !!(await getGoogleProfile());
+export async function googleDriveSyncAvailable(interactive = true): Promise<boolean> {
+  return isGoogleDriveConfigured() && !!(await getGoogleProfile(interactive));
 }
 
 export async function uploadGoogleDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {
-  if (!(await googleDriveSyncAvailable())) {
+  if (!(await googleDriveSyncAvailable(interactive))) {
     throw new Error("Connectez votre compte Google Drive dans Paramètres.");
   }
   const blob = await exportSyncSnapshot();
