@@ -87,12 +87,12 @@ jobs:
           ./gradlew assembleDebug --no-daemon
 
       - name: Collect APK
-        run: cp source/android/app/build/outputs/apk/debug/app-debug.apk output/CRI-BLO.apk
+        run: cp source/android/app/build/outputs/apk/debug/app-debug.apk output/CRI-BLO-TEST-DEBUG.apk
 
       - name: Upload CRI-BLO files
         uses: actions/upload-artifact@v4
         with:
-          name: CRI-BLO-downloads
+          name: CRI-BLO-debug-test
           path: |
             output/CRI-BLO.apk
             output/CRI-BLO-PWA.zip
