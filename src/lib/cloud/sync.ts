@@ -8,10 +8,10 @@ import {
   restoreGoogleDeviceSnapshot,
 } from "@/lib/google/sync";
 
-export async function uploadDeviceSnapshot(): Promise<{ size: number; at: string }> {
+export async function uploadDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {
   const settings = await getSettings();
-  if (settings.cloudProvider === "google-drive") return uploadGoogleDeviceSnapshot();
-  return uploadOneDriveSnapshot();
+  if (settings.cloudProvider === "google-drive") return uploadGoogleDeviceSnapshot(interactive);
+  return uploadOneDriveSnapshot(interactive);
 }
 
 export async function restoreDeviceSnapshot(): Promise<{ size: number }> {
