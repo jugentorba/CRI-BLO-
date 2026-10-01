@@ -114,6 +114,8 @@ function RootComponent() {
 
   useEffect(() => {
     let cancelled = false;
+    let autoTimer: number | null = null;
+
     const tryDrain = async () => {
       try {
         const [{ drainQueue }, { getSettings }] = await Promise.all([
@@ -121,18 +123,50 @@ function RootComponent() {
           import("@/lib/settings/repository"),
         ]);
         const s = await getSettings();
-        if (cancelled || !s.cloudSyncEnabled) return;
+        if (cancelled || !s.cloudSyncEnabled || s.cloudProvider !== "onedrive") return;
         await drainQueue();
       } catch {
         /* noop */
       }
     };
+
+    const tryAutoBackup = async () => {
+      if (cancelled) return;
+      try {
+        const { maybeRunAutomaticCloudBackup } = await import("@/lib/cloud/auto-backup");
+        await maybeRunAutomaticCloudBackup();
+      } catch {
+        /* Automatic backup must never interrupt field work. */
+      }
+    };
+
+    const scheduleAutoBackup = () => {
+      if (autoTimer !== null) window.clearTimeout(autoTimer);
+      autoTimer = window.setTimeout(() => void tryAutoBackup(), 90_000);
+    };
+
     void tryDrain();
-    const onOnline = () => void tryDrain();
+    void tryAutoBackup();
+
+    const onOnline = () => {
+      void tryDrain();
+      void tryAutoBackup();
+    };
+    const onDataChanged = () => scheduleAutoBackup();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") void tryAutoBackup();
+    };
+
     window.addEventListener("online", onOnline);
+    window.addEventListener("criblo:data-changed", onDataChanged);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
+      if (autoTimer !== null) window.clearTimeout(autoTimer);
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("criblo:data-changed", onDataChanged);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
