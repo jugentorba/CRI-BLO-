@@ -67,9 +67,21 @@ export function AppUpdateSection() {
         )}
 
         {result && !result.updateAvailable && (
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-success/30 bg-success/10 p-3 text-xs font-semibold text-success">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            Vous avez déjà la dernière version ({result.latestVersion}).
+          <div className="mt-3 rounded-xl border border-success/30 bg-success/10 p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-success">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              Vous avez déjà la dernière version ({result.latestVersion}).
+            </div>
+            {result.platform === "android" && result.downloadUrl && (
+              <button
+                type="button"
+                onClick={() => openUpdate(result)}
+                className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-success/30 bg-background text-sm font-bold text-foreground transition active:scale-95"
+              >
+                <Download className="h-4 w-4" />
+                Réinstaller {result.downloadName ?? "CRI-BLO.apk"}
+              </button>
+            )}
           </div>
         )}
 
