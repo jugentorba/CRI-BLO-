@@ -85,4 +85,92 @@ requireText(
   "Generated Android project must expose the downloaded APK through a FileProvider",
 );
 
+
+/* Broader CRI BLO regression audit: protect previously requested field/export behavior. */
+requireText(
+  "src/lib/export/xlsx.ts",
+  /commentaires:\s*\{\s*sheet:\s*"FICHE SAV BLO",\s*cell:\s*"A52"/,
+  "Comments must be written into the official Excel comment area",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /sheet:\s*"PHOTOS OI"[\s\S]*row:\s*37\s*\+/,
+  "Supplementary photos must be embedded in PHOTOS OI below the official four slots",
+);
+forbidText(
+  "src/lib/export/zip.ts",
+  /photo_extra_\d+/,
+  "Supplementary Photos OI must not be duplicated as separate ZIP files",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /photo_mesures_loc1[\s\S]*photo_mesures_loc2/,
+  "MESURES must retain its two requested photo slots",
+);
+forbidText(
+  "src/lib/cri/schema.ts",
+  /photo_mesures_loc3/,
+  "MESURES must stay limited to two photo slots",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /longueurCable[\s\S]*type:\s*"number"/,
+  "Cable length field must remain numeric",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /longueurCable:\s*\{\s*sheet:\s*"FICHE SAV BLO",\s*cell:\s*"G31"/,
+  "Cable length must remain mapped to the official Excel cell",
+);
+requireText(
+  "src/lib/attachments/repository.ts",
+  /await file\.arrayBuffer\(\)[\s\S]*new Blob\(\[bytes\]/,
+  "USB/external attachments must be copied into local IndexedDB storage immediately",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /setReviewing\(true\);[\s\S]{0,160}void handleSaveDraft\(\);/,
+  "The first Save tap must open finalization and persist the draft",
+);
+requireText(
+  "src/lib/export/naming.ts",
+  /CRI_BLO_\$\{safe\(commune\)\}_\$\{safe\(reference\)\}/,
+  "Excel/PDF filenames must remain commune + dossier",
+);
+requireText(
+  "src/lib/export/naming.ts",
+  /\$\{safe\(reference\)\}_\$\{safe\(commune\)\}\.zip/,
+  "ZIP filename must remain dossier + commune",
+);
+requireText(
+  "src/components/cri/ExtraPhotosBatchAdd.tsx",
+  /const files = Array\.from\(fileList\)\.filter/,
+  "Photos OI batch import must reject non-image files before storing them as photo slots",
+);
+requireText(
+  "src/components/cri/ExtraPhotosBatchAdd.tsx",
+  /accept="image\/\*"/,
+  "Photos OI picker must advertise image-only input",
+);
+requireText(
+  "src/components/cri/ExtraPhotosSection.tsx",
+  /photo_extra_\$\{count \+ 1\}/,
+  "Supplementary Photos OI must remain dynamically extendable",
+);
+requireText(
+  ".github/workflows/build-release.yml",
+  /ANDROID_KEYSTORE_BASE64[\s\S]*ANDROID_KEY_PASSWORD/,
+  "Production APK updates must keep permanent signing credentials",
+);
+requireText(
+  "capacitor.config.json",
+  /"appId":\s*"com\.criblo\.app"/,
+  "Android package identity must stay stable so updates preserve app data",
+);
+forbidText(
+  "scripts/patch-android-updater.mjs",
+  /ACTION_DELETE|\buninstall\b/i,
+  "In-app updater must install over the existing app and never uninstall it",
+);
+
 console.log("CRI BLO repair regression checks passed.");
