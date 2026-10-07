@@ -23,7 +23,7 @@ import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repo
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { LocalBackupSection } from "@/components/LocalBackupSection";
-import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
+import { isOneDriveConfigured } from "@/lib/onedrive/config";
 import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS, testGeminiConnection } from "@/lib/ai/gemini";
 
 export const Route = createFileRoute("/parametres")({
@@ -42,8 +42,6 @@ function Parametres() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [aiTestBusy, setAiTestBusy] = useState(false);
   const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
 
@@ -98,43 +96,6 @@ function Parametres() {
       /* Sélecteur annulé. */
     } finally {
       setFolderBusy(false);
-    }
-  }
-
-  async function backupToCloud() {
-    setSyncBusy(true);
-    setSyncMessage(null);
-    try {
-      const result = await uploadDeviceSnapshot();
-      setSyncMessage(`Synchronisé ${Math.round(result.size / 1024)} Ko.`);
-      await patchSettings({ cloudSyncEnabled: true, lastSyncAt: result.at });
-    } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "Synchronisation impossible.");
-    } finally {
-      setSyncBusy(false);
-    }
-  }
-
-  async function restoreFromCloud() {
-    if (
-      !confirm(
-        "Restaurer les données cloud sur cet appareil ? Les données locales portant les mêmes identifiants seront remplacées.",
-      )
-    ) {
-      return;
-    }
-
-    setSyncBusy(true);
-    setSyncMessage(null);
-    try {
-      const result = await restoreDeviceSnapshot();
-      setSyncMessage(
-        `Restauration terminée (${Math.round(result.size / 1024)} Ko). Rechargez l'application.`,
-      );
-    } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "Restauration impossible.");
-    } finally {
-      setSyncBusy(false);
     }
   }
 
@@ -243,46 +204,9 @@ function Parametres() {
 
         <LocalBackupSection />
 
-        <OneDriveSection settings={settings} onSettings={setSettings} />
-
-        <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
-            Synchronisation multi-appareils
-          </h2>
-          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="text-xs text-muted-foreground">
-              Sauvegardez vos données CRI-BLO dans OneDrive puis restaurez-les sur un autre appareil connecté au même compte.
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={syncBusy}
-                onClick={() => void backupToCloud()}
-                className="h-10 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-50"
-              >
-                {syncBusy ? "…" : "Sauvegarder dans le cloud"}
-              </button>
-              <button
-                type="button"
-                disabled={syncBusy}
-                onClick={() => void restoreFromCloud()}
-                className="h-10 rounded-xl border border-border bg-background text-xs font-bold disabled:opacity-50"
-              >
-                Restaurer du cloud
-              </button>
-            </div>
-            {settings.lastSyncAt && (
-              <div className="mt-2 text-[10px] text-muted-foreground">
-                Dernière synchro : {new Date(settings.lastSyncAt).toLocaleString("fr-FR")}
-              </div>
-            )}
-            {syncMessage && (
-              <div className="mt-2 rounded-lg bg-primary/5 p-2 text-[10px] text-muted-foreground">
-                {syncMessage}
-              </div>
-            )}
-          </div>
-        </section>
+        {isOneDriveConfigured() && (
+          <OneDriveSection settings={settings} onSettings={setSettings} />
+        )}
 
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">
