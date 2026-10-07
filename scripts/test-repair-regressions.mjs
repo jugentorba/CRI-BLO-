@@ -39,6 +39,22 @@ requireText(
   "The Android production build must retain precise-location permission",
 );
 
+forbidText(
+  "src/components/PermissionSetupDialog.tsx",
+  /navigator\.geolocation/,
+  "Permission onboarding must not bypass the native GPS implementation",
+);
+requireText(
+  "src/components/PermissionSetupDialog.tsx",
+  /getCurrentPosition/,
+  "Permission onboarding must use the same native-aware GPS path as CRI capture",
+);
+forbidText(
+  ".github/workflows/build-release.yml",
+  /Missing repository variable GOOGLE_WEB_CLIENT_ID|test -n "\$GOOGLE_WEB_CLIENT_ID"/,
+  "Optional Google configuration must never block a signed CRI BLO release",
+);
+
 requireText(
   "package.json",
   /"@capacitor\/geolocation"\s*:/,
