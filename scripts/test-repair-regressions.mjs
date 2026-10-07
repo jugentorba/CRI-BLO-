@@ -236,6 +236,23 @@ requireText(
   "GPS capture must remain available independently for A, B and defect",
 );
 
+/* One production APK pipeline: Pages must never create a second signed Android version. */
+forbidText(
+  ".github/workflows/pages.yml",
+  /cap add android|assembleRelease|ANDROID_KEYSTORE_BASE64|CRI-BLO\.apk/,
+  "Pages must deploy only the PWA; build-release.yml is the single production APK builder",
+);
+requireText(
+  ".github/workflows/build-release.yml",
+  /downloads\/CRI-BLO\.apk/,
+  "Signed release workflow must refresh the repository's direct APK download",
+);
+requireText(
+  ".github/workflows/build-release.yml",
+  /downloads\/CRI-BLO-PWA\.zip/,
+  "Signed release workflow must refresh the downloadable PWA package alongside the APK",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
