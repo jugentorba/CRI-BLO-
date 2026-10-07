@@ -23,7 +23,7 @@ function filledNumbers(photos: Record<string, string>): number[] {
  * Section « Photos supplémentaires (PHOTOS OI) ».
  * Nombre de photos, ajout multiple, suppression / remplacement unitaire,
  * réordonnancement. Les emplacements restent toujours photo_extra_1..N sans
- * trou, ce qui garantit l'export inchangé (feuille PHOTOS OI + dossier ZIP).
+ * trou. Ces photos sont exportées uniquement dans la feuille PHOTOS OI du classeur Excel.
  */
 export function ExtraPhotosSection({
   criId,
