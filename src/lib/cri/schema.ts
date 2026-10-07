@@ -51,7 +51,7 @@ export const CRI_SECTIONS: SectionDef[] = [
         id: "ripZone",
         label: "RIP ou zone AMII (nom si RIP)",
         type: "choice",
-        options: ["RIP", "AMI"],
+        options: ["RIP", "AMII"],
         freeTextLabel: "Nom (si RIP)",
       },
       { id: "oiOc", label: "OI/OC ?", type: "choice", options: ["OI", "OC"] },
