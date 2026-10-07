@@ -78,6 +78,12 @@ jobs:
           npx cap sync android
           node scripts/patch-android-updater.mjs
 
+      - name: Package downloadable PWA
+        run: |
+          mkdir -p output
+          cd source
+          zip -qr ../output/CRI-BLO-PWA.zip dist
+
       - name: Set monotonically increasing app version
         working-directory: source
         run: |
@@ -147,6 +153,7 @@ jobs:
           cp source/android/app/build/outputs/apk/release/app-release.apk output/CRI-BLO.apk
           cp source/android/app/build/outputs/apk/release/signing-certificate.txt output/signing-certificate.txt
           cp source/android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256 output/CRI-BLO-SIGNED.sha256
+          test -s output/CRI-BLO-PWA.zip
 
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
@@ -156,6 +163,7 @@ jobs:
             output/CRI-BLO.apk
             output/signing-certificate.txt
             output/CRI-BLO-SIGNED.sha256
+            output/CRI-BLO-PWA.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -165,7 +173,42 @@ jobs:
         run: |
           TAG="v${VERSION_NAME}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG"               output/CRI-BLO.apk               output/signing-certificate.txt               output/CRI-BLO-SIGNED.sha256               --repo "$GITHUB_REPOSITORY"               --clobber
+            gh release upload "$TAG" \
+              output/CRI-BLO.apk \
+              output/CRI-BLO-PWA.zip \
+              output/signing-certificate.txt \
+              output/CRI-BLO-SIGNED.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
           else
-            gh release create "$TAG"               output/CRI-BLO.apk               output/signing-certificate.txt               output/CRI-BLO-SIGNED.sha256               --repo "$GITHUB_REPOSITORY"               --title "CRI-BLO ${VERSION_NAME}"               --notes "Signed CRI-BLO Android release. The in-app updater can install this APK over the existing app when the signing certificate matches."
+            gh release create "$TAG" \
+              output/CRI-BLO.apk \
+              output/CRI-BLO-PWA.zip \
+              output/signing-certificate.txt \
+              output/CRI-BLO-SIGNED.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "CRI-BLO ${VERSION_NAME}" \
+              --notes "Signed CRI-BLO Android release. The in-app updater can install this APK over the existing app when the signing certificate matches."
+          fi
+
+      - name: Checkout main for direct downloads
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: publish
+
+      - name: Refresh direct APK and PWA downloads
+        run: |
+          cd publish
+          git fetch origin main
+          git reset --hard origin/main
+          mkdir -p downloads
+          cp ../output/CRI-BLO.apk downloads/CRI-BLO.apk
+          cp ../output/CRI-BLO-PWA.zip downloads/CRI-BLO-PWA.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/CRI-BLO.apk downloads/CRI-BLO-PWA.zip
+          if ! git diff --cached --quiet; then
+            git commit -m "build: publish CRI-BLO APK and PWA downloads"
+            git push origin main
           fi
