@@ -324,8 +324,8 @@ export function ReviewDialog({ values, photos, gps, criId, onClose, onJump, onEx
           </button>
         </div>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          Le ZIP contient le document choisi, les photos OI supplémentaires et les fichiers
-          supplémentaires (à la racine).
+          Les photos supplémentaires sont intégrées uniquement dans la feuille PHOTOS OI de l’Excel.
+          Elles ne sont pas ajoutées séparément au ZIP ni au PDF.
         </p>
       </div>
     </div>
