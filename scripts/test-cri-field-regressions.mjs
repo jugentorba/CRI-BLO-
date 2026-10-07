@@ -22,6 +22,10 @@ const attachmentViewer = fs.readFileSync("src/components/cri/AttachmentViewer.ts
 const exportFolder = fs.readFileSync("src/lib/export/folder.ts", "utf8");
 const androidExport = fs.readFileSync("plugins/criblo-native-browser/android/src/main/java/com/criblo/nativebrowser/CRIExportPlugin.java", "utf8");
 const androidManifestPatch = fs.readFileSync("scripts/patch-android-manifest.mjs", "utf8");
+const localBackup = fs.readFileSync("src/components/LocalBackupSection.tsx", "utf8");
+const settingsRoute = fs.readFileSync("src/routes/parametres.tsx", "utf8");
+const commentAssistant = fs.readFileSync("src/lib/ai/comment.functions.ts", "utf8");
+const gemini = fs.readFileSync("src/lib/ai/gemini.ts", "utf8");
 
 assert.match(schema, /id: "transportDistribution", label: "Type de tronçon"/, "UI must use the official Type de tronçon label");
 assert.doesNotMatch(route, /addr\.commune \?\? prev\.commune/, "new GPS address must not retain a stale commune");
