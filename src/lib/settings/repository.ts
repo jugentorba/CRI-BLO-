@@ -1,4 +1,5 @@
 import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
+import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS } from "@/lib/ai/gemini";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
@@ -28,8 +29,6 @@ export interface AppSettings {
   permissionsOnboardingDone?: boolean;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
-
 const DEFAULTS: AppSettings = {
   id: "app",
   autoSave: true,
@@ -56,7 +55,7 @@ function normalizeAiSettings(settings: AppSettings): AppSettings {
     // prevents a stale endpoint from silently bypassing the Gemini setup shown
     // in Settings on upgraded installations.
     aiEndpoint: "",
-    aiModel: settings.aiModel?.startsWith("gemini-")
+    aiModel: FREE_GEMINI_MODELS.some((model) => model.id === settings.aiModel)
       ? settings.aiModel
       : DEFAULT_GEMINI_MODEL,
   };
