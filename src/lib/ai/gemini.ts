@@ -3,6 +3,7 @@ const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 export const FREE_GEMINI_MODELS = [
   { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
 ] as const;
@@ -93,6 +94,7 @@ async function listGenerateContentModels(apiKey: string): Promise<string[]> {
 function pickFallbackModel(models: string[]): string | null {
   const preferred = [
     DEFAULT_GEMINI_MODEL,
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-flash-latest",
