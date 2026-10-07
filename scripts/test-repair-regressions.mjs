@@ -204,6 +204,17 @@ requireText(
 );
 forbidText(
   "src/lib/export/zip.ts",
+  /Fichiers supplementaires\//,
+  "Supplementary files must stay flat at ZIP root beside the official document",
+);
+requireText(
+  "src/lib/export/zip.ts",
+  /uniqueName\(used,\s*a\.name\)/,
+  "Supplementary file names must be preserved at ZIP root with duplicate auto-renaming",
+);
+
+forbidText(
+  "src/lib/export/zip.ts",
   /zip\.file\([^\n]*photo_extra_/,
   "Supplementary OI photos belong only in the Excel PHOTOS OI sheet, not as loose ZIP files",
 );
