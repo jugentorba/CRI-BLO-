@@ -65,26 +65,6 @@ jobs:
           npx cap sync android
           node scripts/patch-android-updater.mjs
 
-      - name: Enable Android permissions
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
-          text = manifest.read_text()
-          permissions = [
-              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
-              "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />",
-          ]
-          if "android.permission.ACCESS_FINE_LOCATION" not in text:
-              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
-          if "android:usesCleartextTraffic=" not in text:
-              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-          manifest.write_text(text)
-          PY
-
       - name: Build Android APK
         working-directory: source/android
         run: |
