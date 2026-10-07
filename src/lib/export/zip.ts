@@ -49,7 +49,7 @@ export async function buildZipExport(
   //    explicitement dans la section « Fichiers supplémentaires ».
   const attachments = await listAttachments(cri.id);
   for (const a of attachments) {
-    zip.file(uniqueName(used, `Fichiers supplementaires/${a.name}`), a.blob);
+    zip.file(uniqueName(used, a.name), a.blob);
   }
 
 
