@@ -18,20 +18,17 @@ jobs:
       VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
       VITE_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
-      - name: Verify permanent signing and Google configuration
+      - name: Verify permanent Android signing configuration
         env:
-          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$KS" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
           test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
-          test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "Missing repository variable GOOGLE_WEB_CLIENT_ID"; exit 1; }
 
       - name: Checkout CRI-BLO
         uses: actions/checkout@v4
         with:
-          ref: criblo-master-spec-v1
           path: source
 
       - name: Setup Node
@@ -65,7 +62,7 @@ jobs:
       - name: Prepare Capacitor Android wrapper
         working-directory: source
         run: |
-          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0 @capacitor/geolocation@8.2.2
           cat > capacitor.config.json <<'JSON'
           {
             "appId": "com.criblo.app",
@@ -77,6 +74,13 @@ jobs:
           rm -rf android
           npx cap add android
           npx cap sync android
+          node scripts/patch-android-updater.mjs
+
+      - name: Package downloadable PWA
+        run: |
+          mkdir -p output
+          cd source
+          zip -qr ../output/CRI-BLO-PWA.zip dist
 
       - name: Set monotonically increasing app version
         working-directory: source
@@ -92,25 +96,6 @@ jobs:
           s = re.sub(r'versionName\s+"[^"]+"', f'versionName "{name}"', s)
           p.write_text(s)
           print(f"CRI BLO versionName={name}, versionCode={code}")
-          PY
-
-      - name: Enable Android permissions
-        working-directory: source
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
-          text = manifest.read_text()
-          permissions = [
-              '    <uses-permission android:name="android.permission.CAMERA" />',
-              '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
-              '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
-          ]
-          if "android.permission.ACCESS_FINE_LOCATION" not in text:
-              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
-          if "android:usesCleartextTraffic=" not in text:
-              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-          manifest.write_text(text)
           PY
 
       - name: Decode permanent signing key
@@ -139,6 +124,15 @@ jobs:
           APKSIGNER="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           "$APKSIGNER" verify --print-certs "$APK" | tee android/app/build/outputs/apk/release/signing-certificate.txt
+          EXPECTED="$(tr -d ':\\r\\n ' < android-release-certificate.sha256 | tr '[:lower:]' '[:upper:]')"
+          ACTUAL="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' android/app/build/outputs/apk/release/signing-certificate.txt | head -1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          test -n "$ACTUAL" || { echo "Could not read APK signer SHA-256 fingerprint"; exit 1; }
+          test "$ACTUAL" = "$EXPECTED" || {
+            echo "ERROR: APK signing certificate does not match the permanent CRI BLO certificate."
+            echo "Expected: $EXPECTED"
+            echo "Actual:   $ACTUAL"
+            exit 1
+          }
           sha256sum "$APK" | tee android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256
 
       - name: Collect signed APK
@@ -147,6 +141,7 @@ jobs:
           cp source/android/app/build/outputs/apk/release/app-release.apk output/CRI-BLO.apk
           cp source/android/app/build/outputs/apk/release/signing-certificate.txt output/signing-certificate.txt
           cp source/android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256 output/CRI-BLO-SIGNED.sha256
+          test -s output/CRI-BLO-PWA.zip
 
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
@@ -156,6 +151,7 @@ jobs:
             output/CRI-BLO.apk
             output/signing-certificate.txt
             output/CRI-BLO-SIGNED.sha256
+            output/CRI-BLO-PWA.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -165,7 +161,42 @@ jobs:
         run: |
           TAG="v${VERSION_NAME}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG"               output/CRI-BLO.apk               output/signing-certificate.txt               output/CRI-BLO-SIGNED.sha256               --repo "$GITHUB_REPOSITORY"               --clobber
+            gh release upload "$TAG" \
+              output/CRI-BLO.apk \
+              output/CRI-BLO-PWA.zip \
+              output/signing-certificate.txt \
+              output/CRI-BLO-SIGNED.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
           else
-            gh release create "$TAG"               output/CRI-BLO.apk               output/signing-certificate.txt               output/CRI-BLO-SIGNED.sha256               --repo "$GITHUB_REPOSITORY"               --title "CRI-BLO ${VERSION_NAME}"               --notes "Signed CRI-BLO Android release. The in-app updater can install this APK over the existing app when the signing certificate matches."
+            gh release create "$TAG" \
+              output/CRI-BLO.apk \
+              output/CRI-BLO-PWA.zip \
+              output/signing-certificate.txt \
+              output/CRI-BLO-SIGNED.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "CRI-BLO ${VERSION_NAME}" \
+              --notes "Signed CRI-BLO Android release. The in-app updater can install this APK over the existing app when the signing certificate matches."
+          fi
+
+      - name: Checkout main for direct downloads
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: publish
+
+      - name: Refresh direct APK and PWA downloads
+        run: |
+          cd publish
+          git fetch origin main
+          git reset --hard origin/main
+          mkdir -p downloads
+          cp ../output/CRI-BLO.apk downloads/CRI-BLO.apk
+          cp ../output/CRI-BLO-PWA.zip downloads/CRI-BLO-PWA.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/CRI-BLO.apk downloads/CRI-BLO-PWA.zip
+          if ! git diff --cached --quiet; then
+            git commit -m "build: publish CRI-BLO APK and PWA downloads"
+            git push origin main
           fi

@@ -12,7 +12,7 @@ import {
   Loader2,
   X,
   Lock,
-  Plus, Star, History, KeyRound, Eye, EyeOff, Shield, Tabs, MoreHorizontal,
+  Plus, Star, History, KeyRound, Eye, EyeOff, Shield, MoreHorizontal,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import {

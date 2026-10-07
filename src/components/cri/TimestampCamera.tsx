@@ -11,6 +11,7 @@ export interface TimestampCameraProps {
   saveToGallery?: boolean;
   onCancel: () => void;
   onCapture: (blob: Blob) => Promise<void> | void;
+  onNativeFallback?: () => void;
 }
 
 export function TimestampCamera({
@@ -20,6 +21,7 @@ export function TimestampCamera({
   saveToGallery = false,
   onCancel,
   onCapture,
+  onNativeFallback,
 }: TimestampCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -39,6 +41,7 @@ export function TimestampCamera({
           video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } },
           audio: false,
         });
+        if (!stream) throw new Error("Caméra intégrée indisponible.");
         if (cancelled) {
           stream?.getTracks().forEach((t) => t.stop());
           return;
@@ -80,7 +83,7 @@ export function TimestampCamera({
     const caps = track?.getCapabilities?.() as MediaTrackCapabilities & { zoom?: { min: number; max: number; step: number } };
     if (track && caps?.zoom && value >= caps.zoom.min && value <= caps.zoom.max) {
       try {
-        await track.applyConstraints({ advanced: [{ zoom: value }] } as MediaTrackConstraints);
+        await track.applyConstraints({ advanced: [{ zoom: value }] } as unknown as MediaTrackConstraints);
       } catch {
         // Some Android WebViews expose the capability but reject the constraint.
       }
@@ -144,7 +147,23 @@ export function TimestampCamera({
           <div>{new Date().toLocaleString("fr-FR")}</div>
           {gps && <div className="flex items-center gap-1"><MapPin className="h-3 w-3" /> {gps.latitude.toFixed(6)}, {gps.longitude.toFixed(6)}</div>}
         </div>
-        {error && <div className="absolute left-3 right-3 top-3 rounded-xl bg-red-600/90 p-3 text-xs">{error}</div>}
+        {error && (
+          <div className="absolute left-3 right-3 top-3 space-y-2 rounded-xl bg-red-600/90 p-3 text-xs">
+            <div>{error}</div>
+            {onNativeFallback && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCancel();
+                  window.setTimeout(onNativeFallback, 0);
+                }}
+                className="w-full rounded-lg bg-white px-3 py-2 font-bold text-black"
+              >
+                Ouvrir la caméra du téléphone
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div className="space-y-3 p-4">
         <div className="flex items-center gap-2 overflow-x-auto">

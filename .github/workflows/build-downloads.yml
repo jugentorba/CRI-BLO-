@@ -39,7 +39,7 @@ jobs:
       - name: Prepare Capacitor Android wrapper
         working-directory: source
         run: |
-          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0 @capacitor/geolocation@8.2.2
           cat > capacitor.config.json <<'JSON'
           {
             "appId": "com.criblo.app",
@@ -63,25 +63,7 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
-
-      - name: Enable Android permissions
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          manifest = Path("source/android/app/src/main/AndroidManifest.xml")
-          text = manifest.read_text()
-          permissions = [
-              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
-              "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
-          ]
-          if "android.permission.ACCESS_FINE_LOCATION" not in text:
-              text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
-          if "android:usesCleartextTraffic=" not in text:
-              text = text.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-          manifest.write_text(text)
-          PY
+          node scripts/patch-android-updater.mjs
 
       - name: Build Android APK
         working-directory: source/android

@@ -57,6 +57,7 @@ export function PhotoSlot({
     if (!file) return;
     const scrollY = window.scrollY;
     const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
+    if (!isImage) return;
     const blob = watermarkEnabled && isImage
       ? await watermarkImage(file, { date: new Date(), address })
       : file;
@@ -143,6 +144,7 @@ export function PhotoSlot({
       <input
         ref={fileRef}
         type="file"
+        accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.bmp"
         className="hidden"
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
@@ -165,6 +167,7 @@ export function PhotoSlot({
         watermarkEnabled={watermarkEnabled}
         saveToGallery={saveToGallery}
         onCancel={() => setCameraOpen(false)}
+        onNativeFallback={() => camRef.current?.click()}
         onCapture={async (blob) => {
           await savePhoto(criId, slot, blob);
           onChange(true);

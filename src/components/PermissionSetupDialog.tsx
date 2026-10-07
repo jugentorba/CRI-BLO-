@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Check, FileUp, MapPin, ShieldCheck } from "lucide-react";
 import { getSettings, saveSettings } from "@/lib/settings/repository";
+import { getCurrentPosition } from "@/lib/geo/gps";
 
 export function PermissionSetupDialog() {
   const [open, setOpen] = useState(false);
@@ -14,12 +15,12 @@ export function PermissionSetupDialog() {
   }, []);
 
   async function requestLocation() {
-    if (!navigator.geolocation) return setLocation("denied");
-    navigator.geolocation.getCurrentPosition(
-      () => setLocation("granted"),
-      () => setLocation("denied"),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
+    try {
+      await getCurrentPosition();
+      setLocation("granted");
+    } catch {
+      setLocation("denied");
+    }
   }
 
   async function requestCamera() {

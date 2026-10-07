@@ -1,3 +1,5 @@
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+
 export type AiProvider =
   | "none"
   | "gemini"
@@ -47,17 +49,17 @@ const PRESETS: Record<
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     protocol: "openai",
   },
   deepseek: {
     endpoint: "https://api.deepseek.com/chat/completions",
-    model: "deepseek-flash",
+    model: "deepseek-v4-flash",
     protocol: "openai",
   },
   claude: {
     endpoint: "https://api.anthropic.com/v1/messages",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     protocol: "anthropic",
   },
   grok: {
@@ -133,26 +135,68 @@ function readErrorMessage(data: unknown): string | null {
   return null;
 }
 
-async function throwProviderError(res: Response, provider: AiProvider): Promise<never> {
-  let message = "";
-  try {
-    message = readErrorMessage(await res.json()) ?? "";
-  } catch {
-    /* réponse non JSON */
-  }
-  const prefix = getAiProviderLabel(provider);
-  if (res.status === 401 || res.status === 403) {
-    throw new Error(`${prefix} : clé API refusée (HTTP ${res.status}).`);
-  }
-  if (res.status === 404) {
-    throw new Error(`${prefix} : endpoint ou modèle introuvable (HTTP 404).`);
-  }
-  if (res.status === 429) {
-    throw new Error(`${prefix} : limite d'utilisation atteinte (HTTP 429).`);
-  }
-  throw new Error(message ? `${prefix} : ${message}` : `${prefix} : HTTP ${res.status}`);
+interface ProviderHttpResponse {
+  status: number;
+  data: unknown;
 }
 
+function normalizeHttpData(data: unknown): unknown {
+  if (typeof data !== "string") return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return data;
+  }
+}
+
+async function postProviderJson(
+  url: string,
+  headers: Record<string, string>,
+  data: Record<string, unknown>,
+): Promise<ProviderHttpResponse> {
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.post({
+      url,
+      headers,
+      data,
+      connectTimeout: 15000,
+      readTimeout: 60000,
+    });
+    return { status: response.status, data: normalizeHttpData(response.data) };
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(data),
+  });
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    try {
+      body = await response.text();
+    } catch {
+      body = null;
+    }
+  }
+  return { status: response.status, data: normalizeHttpData(body) };
+}
+
+async function throwProviderError(response: ProviderHttpResponse, provider: AiProvider): Promise<never> {
+  const message = readErrorMessage(response.data) ?? "";
+  const prefix = getAiProviderLabel(provider);
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`${prefix} : clé API refusée (HTTP ${response.status}).`);
+  }
+  if (response.status === 404) {
+    throw new Error(`${prefix} : endpoint ou modèle introuvable (HTTP 404).`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${prefix} : limite d\'utilisation atteinte (HTTP 429).`);
+  }
+  throw new Error(message ? `${prefix} : ${message}` : `${prefix} : HTTP ${response.status}`);
+}
 function extractOpenAiText(data: unknown): string {
   const content = (data as {
     choices?: Array<{
@@ -191,23 +235,25 @@ export async function callIndependentAi(
   if (!config.apiKey.trim()) throw new Error("Clé API manquante.");
 
   if (config.protocol === "anthropic") {
-    const res = await fetch(config.endpoint.trim(), {
-      method: "POST",
-      headers: {
+    const response = await postProviderJson(
+      config.endpoint.trim(),
+      {
         "Content-Type": "application/json",
         "x-api-key": config.apiKey.trim(),
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({
+      {
         model: config.model,
         max_tokens: 1200,
         ...(options?.system ? { system: options.system } : {}),
         messages: [{ role: "user", content: input }],
-      }),
-    });
-    if (!res.ok) await throwProviderError(res, config.provider);
-    const text = extractAnthropicText(await res.json());
+      },
+    );
+    if (response.status < 200 || response.status >= 300) {
+      await throwProviderError(response, config.provider);
+    }
+    const text = extractAnthropicText(response.data);
     if (!text) throw new Error(`${getAiProviderLabel(config.provider)} : réponse vide.`);
     return text;
   }
@@ -216,19 +262,21 @@ export async function callIndependentAi(
     ...(options?.system ? [{ role: "system", content: options.system }] : []),
     { role: "user", content: input },
   ];
-  const res = await fetch(config.endpoint.trim(), {
-    method: "POST",
-    headers: {
+  const response = await postProviderJson(
+    config.endpoint.trim(),
+    {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey.trim()}`,
     },
-    body: JSON.stringify({
+    {
       model: config.model,
       messages,
-    }),
-  });
-  if (!res.ok) await throwProviderError(res, config.provider);
-  const text = extractOpenAiText(await res.json());
+    },
+  );
+  if (response.status < 200 || response.status >= 300) {
+    await throwProviderError(response, config.provider);
+  }
+  const text = extractOpenAiText(response.data);
   if (!text) throw new Error(`${getAiProviderLabel(config.provider)} : réponse vide.`);
   return text;
 }
