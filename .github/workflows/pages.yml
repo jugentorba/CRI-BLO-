@@ -32,7 +32,6 @@ jobs:
       - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
         with:
-          ref: criblo-master-spec-v1
           path: source
 
       - name: Setup Node
@@ -79,8 +78,10 @@ jobs:
       - name: Create Android project
         working-directory: source
         run: |
+          npm install --no-save --no-audit --no-fund @capacitor/android@8.5.0 @capacitor/cli@8.5.0
           npx cap add android
           npx cap sync android
+          node scripts/patch-android-updater.mjs
 
       - name: Enable camera and GPS permissions
         run: |
@@ -157,7 +158,7 @@ jobs:
           else
             gh release create "$TAG" "$APK" \
               --repo "$GITHUB_REPOSITORY" \
-              --target criblo-master-spec-v1 \
+              --target "$GITHUB_SHA" \
               --title "CRI BLO ${VERSION_NAME}" \
               --notes "CRI BLO Android update containing the latest fixes, including supplementary photos embedded only in the Excel PHOTOS OI sheet."
           fi
