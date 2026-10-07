@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: criblo-signed-release
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
