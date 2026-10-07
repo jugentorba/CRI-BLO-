@@ -281,6 +281,18 @@ requireText(
   "Signed release workflow must refresh the downloadable PWA package alongside the APK",
 );
 
+/* Previously requested fixed form behavior. */
+forbidText(
+  "src/lib/cri/visibility.ts",
+  /photo_rdsur_(?:avant|apres)\s*:/,
+  "RDSUR before/after photos must always stay visible; they are optional evidence",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /id:\s*"ripZone"[\s\S]{0,260}options:\s*\["RIP",\s*"AMII"\]/,
+  "RIP/AMII must use the exact fixed choices requested",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
