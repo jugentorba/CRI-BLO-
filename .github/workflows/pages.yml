@@ -21,6 +21,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Verify permanent Android signing secrets
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KS" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
+          test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
+
       - name: Checkout CRI-BLO source
         uses: actions/checkout@v4
         with:
@@ -106,16 +114,36 @@ jobs:
           gradle.write_text(text)
           PY
 
-      - name: Build Android APK
+      - name: Decode permanent Android signing key
+        working-directory: source
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/criblo-release.jks
+
+      - name: Build signed Android APK
         working-directory: source/android
+        env:
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$PWD/criblo-release.jks" \
+            -Pandroid.injected.signing.store.password="$KEY_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="criblo" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Verify APK signature
+        working-directory: source
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          APKSIGNER="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Add APK and PWA download files
         run: |
           mkdir -p source/dist/downloads
-          cp source/android/app/build/outputs/apk/debug/app-debug.apk source/dist/downloads/CRI-BLO.apk
+          cp source/android/app/build/outputs/apk/release/app-release.apk source/dist/downloads/CRI-BLO.apk
           cp CRI-BLO-PWA.zip source/dist/downloads/CRI-BLO-PWA.zip
 
       - name: Publish GitHub Release for in-app updates
