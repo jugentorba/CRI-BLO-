@@ -133,7 +133,7 @@ export function UniversalDocumentEditor({
         }
       } catch { /* fallback */ }
     }
-    const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = name; a.click();
+    const a = globalThis.document.createElement("a"); a.href = URL.createObjectURL(file); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
