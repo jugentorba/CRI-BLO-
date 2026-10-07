@@ -1,12 +1,12 @@
-// Export ZIP: official document (Excel OR PDF) + supplementary photos/files.
-// Everything is deliberately flat at ZIP root: no hidden subfolders.
+// Export ZIP: official document (Excel OR PDF) + supplementary files.
+// Supplementary OI photos are Excel-only (PHOTOS OI) and are never separate ZIP/PDF files.
+// User-added supplementary files stay flat at ZIP root.
 
 import JSZip from "jszip";
 import type { CriRecord } from "@/lib/cri/types";
 import { buildXlsxExport } from "@/lib/export/xlsx";
 import { buildPdfExport } from "@/lib/export/pdf";
 import { listAttachments } from "@/lib/attachments/repository";
-import { getPhoto } from "@/lib/photos/repository";
 import { exportFileName } from "@/lib/export/naming";
 
 export type ZipVariant = "xlsx" | "pdf";
@@ -37,22 +37,6 @@ function uniqueName(used: Set<string>, requestedName: string): string {
   }
   used.add(next.toLocaleLowerCase("fr-FR"));
   return next;
-}
-
-function photoExtension(blob: Blob): string {
-  const type = blob.type.toLowerCase();
-  if (type.includes("png")) return "png";
-  if (type.includes("webp")) return "webp";
-  if (type.includes("heic")) return "heic";
-  if (type.includes("heif")) return "heif";
-  return "jpg";
-}
-
-function extraPhotoNumber(slot: string): number | null {
-  const match = /^photo_extra_(\d+)$/.exec(slot);
-  if (!match) return null;
-  const number = Number(match[1]);
-  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 function verifyFlatZip(zip: JSZip, expectedFiles: number): void {
@@ -90,22 +74,8 @@ export async function buildZipExport(
   const mainName = uniqueName(used, exportFileName(reference, commune, variant));
   zip.file(mainName, mainBlob);
 
-  // 2. Supplementary OI photos are embedded in Excel/PDF AND exported as
-  // individual evidence files at ZIP root. This keeps them directly accessible
-  // without creating a Photos/ or supplementary subfolder.
-  const extraSlots = Object.keys(cri.photos ?? {})
-    .map((slot) => ({ slot, number: extraPhotoNumber(slot) }))
-    .filter((entry): entry is { slot: string; number: number } => entry.number !== null)
-    .sort((a, b) => a.number - b.number);
-
-  let exportedExtraPhotos = 0;
-  for (const { slot, number } of extraSlots) {
-    const stored = await getPhoto(cri.id, slot);
-    if (!stored) continue;
-    const photoName = `Photo_supplementaire_${number}.${photoExtension(stored.blob)}`;
-    zip.file(uniqueName(used, photoName), stored.blob);
-    exportedExtraPhotos += 1;
-  }
+  // 2. Supplementary OI photos are embedded only in the XLSX PHOTOS OI sheet.
+  //    They are never exported as standalone files in the ZIP and never added to PDF.
 
   // 3. User-added supplementary files, FLAT at ZIP root. Original basenames are
   // retained; collisions become name-2.ext, name-3.ext, etc. Never overwrite.
@@ -115,7 +85,7 @@ export async function buildZipExport(
   }
 
   // Do not report success unless the in-memory package structure is complete.
-  verifyFlatZip(zip, 1 + exportedExtraPhotos + attachments.length);
+  verifyFlatZip(zip, 1 + attachments.length);
 
   const output = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
   if (output.size === 0) throw new Error("ZIP vide : export annulé.");
@@ -123,7 +93,7 @@ export async function buildZipExport(
   // Validate the final bytes, not only JSZip's in-memory file list. This catches
   // a malformed archive before it reaches Android Files or the native writer.
   const reopened = await JSZip.loadAsync(await output.arrayBuffer(), { checkCRC32: true });
-  verifyFlatZip(reopened, 1 + exportedExtraPhotos + attachments.length);
+  verifyFlatZip(reopened, 1 + attachments.length);
 
   return output;
 }

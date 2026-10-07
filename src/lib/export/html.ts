@@ -51,6 +51,8 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
   const photos = cri.photos ?? {};
   const photoData: Record<string, { src: string; createdAt: string }> = {};
   for (const slot of Object.keys(photos)) {
+    // Supplementary photos are reserved for the Excel PHOTOS OI sheet.
+    if (/^photo_extra_\d+$/.test(slot)) continue;
     const p = await getPhoto(cri.id, slot);
     if (p) photoData[slot] = { src: await blobToDataUrl(p.blob), createdAt: p.createdAt };
   }
@@ -72,11 +74,6 @@ export async function buildHtmlExport(cri: CriRecord): Promise<Blob> {
     const m = /^photo_extra_(\d+)$/.exec(slot);
     return m ? `Photo supplémentaire ${m[1]}` : slot;
   };
-
-  // Photos supplémentaires réellement présentes (aucune limite).
-  const extraSlots = Object.keys(photos)
-    .filter((s) => /^photo_extra_\d+$/.test(s))
-    .sort((a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")));
 
   const fmtCaption = (iso?: string) => {
     if (!iso) return "";
@@ -269,7 +266,6 @@ ${photoPages("Photos principales (OI)", ["photo_oi_situation", "photo_oi_etiquet
 ${photoPages("Mesures", ["photo_mesures_loc1", "photo_mesures_loc2"])}
 ${photoPages("RDSUR", ["photo_rdsur_avant", "photo_rdsur_apres"])}
 ${photoPages("Photos SAV OC", ["photo_oc_defaut", "photo_oc_apres_def", "photo_oc_avant", "photo_oc_apres", "photo_oc_mesure1", "photo_oc_mesure2"])}
-${extraSlots.length ? photoPages("Photos supplémentaires (PHOTOS OI)", extraSlots) : ""}
 </body></html>`;
   return new Blob([html], { type: "text/html;charset=utf-8" });
 }
