@@ -124,6 +124,15 @@ jobs:
           APKSIGNER="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)/apksigner"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           "$APKSIGNER" verify --print-certs "$APK" | tee android/app/build/outputs/apk/release/signing-certificate.txt
+          EXPECTED="$(tr -d ':\\r\\n ' < android-release-certificate.sha256 | tr '[:lower:]' '[:upper:]')"
+          ACTUAL="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' android/app/build/outputs/apk/release/signing-certificate.txt | head -1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          test -n "$ACTUAL" || { echo "Could not read APK signer SHA-256 fingerprint"; exit 1; }
+          test "$ACTUAL" = "$EXPECTED" || {
+            echo "ERROR: APK signing certificate does not match the permanent CRI BLO certificate."
+            echo "Expected: $EXPECTED"
+            echo "Actual:   $ACTUAL"
+            exit 1
+          }
           sha256sum "$APK" | tee android/app/build/outputs/apk/release/CRI-BLO-SIGNED.sha256
 
       - name: Collect signed APK
