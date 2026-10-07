@@ -173,4 +173,84 @@ forbidText(
   "In-app updater must install over the existing app and never uninstall it",
 );
 
+
+/* Previously reported CRI regressions: keep these protected too. */
+requireText(
+  "src/routes/cri.$id.tsx",
+  /setReviewing\(true\)[\s\S]{0,200}handleSaveDraft\(\)/,
+  "Save/finalize must react on the first tap while persisting the draft",
+);
+requireText(
+  "src/lib/export/zip.ts",
+  /type:\s*"uint8array"/,
+  "ZIP export must finish into stable bytes before Android receives the archive",
+);
+forbidText(
+  "src/lib/export/zip.ts",
+  /zip\.file\([^\n]*photo_extra_/,
+  "Supplementary OI photos belong only in the Excel PHOTOS OI sheet, not as loose ZIP files",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /commentaires:\s*\{[^}]*cell:\s*"A52"/,
+  "CRI comments must be written into the official Excel template",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /\^photo_extra_\\\(\\d\+\\\)\$/,
+  "Unlimited supplementary OI photo slots must remain supported",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /sheet:\s*"PHOTOS OI"[\s\S]{0,220}Math\.floor/,
+  "Supplementary OI photos must be laid out dynamically in the PHOTOS OI sheet",
+);
+requireText(
+  "src/lib/attachments/repository.ts",
+  /file\.arrayBuffer\(\)[\s\S]{0,300}new Blob/,
+  "Imported USB/external attachments must be copied into local IndexedDB storage",
+);
+requireText(
+  "src/components/cri/AttachmentsSection.tsx",
+  /navigator\.share[\s\S]{0,900}downloadBlob/,
+  "Stored supplementary files must be openable/shareable from CRI BLO with a download fallback",
+);
+requireText(
+  "src/lib/export/naming.ts",
+  /CRI_BLO_\$\{safe\(commune\)\}_\$\{safe\(reference\)\}/,
+  "Excel/PDF naming must be commune then dossier",
+);
+requireText(
+  "src/lib/export/naming.ts",
+  /\$\{safe\(reference\)\}_\$\{safe\(commune\)\}\.zip/,
+  "ZIP naming must be dossier then commune",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /photo_mesures_loc1[\s\S]{0,500}photo_mesures_loc2/,
+  "MESURES must keep the two requested photo slots",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /gpsBtnA[\s\S]{0,900}scope:\s*"A"[\s\S]{0,1200}gpsBtnB[\s\S]{0,900}scope:\s*"B"[\s\S]{0,1600}gpsBtnDefaut[\s\S]{0,900}scope:\s*"defaut"/,
+  "GPS capture must remain available independently for A, B and defect",
+);
+
+/* Provider defaults must be model IDs that are currently published by each provider. */
+requireText(
+  "src/lib/ai/independent.ts",
+  /model:\s*"gpt-6-luna"/,
+  "OpenAI default model must use the current API model ID",
+);
+requireText(
+  "src/lib/ai/independent.ts",
+  /model:\s*"deepseek-v4-flash"/,
+  "DeepSeek default model must use the current V4 API model ID",
+);
+requireText(
+  "src/lib/ai/independent.ts",
+  /model:\s*"claude-sonnet-5-5"/,
+  "Anthropic default model must use the current Sonnet API model ID",
+);
+
 console.log("CRI BLO repair regression checks passed.");
