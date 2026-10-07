@@ -22,6 +22,7 @@ import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
+import { LocalBackupSection } from "@/components/LocalBackupSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
 import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS } from "@/lib/ai/gemini";
 
@@ -219,6 +220,8 @@ function Parametres() {
             </button>
           </div>
         </section>
+
+        <LocalBackupSection />
 
         <OneDriveSection settings={settings} onSettings={setSettings} />
 
