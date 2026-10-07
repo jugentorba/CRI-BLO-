@@ -1,5 +1,6 @@
 // Export ZIP : document officiel (Excel OU PDF) + fichiers supplémentaires.
-// Les photos supplémentaires OI sont intégrées dans le classeur Excel, pas en fichiers séparés.
+// Les photos supplémentaires OI sont réservées au classeur Excel (feuille PHOTOS OI).
+// Elles ne sont jamais ajoutées au ZIP comme fichiers séparés et ne sont pas ajoutées au PDF.
 
 import JSZip from "jszip";
 import type { CriRecord } from "@/lib/cri/types";
@@ -40,8 +41,9 @@ export async function buildZipExport(
   const mainBlob = variant === "pdf" ? await buildPdfExport(cri) : await buildXlsxExport(cri);
   zip.file(uniqueName(used, exportFileName(reference, commune, variant)), mainBlob);
 
-  // 2. Photos supplémentaires OI : NON exportées séparément — elles sont déjà
-  //    intégrées comme images dans le classeur Excel (feuille PHOTOS OI).
+  // 2. Photos supplémentaires OI : jamais exportées comme fichiers.
+  //    Avec la variante XLSX, elles sont intégrées uniquement dans la feuille PHOTOS OI.
+  //    Avec la variante PDF, elles ne sont pas exportées.
 
   // 3. Fichiers supplémentaires — uniquement ce que l'utilisateur a ajouté
   //    explicitement dans la section « Fichiers supplémentaires ».
