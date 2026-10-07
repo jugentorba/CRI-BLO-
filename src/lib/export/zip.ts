@@ -61,5 +61,7 @@ export async function buildZipExport(
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
-  const zipBuffer = new ArrayBuffer(bytes.byteLength);\n  new Uint8Array(zipBuffer).set(bytes);\n  return new Blob([zipBuffer], { type: "application/zip" });
+  const zipBuffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(zipBuffer).set(bytes);
+  return new Blob([zipBuffer], { type: "application/zip" });
 }
