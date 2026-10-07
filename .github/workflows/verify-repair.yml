@@ -34,8 +34,8 @@ jobs:
       - name: Regression checks
         run: node scripts/test-repair-regressions.mjs
 
-      - name: Lint source
-        run: npm run lint
+      - name: Type-check repair source
+        run: npx tsc --noEmit
 
       - name: Build production web bundle
         env:
