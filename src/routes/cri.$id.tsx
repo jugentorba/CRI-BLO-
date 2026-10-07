@@ -118,6 +118,7 @@ function CriEditor() {
       if (!c.values?.company && p?.company) autoPatch.company = p.company;
       if (!c.values?.technicianName && p?.lastName) autoPatch.technicianName = p.lastName;
       if (!c.values?.interventionStart) autoPatch.interventionStart = c.interventionAt;
+      if (c.values?.ripZone === "AMI") autoPatch.ripZone = "AMII";
       // Rétro-compat : si on a déjà une adresse géocodée, alimente les champs officiels.
       if (!c.values?.commune && c.address?.commune) autoPatch.commune = c.address.commune;
       if (!c.values?.codePostal && c.address?.postalCode) autoPatch.codePostal = c.address.postalCode;
@@ -828,12 +829,13 @@ function FieldRow(props: {
         <div className="flex gap-1.5">
           {options.map((o) => {
             const active = o === selected;
+            const allowsExtra = !f.freeTextWhen || f.freeTextWhen.includes(o);
             return (
               <button
                 key={o}
                 type="button"
                 aria-pressed={active}
-                onClick={() => props.onChange(active ? undefined : compose(o, extra))}
+                onClick={() => props.onChange(active ? undefined : compose(o, allowsExtra ? extra : ""))}
                 className={
                   "h-10 flex-1 rounded-lg border text-sm font-bold transition active:scale-95 " +
                   (active
@@ -846,7 +848,7 @@ function FieldRow(props: {
             );
           })}
         </div>
-        {f.freeTextLabel && selected && (
+        {f.freeTextLabel && selected && (!f.freeTextWhen || f.freeTextWhen.includes(selected)) && (
           <input
             id={`f-${f.id}-input`}
             type="text"
