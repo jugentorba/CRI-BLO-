@@ -113,6 +113,38 @@ requireText(
 );
 
 
+
+/* Schema-to-Excel coverage guard: a normal CRI field may not silently disappear from export. */
+{
+  const schemaText = read("src/lib/cri/schema.ts");
+  const xlsxText = read("src/lib/export/xlsx.ts");
+  const fieldIds = [...schemaText.matchAll(/\{\s*id:\s*"([^"]+)"\s*,\s*label:/g)].map((match) => match[1]);
+  const mappedIds = new Set(
+    [...xlsxText.matchAll(/^\s{2}([A-Za-z0-9_]+):\s*\{\s*sheet:/gm)].map((match) => match[1]),
+  );
+  const explicitlyHandled = new Set([
+    "company",
+    "technicianName",
+    "gpsCoordsDefaut",
+    "commune",
+    "codePostal",
+    "nomVoie",
+    "numeroVoie",
+    "defautLocaliseAutre",
+    "causePrincipaleAutre",
+  ]);
+  const missing = fieldIds.filter(
+    (id) =>
+      !id.startsWith("photo_") &&
+      !id.startsWith("gpsBtn") &&
+      !explicitlyHandled.has(id) &&
+      !mappedIds.has(id),
+  );
+  if (missing.length) {
+    throw new Error(`CRI fields missing from Excel export coverage: ${missing.join(", ")}`);
+  }
+}
+
 /* Broader CRI BLO regression audit: protect previously requested field/export behavior. */
 requireText(
   "src/lib/export/xlsx.ts",
