@@ -1,4 +1,6 @@
-// Proxy serveur du navigateur intégré : récupère une page distante et la rend
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+
+// Proxy natif/web du navigateur intégré : récupère une page distante et la rend
 // affichable dans une iframe (contourne X-Frame-Options / CSP frame-ancestors).
 // Module 100 % indépendant du module CRI BLO.
 
@@ -24,6 +26,30 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 const UA =
   "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36";
+
+
+function headerValue(headers: Record<string, string>, name: string): string | null {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) return value;
+  }
+  return null;
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return bytes.buffer;
+}
+
+function nativeDataToArrayBuffer(data: unknown): ArrayBuffer {
+  if (typeof data === "string") return base64ToArrayBuffer(data);
+  if (data instanceof ArrayBuffer) return data;
+  if (ArrayBuffer.isView(data)) {
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  }
+  return new TextEncoder().encode(JSON.stringify(data ?? "")).buffer;
+}
 
 /** Script injecté : les clics et formulaires remontent au parent (navigation). */
 const BRIDGE = `
@@ -116,30 +142,53 @@ export async function proxyPage(url: string): Promise<ProxyResult> {
     return { ok: false, message: "Protocole non supporté." };
   }
 
-  let res: Response;
+  let status: number;
+  let finalUrl: string;
+  let mimeType = "";
+  let disposition: string | null = null;
+  let buffer: ArrayBuffer;
+
   try {
-    res = await fetch(parsed.toString(), {
-      redirect: "follow",
-      headers: {
-        "user-agent": UA,
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-    });
+    if (Capacitor.isNativePlatform()) {
+      const res = await CapacitorHttp.get({
+        url: parsed.toString(),
+        headers: {
+          "User-Agent": UA,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+        },
+        responseType: "arraybuffer",
+        connectTimeout: 15000,
+        readTimeout: 60000,
+      });
+      status = res.status;
+      finalUrl = res.url || parsed.toString();
+      mimeType = headerValue(res.headers, "content-type")?.split(";")[0]?.trim() ?? "";
+      disposition = headerValue(res.headers, "content-disposition");
+      buffer = nativeDataToArrayBuffer(res.data);
+    } else {
+      const res = await fetch(parsed.toString(), {
+        redirect: "follow",
+        headers: {
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+      status = res.status;
+      finalUrl = res.url || parsed.toString();
+      mimeType = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+      disposition = res.headers.get("content-disposition");
+      buffer = await res.arrayBuffer();
+    }
   } catch {
     return { ok: false, message: "Site inaccessible (vérifiez l'adresse ou la connexion)." };
   }
-  if (!res.ok && res.status !== 203) {
-    return { ok: false, message: `Le site a répondu ${res.status}.` };
+
+  if ((status < 200 || status >= 300) && status !== 203) {
+    return { ok: false, message: `Le site a répondu ${status}.` };
   }
 
-  const finalUrl = res.url || parsed.toString();
-  const mimeType = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-  const disposition = res.headers.get("content-disposition");
   const isHtml = mimeType.includes("html") || mimeType.includes("xml") || mimeType === "";
   const isAttachment = !!disposition?.toLowerCase().includes("attachment");
-
-  const buffer = await res.arrayBuffer();
   if (buffer.byteLength > MAX_BYTES) {
     return { ok: false, message: "Contenu trop volumineux (max 8 Mo)." };
   }
