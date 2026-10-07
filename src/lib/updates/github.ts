@@ -37,10 +37,12 @@ export interface AppUpdateInfo {
 }
 
 function versionParts(version: string): number[] {
-  return version
+  const core = version
     .trim()
     .replace(/^v/i, "")
-    .split(/[.+-]/)[0]
+    .split(/[+-]/, 1)[0];
+
+  return core
     .split(".")
     .map((part) => Number.parseInt(part, 10))
     .map((part) => (Number.isFinite(part) ? part : 0));
