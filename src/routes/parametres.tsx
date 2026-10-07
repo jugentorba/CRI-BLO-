@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Building2, UserCircle2, FolderOpen, Save, Camera, ImageIcon, Languages, Zap, Sun, Moon, Monitor, Rows3, LayoutGrid, Minimize2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { AppUpdateSection } from "@/components/AppUpdateSection";
 import { getProfile, saveProfile } from "@/lib/profile/repository";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings/repository";
 import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
@@ -418,6 +419,7 @@ function Parametres() {
             </select>
           </div>
         </section>
+        <AppUpdateSection />
       </form>
 
       <p className="mt-8 text-center text-xs text-muted-foreground">CRI BLO Assistant · Orange France</p>
