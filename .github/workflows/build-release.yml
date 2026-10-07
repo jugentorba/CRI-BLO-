@@ -18,15 +18,13 @@ jobs:
       VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
       VITE_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
-      - name: Verify permanent signing and Google configuration
+      - name: Verify permanent Android signing configuration
         env:
-          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$KS" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
           test -n "$KP" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
-          test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "Missing repository variable GOOGLE_WEB_CLIENT_ID"; exit 1; }
 
       - name: Checkout CRI-BLO
         uses: actions/checkout@v4
