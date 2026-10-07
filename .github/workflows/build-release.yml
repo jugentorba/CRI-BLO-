@@ -31,7 +31,6 @@ jobs:
       - name: Checkout CRI-BLO
         uses: actions/checkout@v4
         with:
-          ref: criblo-master-spec-v1
           path: source
 
       - name: Setup Node
@@ -65,7 +64,7 @@ jobs:
       - name: Prepare Capacitor Android wrapper
         working-directory: source
         run: |
-          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0
+          npm install --no-save --no-audit --no-fund @capacitor/core@8.5.0 @capacitor/android@8.5.0 @capacitor/cli@8.5.0 @capacitor/geolocation@8.2.2
           cat > capacitor.config.json <<'JSON'
           {
             "appId": "com.criblo.app",
@@ -77,6 +76,7 @@ jobs:
           rm -rf android
           npx cap add android
           npx cap sync android
+          node scripts/patch-android-updater.mjs
 
       - name: Set monotonically increasing app version
         working-directory: source
