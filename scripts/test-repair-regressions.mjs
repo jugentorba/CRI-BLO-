@@ -244,8 +244,8 @@ requireText(
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /model:\s*"deepseek-v4-flash"/,
-  "DeepSeek default model must use the current V4 API model ID",
+  /model:\s*"deepseek-flash"/,
+  "DeepSeek default model must use the current production API model ID",
 );
 requireText(
   "src/lib/ai/independent.ts",
