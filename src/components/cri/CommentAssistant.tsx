@@ -49,7 +49,7 @@ export function CommentAssistant({
         .filter(([, v]) => v !== undefined && v !== null && v !== "")
         .map(([k, v]) => `${k}: ${String(v)}`)
         .join("\n");
-      const res = await run({
+      const res = await improveComment({
         data: { notes, style: nextStyle, context: ctxLines || undefined, patterns },
       });
       if (lastKey.current !== key) return;
