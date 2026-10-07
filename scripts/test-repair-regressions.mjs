@@ -293,6 +293,38 @@ requireText(
   "RIP/AMII must use the exact fixed choices requested",
 );
 
+/* Device fallbacks and compatibility. */
+requireText(
+  ".github/workflows/build-release.yml",
+  /android\.permission\.RECORD_AUDIO/,
+  "Android production build must request microphone permission for dictation",
+);
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /onNativeFallback=\{\(\)\s*=>\s*camRef\.current\?\.click\(\)\}/,
+  "Photo camera overlay must fall back to the phone camera input when WebView camera fails",
+);
+requireText(
+  "src/components/cri/TimestampCamera.tsx",
+  /if\s*\(!stream\)\s*throw/,
+  "Integrated camera must detect an unavailable WebView stream instead of showing a dead preview",
+);
+requireText(
+  "src/components/cri/TimestampCamera.tsx",
+  /Ouvrir la caméra du téléphone/,
+  "Integrated camera errors must expose the phone-camera fallback",
+);
+requireText(
+  "src/lib/cri/schema.ts",
+  /id:\s*"ripZone"[\s\S]{0,320}freeTextWhen:\s*\["RIP"\]/,
+  "RIP name free text must be available only when RIP is selected",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /ripZone\s*===\s*"AMI"[\s\S]{0,180}AMII/,
+  "Existing CRI records saved with the old AMI value must migrate to AMII",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
