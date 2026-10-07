@@ -184,6 +184,10 @@ if (missingPermissions.length) {
   manifest = manifest.replace("<application", `${lines}\n\n    <application`);
 }
 
+if (!manifest.includes("android:usesCleartextTraffic=")) {
+  manifest = manifest.replace("<application", '<application android:usesCleartextTraffic="true"');
+}
+
 if (!manifest.includes(".criblo.updater.fileprovider")) {
   const provider = `
         <provider
