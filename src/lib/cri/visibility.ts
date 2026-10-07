@@ -17,10 +17,6 @@ const RULES: Record<string, (v: V, p: Photos) => boolean> = {
   // Rétablissement
   numDecharge: (v) => v.testAGIR === true,
 
-  // RDSUR — photos uniquement si facturation = Oui
-  photo_rdsur_avant: (v) => v.rdsurFacture === true,
-  photo_rdsur_apres: (v) => v.rdsurFacture === true,
-
 };
 
 function extraPhotoIndex(fieldId: string): number | null {
