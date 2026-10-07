@@ -144,7 +144,7 @@ requireText(
 );
 requireText(
   "src/components/cri/ExtraPhotosBatchAdd.tsx",
-  /const files = Array\.from\(fileList\)\.filter/,
+  /const files\s*=\s*Array\.from\(fileList\)\.filter/,
   "Photos OI batch import must reject non-image files before storing them as photo slots",
 );
 requireText(
