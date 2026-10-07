@@ -14,6 +14,12 @@ function forbidText(path, pattern, message) {
   if (pattern.test(content)) throw new Error(`${message} [${path}]`);
 }
 
+forbidText(
+  ".github/workflows/pages.yml",
+  /gh release (?:create|upload)/,
+  "Only build-release.yml may publish Android releases used by the in-app updater",
+);
+
 for (const workflow of [".github/workflows/build-release.yml", ".github/workflows/pages.yml"]) {
   forbidText(
     workflow,
