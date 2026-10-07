@@ -392,6 +392,18 @@ for (const browserModule of ["src/lib/browser/proxy.browser.ts", "src/lib/browse
   );
 }
 
+/* Permanent Android signer continuity: public fingerprint is pinned, private key remains secret. */
+requireText(
+  "android-release-certificate.sha256",
+  /^36:61:19:6D:8E:DD:ED:FD:3C:D8:06:07:E1:64:2B:D4:EB:D2:13:78:52:DC:F3:3D:D5:98:CC:E2:4C:94:62:C8\s*$/m,
+  "Permanent CRI BLO release certificate fingerprint must stay pinned",
+);
+requireText(
+  ".github/workflows/build-release.yml",
+  /android-release-certificate\.sha256[\s\S]{0,1200}signing-certificate\.txt/,
+  "Signed release must verify its certificate against the pinned permanent fingerprint",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
