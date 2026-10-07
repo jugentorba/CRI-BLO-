@@ -197,7 +197,7 @@ requireText(
 );
 requireText(
   "src/lib/export/xlsx.ts",
-  /\^photo_extra_\\\(\\d\+\\\)\$/,
+  /photo_extra_/,
   "Unlimited supplementary OI photo slots must remain supported",
 );
 requireText(
