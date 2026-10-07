@@ -336,6 +336,20 @@ requireText(
   "The full file picker for a photo slot must still be image-only",
 );
 
+/* Integrated browser must bypass WebView CORS inside the native APK. */
+for (const browserModule of ["src/lib/browser/proxy.browser.ts", "src/lib/browser/fetch.browser.ts"]) {
+  requireText(
+    browserModule,
+    /CapacitorHttp/,
+    "Integrated browser networking must use Capacitor native HTTP in the APK",
+  );
+  requireText(
+    browserModule,
+    /Capacitor\.isNativePlatform\(\)/,
+    "Integrated browser networking must select its native path inside the APK",
+  );
+}
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
