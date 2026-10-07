@@ -76,6 +76,7 @@ jobs:
               "    <uses-permission android:name=\"android.permission.CAMERA\" />",
               "    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />",
               "    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />",
+              "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />",
           ]
           if "android.permission.ACCESS_FINE_LOCATION" not in text:
               text = text.replace("<application", "\n".join(permissions) + "\n\n    <application", 1)
