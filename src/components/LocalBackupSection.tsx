@@ -1,6 +1,11 @@
 import { useRef, useState } from "react";
 import { CloudUpload, Download, Upload, ShieldCheck } from "lucide-react";
 import { exportSyncSnapshot, importSyncSnapshot } from "@/lib/db";
+import {
+  isFolderPickerSupported,
+  pickExportFolder,
+  writeFileToExportFolder,
+} from "@/lib/export/folder";
 
 type BusyAction = "export" | "import" | "drive" | null;
 
@@ -62,6 +67,17 @@ export function LocalBackupSection() {
           files: [file],
         });
         setMessage("Choisissez Google Drive dans la feuille de partage pour enregistrer la sauvegarde.");
+      } else if (isFolderPickerSupported()) {
+        const picked = await pickExportFolder();
+        if (!picked) {
+          setMessage("Sélection Google Drive annulée.");
+          return;
+        }
+        const written = await writeFileToExportFolder(name, blob);
+        if (!written.wrote) {
+          throw new Error("Impossible d’écrire la sauvegarde dans le dossier choisi.");
+        }
+        setMessage(`Sauvegarde enregistrée dans ${written.folderName ?? picked.name}. Sur Android, vous pouvez choisir un dossier Google Drive dans le sélecteur système.`);
       } else {
         downloadBlob(name, blob);
         setMessage(
