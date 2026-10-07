@@ -325,6 +325,17 @@ requireText(
   "Existing CRI records saved with the old AMI value must migrate to AMII",
 );
 
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /if\s*\(!isImage\)\s*return/,
+  "Photo slots must reject non-image files instead of storing them as broken photos",
+);
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /ref=\{fileRef\}[\s\S]{0,160}accept="image\/\*/,
+  "The full file picker for a photo slot must still be image-only",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
