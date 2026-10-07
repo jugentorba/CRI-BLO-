@@ -80,7 +80,7 @@ export function TimestampCamera({
     const caps = track?.getCapabilities?.() as MediaTrackCapabilities & { zoom?: { min: number; max: number; step: number } };
     if (track && caps?.zoom && value >= caps.zoom.min && value <= caps.zoom.max) {
       try {
-        await track.applyConstraints({ advanced: [{ zoom: value }] } as MediaTrackConstraints);
+        await track.applyConstraints({ advanced: [{ zoom: value }] } as unknown as MediaTrackConstraints);
       } catch {
         // Some Android WebViews expose the capability but reject the constraint.
       }
