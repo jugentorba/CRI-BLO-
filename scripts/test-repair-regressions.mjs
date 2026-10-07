@@ -403,6 +403,16 @@ requireText(
   /android-release-certificate\.sha256[\s\S]{0,1200}signing-certificate\.txt/,
   "Signed release must verify its certificate against the pinned permanent fingerprint",
 );
+requireText(
+  ".github/workflows/build-release.yml",
+  /\^\.\*certificate SHA-256 digest:/,
+  "Release certificate parser must accept V2 Signer output from current Android build tools",
+);
+forbidText(
+  ".github/workflows/build-release.yml",
+  /\^Signer #1 certificate SHA-256 digest:/,
+  "Release certificate parser must not depend on the old Signer #1 label",
+);
 
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
