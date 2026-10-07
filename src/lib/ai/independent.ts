@@ -49,17 +49,17 @@ const PRESETS: Record<
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     protocol: "openai",
   },
   deepseek: {
     endpoint: "https://api.deepseek.com/chat/completions",
-    model: "deepseek-flash",
+    model: "deepseek-v4-flash",
     protocol: "openai",
   },
   claude: {
     endpoint: "https://api.anthropic.com/v1/messages",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     protocol: "anthropic",
   },
   grok: {
