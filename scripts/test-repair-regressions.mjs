@@ -34,9 +34,14 @@ requireText(
   "The single Android release build must install the native in-app updater bridge",
 );
 requireText(
-  ".github/workflows/build-release.yml",
+  "scripts/patch-android-updater.mjs",
   /android\.permission\.ACCESS_FINE_LOCATION/,
-  "The Android production build must retain precise-location permission",
+  "Every generated Android APK must retain precise-location permission",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /android\.permission\.CAMERA/,
+  "Every generated Android APK must request camera permission",
 );
 
 forbidText(
@@ -295,9 +300,9 @@ requireText(
 
 /* Device fallbacks and compatibility. */
 requireText(
-  ".github/workflows/build-release.yml",
+  "scripts/patch-android-updater.mjs",
   /android\.permission\.RECORD_AUDIO/,
-  "Android production build must request microphone permission for dictation",
+  "Every generated Android APK must request microphone permission for dictation",
 );
 requireText(
   "src/components/cri/PhotoSlot.tsx",
