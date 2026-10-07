@@ -32,7 +32,12 @@ export function ExtraPhotosBatchAdd({
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList);
+    const files = Array.from(fileList).filter(
+      (file) =>
+        file.type.startsWith("image/") ||
+        /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name),
+    );
+    if (files.length === 0) return;
 
     // Emplacements libres, dans l'ordre.
     const freeSlots: string[] = [];
@@ -54,12 +59,9 @@ export function ExtraPhotosBatchAdd({
           const i = cursor++;
           const file = toProcess[i];
           const slot = freeSlots[i];
-          const isImage =
-            file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
-          const blob =
-            watermarkEnabled && isImage
-              ? await watermarkImage(file, { date: new Date(), address })
-              : file;
+          const blob = watermarkEnabled
+            ? await watermarkImage(file, { date: new Date(), address })
+            : file;
           await savePhoto(criId, slot, blob);
           results.push({ slot, blob });
           setProgress((p) => p ? { ...p, done: p.done + 1 } : p);
@@ -90,16 +92,17 @@ export function ExtraPhotosBatchAdd({
         {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />}
         {busy && progress
           ? `Ajout ${progress.done}/${progress.total}…`
-          : "Ajouter plusieurs photos / fichiers"}
+          : "Ajouter plusieurs photos"}
       </button>
       <p className="mt-2 text-xs text-muted-foreground">
-        Sélection multiple depuis la galerie, les téléchargements, les fichiers, Gmail ou Drive —
-        les photos sont placées automatiquement dans les prochains emplacements libres.
+        Sélection multiple d’images depuis la galerie ou un fournisseur de fichiers — les photos sont placées
+        automatiquement dans les prochains emplacements libres. Les autres documents vont dans « Fichiers supplémentaires ».
       </p>
       {/* Sélecteur Android complet (Galerie, Téléchargements, Fichiers, Gmail, Drive…) */}
       <input
         ref={inputRef}
         type="file"
+        accept="image/*"
         multiple
         className="hidden"
         onChange={(e) => void handleFiles(e.target.files)}
