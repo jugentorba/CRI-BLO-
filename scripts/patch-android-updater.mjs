@@ -169,11 +169,19 @@ const pathsXml = `<?xml version="1.0" encoding="utf-8"?>
 fs.writeFileSync(path.join(xmlDir, "criblo_updater_paths.xml"), pathsXml);
 
 let manifest = fs.readFileSync(manifestPath, "utf8");
-if (!manifest.includes("android.permission.REQUEST_INSTALL_PACKAGES")) {
-  manifest = manifest.replace(
-    "<application",
-    '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n\n    <application',
-  );
+const requiredPermissions = [
+  "android.permission.CAMERA",
+  "android.permission.ACCESS_FINE_LOCATION",
+  "android.permission.ACCESS_COARSE_LOCATION",
+  "android.permission.RECORD_AUDIO",
+  "android.permission.REQUEST_INSTALL_PACKAGES",
+];
+const missingPermissions = requiredPermissions.filter((permission) => !manifest.includes(permission));
+if (missingPermissions.length) {
+  const lines = missingPermissions
+    .map((permission) => `    <uses-permission android:name="${permission}" />`)
+    .join("\n");
+  manifest = manifest.replace("<application", `${lines}\n\n    <application`);
 }
 
 if (!manifest.includes(".criblo.updater.fileprovider")) {
