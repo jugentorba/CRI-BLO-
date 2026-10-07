@@ -24,7 +24,7 @@ import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { LocalBackupSection } from "@/components/LocalBackupSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/onedrive/sync";
-import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS } from "@/lib/ai/gemini";
+import { DEFAULT_GEMINI_MODEL, FREE_GEMINI_MODELS, testGeminiConnection } from "@/lib/ai/gemini";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
@@ -44,6 +44,8 @@ function Parametres() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [aiTestBusy, setAiTestBusy] = useState(false);
+  const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void getProfile().then((profile) => {
@@ -62,6 +64,24 @@ function Parametres() {
 
   async function patchSettings(patch: Partial<AppSettings>) {
     setSettings(await saveSettings(patch));
+  }
+
+  async function testConfiguredGemini() {
+    const apiKey = settings?.aiApiKey?.trim() ?? "";
+    if (!apiKey) {
+      setAiTestMessage("Ajoutez d'abord votre clé Gemini.");
+      return;
+    }
+    setAiTestBusy(true);
+    setAiTestMessage(null);
+    try {
+      const message = await testGeminiConnection(apiKey, settings?.aiModel || DEFAULT_GEMINI_MODEL);
+      setAiTestMessage(message);
+    } catch (error) {
+      setAiTestMessage(error instanceof Error ? error.message : "Test Gemini impossible.");
+    } finally {
+      setAiTestBusy(false);
+    }
   }
 
   async function chooseFolder() {
@@ -323,6 +343,20 @@ function Parametres() {
                 ))}
               </select>
             </label>
+
+            <button
+              type="button"
+              disabled={aiTestBusy || !(settings.aiApiKey ?? "").trim()}
+              onClick={() => void testConfiguredGemini()}
+              className="h-10 w-full rounded-xl border border-primary/40 bg-primary/5 text-xs font-bold text-primary disabled:opacity-50"
+            >
+              {aiTestBusy ? "Test en cours…" : "Tester la clé Gemini"}
+            </button>
+            {aiTestMessage && (
+              <div className="rounded-lg bg-muted/50 p-2 text-[11px] text-foreground">
+                {aiTestMessage}
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/5 px-3 py-2">
               <div className="text-[11px] text-muted-foreground">
