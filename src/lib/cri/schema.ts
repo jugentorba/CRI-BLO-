@@ -22,6 +22,7 @@ export interface FieldDef {
   required?: boolean;
   options?: string[]; // pour select / choice
   freeTextLabel?: string; // pour choice : champ libre complémentaire (ex. nom du RIP)
+  freeTextWhen?: string[]; // limite le champ libre à certaines options (ex. uniquement RIP)
   autoFrom?: "profile.company" | "profile.lastName" | "now" | "gps";
   example?: string; // texte pour le bouton "Exemple"
   hint?: string; // affiché uniquement si vraiment nécessaire
@@ -53,6 +54,7 @@ export const CRI_SECTIONS: SectionDef[] = [
         type: "choice",
         options: ["RIP", "AMII"],
         freeTextLabel: "Nom (si RIP)",
+        freeTextWhen: ["RIP"],
       },
       { id: "oiOc", label: "OI/OC ?", type: "choice", options: ["OI", "OC"] },
       { id: "nbLiaisonsGTR", label: "Nb liaisons avec GTR", type: "number" },
