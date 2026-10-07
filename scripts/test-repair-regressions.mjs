@@ -43,6 +43,11 @@ requireText(
   /android\.permission\.CAMERA/,
   "Every generated Android APK must request camera permission",
 );
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /usesCleartextTraffic/,
+  "Every generated Android APK must allow the integrated browser to reach explicitly entered HTTP sites",
+);
 
 forbidText(
   "src/components/PermissionSetupDialog.tsx",
