@@ -180,7 +180,7 @@ if (!manifest.includes(".criblo.updater.fileprovider")) {
   const provider = `
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="\\${applicationId}.criblo.updater.fileprovider"
+            android:authorities="\${applicationId}.criblo.updater.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
