@@ -31,6 +31,11 @@ for (const workflow of [".github/workflows/build-release.yml", ".github/workflow
     /node scripts\/patch-android-updater\.mjs/,
     "Android build must install the native in-app updater bridge before compiling the APK",
   );
+  requireText(
+    workflow,
+    /android\.permission\.ACCESS_FINE_LOCATION/,
+    "Android production build must retain precise-location permission",
+  );
 }
 
 requireText(
