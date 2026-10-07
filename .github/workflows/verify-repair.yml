@@ -49,7 +49,12 @@ jobs:
           npx cap add android
           npx cap sync android
           node scripts/patch-android-updater.mjs
+          grep -q 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.ACCESS_FINE_LOCATION' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.ACCESS_COARSE_LOCATION' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.RECORD_AUDIO' android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.REQUEST_INSTALL_PACKAGES' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           grep -q 'CriBloUpdaterPlugin.class' android/app/src/main/java/com/criblo/app/MainActivity.java
           grep -q 'class CriBloUpdaterPlugin' android/app/src/main/java/com/criblo/app/CriBloUpdaterPlugin.java
 
