@@ -165,6 +165,7 @@ export function PhotoSlot({
         watermarkEnabled={watermarkEnabled}
         saveToGallery={saveToGallery}
         onCancel={() => setCameraOpen(false)}
+        onNativeFallback={() => camRef.current?.click()}
         onCapture={async (blob) => {
           await savePhoto(criId, slot, blob);
           onChange(true);
