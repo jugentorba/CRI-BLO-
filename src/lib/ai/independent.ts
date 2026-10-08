@@ -325,7 +325,11 @@ export async function callIndependentAi(
     {
       model: config.model,
       messages,
-      max_tokens: options?.maxTokens ?? 1200,
+      // Reasoning tokens count against the output limit. A tiny limit such as
+      // 220 can silently return no user-visible text on 3.7/3.8 Flash.
+      max_tokens: config.provider === "gemini" && /^gemini-3\\.(?:7|8)-flash(?:$|-)/.test(config.model)
+        ? Math.max(options?.maxTokens ?? 1200, 1536)
+        : options?.maxTokens ?? 1200,
       ...(config.provider === "gemini" && getGeminiReasoningEffort(config.model, options?.fast ?? false)
         ? { reasoning_effort: getGeminiReasoningEffort(config.model, options?.fast ?? false) }
         : {}),
