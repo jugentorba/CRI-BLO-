@@ -3,7 +3,7 @@ name: Verify CRI-BLO repair branch
 on:
   push:
     branches:
-      - fix/criblo-release-gps-ai-updater
+      - "fix/**"
   workflow_dispatch:
 
 permissions:
