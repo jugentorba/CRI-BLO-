@@ -493,6 +493,60 @@ requireText(
   "Installer handoff must grant the APK content URI explicitly",
 );
 
+/* Cloud-folder sync must work without Google/Azure OAuth on Android. */
+requireText(
+  "src/lib/settings/repository.ts",
+  /cloudProvider\?:\s*"onedrive"\s*\|\s*"google-drive"\s*\|\s*"cloud-folder"/,
+  "Settings must support the native cloud-folder provider",
+);
+requireText(
+  "src/lib/cloud/folder-sync.ts",
+  /exportSyncSnapshot[\s\S]{0,1600}importSyncSnapshot/,
+  "Cloud-folder provider must backup and restore the full CRI BLO snapshot",
+);
+requireText(
+  "src/lib/cloud/folder-sync.ts",
+  /writeChunk[\s\S]{0,1600}readChunk/,
+  "Cloud-folder sync must stream snapshot data in chunks",
+);
+requireText(
+  "src/lib/cloud/sync.ts",
+  /cloud-folder[\s\S]{0,500}uploadCloudFolderSnapshot/,
+  "Cloud sync router must support the native cloud-folder provider",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /cloud_tree_uri/,
+  "Android native storage plugin must persist a separate cloud-folder URI",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /beginRead[\s\S]{0,2200}readChunk[\s\S]{0,2200}finishRead/,
+  "Android native storage plugin must support chunked cloud snapshot restore",
+);
+requireText(
+  "src/routes/parametres.tsx",
+  /value="cloud-folder"/,
+  "Settings must expose Cloud folder as a selectable sync provider",
+);
+
+/* Gemini comment rewriting must visibly change the source text. */
+requireText(
+  "src/components/cri/CommentAssistant.tsx",
+  /ne recopie pas mot pour mot|ne répète pas mot pour mot/i,
+  "Comment assistant must explicitly require a real rewrite",
+);
+requireText(
+  "src/components/cri/CommentAssistant.tsx",
+  /sameNormalizedText|sameMeaningfulText/,
+  "Comment assistant must detect unchanged AI output",
+);
+requireText(
+  "src/components/cri/CommentAssistant.tsx",
+  /retry|deuxième|second/i,
+  "Comment assistant must retry once when Gemini returns unchanged text",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
