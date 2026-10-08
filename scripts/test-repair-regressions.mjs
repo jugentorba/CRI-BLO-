@@ -563,10 +563,10 @@ requireText(
   /grantUriPermission/,
   "Updater must explicitly grant the selected installer read access to the APK URI",
 );
-forbidText(
+requireText(
   "scripts/patch-android-updater.mjs",
-  /Intent install = new Intent\(Intent\.ACTION_VIEW\);/,
-  "Primary updater handoff must not use generic ACTION_VIEW",
+  /install\.setPackage\(systemInstallerPackage\)/,
+  "Primary APK handler must be explicitly restricted to a system package installer",
 );
 
 /* Gemini field-note requests must be genuinely fast and produce a real rewrite. */
