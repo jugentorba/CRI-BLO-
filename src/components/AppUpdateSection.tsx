@@ -41,6 +41,7 @@ export function AppUpdateSection() {
         const nativeResult = await downloadAndInstallUpdate(
           info.downloadUrl,
           info.downloadName || "CRI-BLO.apk",
+          info.downloadSize,
         );
         if (nativeResult.status === "permission_required") {
           setInstallMessage(
