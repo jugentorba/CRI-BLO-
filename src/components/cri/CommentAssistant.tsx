@@ -13,6 +13,20 @@ const STYLES: { id: CommentStyle; label: string }[] = [
   { id: "detailed", label: "Détaillé" },
 ];
 
+function normalizeForComparison(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function sameNormalizedText(a: string, b: string): boolean {
+  return normalizeForComparison(a) === normalizeForComparison(b);
+}
+
 export function CommentAssistant({
   notes,
   context,
@@ -60,6 +74,7 @@ export function CommentAssistant({
       }
       const prompt = [
         STYLE_INSTRUCTIONS[nextStyle],
+        "Instruction importante : reformule réellement le commentaire. Ne recopie pas mot pour mot les notes brutes. Conserve strictement les faits, références, mesures, lieux et nombres.",
         ctxLines ? `Contexte CRI BLO :\n${ctxLines}` : "",
         patterns.length
           ? `Exemples de formulations déjà utilisées (style seulement, ne copie aucune donnée) :\n${patterns.join("\n")}`
@@ -68,7 +83,24 @@ export function CommentAssistant({
       ]
         .filter(Boolean)
         .join("\n\n");
-      const aiText = await callIndependentAi(aiConfig, prompt, { system: SYSTEM_PROMPT });
+
+      let aiText = await callIndependentAi(aiConfig, prompt, { system: SYSTEM_PROMPT });
+
+      // Some providers occasionally echo a short field note unchanged. A comment
+      // assistant is useful only if it produces a real rewrite, so retry once
+      // with an explicit second instruction before falling back.
+      if (sameNormalizedText(aiText, notes)) {
+        const retryPrompt = [
+          prompt,
+          "Deuxième tentative : le résultat précédent était identique au texte source. Réécris maintenant la même information avec une formulation professionnelle différente, sans ajouter ni retirer aucun fait.",
+        ].join("\n\n");
+        aiText = await callIndependentAi(aiConfig, retryPrompt, { system: SYSTEM_PROMPT });
+      }
+
+      if (sameNormalizedText(aiText, notes)) {
+        throw new Error(`${aiConfig.provider === "gemini" ? "Gemini" : "L’IA"} a renvoyé le commentaire sans le reformuler.`);
+      }
+
       if (lastKey.current !== key) return;
       setResult(aiText);
       setSource("ia");
@@ -187,7 +219,7 @@ export function CommentAssistant({
             className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
           >
             <Check className="h-3 w-3" />
-            Remplacer
+            Remplacer le commentaire
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { STORE_SETTINGS, reqAsync, tx } from "@/lib/db";
 import type { AiProvider } from "@/lib/ai/independent";
+import { isGoogleDriveConfigured } from "@/lib/google/config";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayDensity = "comfortable" | "compact" | "very-compact";
@@ -16,7 +17,8 @@ export interface AppSettings {
   /** Custom scale in percent, 80–110. Defaults to 100. */
   scale: number;
   cloudSyncEnabled?: boolean;
-  cloudProvider?: "onedrive" | "google-drive";
+  cloudProvider?: "onedrive" | "google-drive" | "cloud-folder";
+  cloudFolderName?: string;
   cloudAutoBackupEnabled?: boolean;
   cloudAutoBackupIntervalHours?: number;
   lastSyncAt?: string;
@@ -38,7 +40,7 @@ const DEFAULTS: AppSettings = {
   density: "comfortable",
   scale: 100,
   cloudSyncEnabled: false,
-  cloudProvider: "google-drive",
+  cloudProvider: "cloud-folder",
   cloudAutoBackupEnabled: false,
   cloudAutoBackupIntervalHours: 6,
   aiProvider: "none",
@@ -54,6 +56,12 @@ export async function getSettings(): Promise<AppSettings> {
     const merged = { ...DEFAULTS, ...(r ?? {}) };
     // Migration douce des anciennes versions qui n’avaient qu’un endpoint personnalisé.
     if (!r?.aiProvider && r?.aiEndpoint?.trim()) merged.aiProvider = "custom";
+    // Les anciennes versions utilisaient Google Drive comme valeur par défaut,
+    // même quand aucun OAuth Google n'était configuré dans l'APK. Dans ce cas
+    // on bascule vers le dossier cloud Android, qui ne demande aucun Client ID.
+    if (merged.cloudProvider === "google-drive" && !isGoogleDriveConfigured()) {
+      merged.cloudProvider = "cloud-folder";
+    }
     return merged;
   });
 }

@@ -2,11 +2,25 @@
 
 CRI BLO supports:
 
-1. **Google Drive** — recommended primary cloud backup.
-2. **Microsoft OneDrive** — alternative cloud backup.
-3. **Local backup file** — emergency/offline fallback.
+1. **Cloud folder (Android)** — recommended. Uses Android's system Storage Access Framework, so the user can choose a folder exposed by Google Drive, OneDrive, Dropbox, USB or local storage without CRI BLO needing OAuth credentials.
+2. **Google Drive API** — optional direct app-data backup when the CRI BLO Google OAuth application is configured.
+3. **Microsoft OneDrive API** — optional direct AppFolder backup when the CRI BLO Microsoft application is configured.
+4. **Local backup file** — emergency/offline fallback.
 
 End users never enter OAuth Client IDs. OAuth configuration belongs to the CRI BLO application build. Every user signs in with their own Google or Microsoft account and backs up only their own CRI BLO data.
+
+## Cloud folder — recommended on Android
+
+No application API key or OAuth client is required.
+
+1. In **Settings → Synchronisation multi-appareils**, choose **Dossier cloud Android**.
+2. Tap **Choisir le dossier cloud**.
+3. Android opens its system document-provider picker.
+4. Choose a folder exposed by an installed provider (for example Google Drive, OneDrive, Dropbox), USB storage, or local storage.
+5. CRI BLO keeps the persistable folder permission and writes `CRI-BLO-cloud-backup.json` there.
+6. On another Android device, select the same cloud folder and use **Restaurer du cloud**.
+
+The snapshot includes CRI history, photos, attachments and other local CRI BLO data. API keys remain device-local and are deliberately excluded from cloud snapshots.
 
 ## Automatic backup behavior
 

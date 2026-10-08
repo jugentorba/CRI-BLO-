@@ -321,6 +321,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Map;
 import java.util.UUID;
@@ -329,11 +330,24 @@ import java.util.concurrent.ConcurrentHashMap;
 @CapacitorPlugin(name = "CriBloStorage")
 public class CriBloStoragePlugin extends Plugin {
     private static final String PREFS = "criblo_storage";
-    private static final String KEY_TREE_URI = "export_tree_uri";
+    private static final String KEY_EXPORT_TREE_URI = "export_tree_uri";
+    private static final String KEY_CLOUD_TREE_URI = "cloud_tree_uri";
+    private static final int READ_CHUNK_BYTES = 256 * 1024;
+
     private final Map<String, OutputStream> openStreams = new ConcurrentHashMap<>();
+    private final Map<String, InputStream> openInputs = new ConcurrentHashMap<>();
 
     private SharedPreferences prefs() {
         return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private String keyForScope(PluginCall call) {
+        String scope = call.getString("scope", "export");
+        return "cloud".equals(scope) ? KEY_CLOUD_TREE_URI : KEY_EXPORT_TREE_URI;
+    }
+
+    private String storedTree(PluginCall call) {
+        return prefs().getString(keyForScope(call), null);
     }
 
     @PluginMethod
@@ -370,7 +384,7 @@ public class CriBloStoragePlugin extends Plugin {
             if (takeFlags != 0) {
                 getContext().getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
             }
-            prefs().edit().putString(KEY_TREE_URI, treeUri.toString()).apply();
+            prefs().edit().putString(keyForScope(call), treeUri.toString()).apply();
 
             response.put("status", "selected");
             response.put("name", folderName(treeUri));
@@ -382,7 +396,7 @@ public class CriBloStoragePlugin extends Plugin {
 
     @PluginMethod
     public void beginWrite(PluginCall call) {
-        String tree = prefs().getString(KEY_TREE_URI, null);
+        String tree = storedTree(call);
         if (tree == null || tree.isEmpty()) {
             JSObject response = new JSObject();
             response.put("wrote", false);
@@ -397,7 +411,7 @@ public class CriBloStoragePlugin extends Plugin {
             return;
         }
 
-        fileName = fileName.replace("/", "_").replace("\\\\", "_");
+        fileName = safeFileName(fileName);
 
         try {
             Uri treeUri = Uri.parse(tree);
@@ -412,7 +426,7 @@ public class CriBloStoragePlugin extends Plugin {
             }
             if (documentUri == null) throw new IllegalStateException("Impossible de créer le fichier.");
 
-            OutputStream output = resolver.openOutputStream(documentUri, "wt");
+            OutputStream output = resolver.openOutputStream(documentUri, "w");
             if (output == null) throw new IllegalStateException("Impossible d'ouvrir le fichier.");
 
             String token = UUID.randomUUID().toString();
@@ -424,7 +438,7 @@ public class CriBloStoragePlugin extends Plugin {
             response.put("folderName", folderName(treeUri));
             call.resolve(response);
         } catch (SecurityException error) {
-            prefs().edit().remove(KEY_TREE_URI).apply();
+            prefs().edit().remove(keyForScope(call)).apply();
             JSObject response = new JSObject();
             response.put("wrote", false);
             call.resolve(response);
@@ -487,6 +501,109 @@ public class CriBloStoragePlugin extends Plugin {
         call.resolve();
     }
 
+    @PluginMethod
+    public void beginRead(PluginCall call) {
+        String tree = storedTree(call);
+        if (tree == null || tree.isEmpty()) {
+            JSObject response = new JSObject();
+            response.put("found", false);
+            call.resolve(response);
+            return;
+        }
+
+        String fileName = call.getString("fileName");
+        if (fileName == null || fileName.trim().isEmpty()) {
+            call.reject("Nom de sauvegarde manquant.");
+            return;
+        }
+
+        try {
+            Uri treeUri = Uri.parse(tree);
+            ContentResolver resolver = getContext().getContentResolver();
+            Uri documentUri = findChild(resolver, treeUri, safeFileName(fileName));
+            if (documentUri == null) {
+                JSObject response = new JSObject();
+                response.put("found", false);
+                response.put("folderName", folderName(treeUri));
+                call.resolve(response);
+                return;
+            }
+
+            InputStream input = resolver.openInputStream(documentUri);
+            if (input == null) throw new IllegalStateException("Impossible d'ouvrir la sauvegarde cloud.");
+
+            String token = UUID.randomUUID().toString();
+            openInputs.put(token, input);
+
+            JSObject response = new JSObject();
+            response.put("found", true);
+            response.put("token", token);
+            response.put("folderName", folderName(treeUri));
+            call.resolve(response);
+        } catch (SecurityException error) {
+            prefs().edit().remove(keyForScope(call)).apply();
+            JSObject response = new JSObject();
+            response.put("found", false);
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("Impossible de lire la sauvegarde dans le dossier choisi.", error);
+        }
+    }
+
+    @PluginMethod
+    public void readChunk(PluginCall call) {
+        String token = call.getString("token");
+        if (token == null) {
+            call.reject("Session de restauration invalide.");
+            return;
+        }
+
+        InputStream input = openInputs.get(token);
+        if (input == null) {
+            JSObject response = new JSObject();
+            response.put("base64", "");
+            response.put("done", true);
+            call.resolve(response);
+            return;
+        }
+
+        try {
+            byte[] buffer = new byte[READ_CHUNK_BYTES];
+            int read = input.read(buffer);
+            JSObject response = new JSObject();
+            if (read < 0) {
+                openInputs.remove(token);
+                input.close();
+                response.put("base64", "");
+                response.put("done", true);
+            } else {
+                response.put("base64", Base64.encodeToString(buffer, 0, read, Base64.NO_WRAP));
+                response.put("done", false);
+            }
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("Lecture de la sauvegarde cloud impossible.", error);
+        }
+    }
+
+    @PluginMethod
+    public void finishRead(PluginCall call) {
+        String token = call.getString("token");
+        InputStream input = token == null ? null : openInputs.remove(token);
+        if (input != null) {
+            try {
+                input.close();
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+        call.resolve();
+    }
+
+    private String safeFileName(String value) {
+        return value.replace("/", "_").replace("\\\\", "_");
+    }
+
     private Uri findChild(ContentResolver resolver, Uri treeUri, String fileName) {
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
             treeUri,
@@ -534,7 +651,15 @@ public class CriBloStoragePlugin extends Plugin {
                 // best effort
             }
         }
+        for (InputStream input : openInputs.values()) {
+            try {
+                input.close();
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
         openStreams.clear();
+        openInputs.clear();
         super.handleOnDestroy();
     }
 }

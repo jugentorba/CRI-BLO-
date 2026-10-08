@@ -7,15 +7,21 @@ import {
   uploadGoogleDeviceSnapshot,
   restoreGoogleDeviceSnapshot,
 } from "@/lib/google/sync";
+import {
+  uploadCloudFolderSnapshot,
+  restoreCloudFolderSnapshot,
+} from "@/lib/cloud/folder-sync";
 
 export async function uploadDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {
   const settings = await getSettings();
+  if (settings.cloudProvider === "cloud-folder") return uploadCloudFolderSnapshot(interactive);
   if (settings.cloudProvider === "google-drive") return uploadGoogleDeviceSnapshot(interactive);
   return uploadOneDriveSnapshot(interactive);
 }
 
 export async function restoreDeviceSnapshot(): Promise<{ size: number }> {
   const settings = await getSettings();
+  if (settings.cloudProvider === "cloud-folder") return restoreCloudFolderSnapshot(true);
   if (settings.cloudProvider === "google-drive") return restoreGoogleDeviceSnapshot();
   return restoreOneDriveSnapshot();
 }
