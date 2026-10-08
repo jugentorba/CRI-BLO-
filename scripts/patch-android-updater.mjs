@@ -203,17 +203,18 @@ public class CriBloUpdaterPlugin extends Plugin {
     private void openSystemPackageInstaller(Activity activity, Uri uri) {
         PackageManager manager = activity.getPackageManager();
 
-        // ACTION_VIEW with APK MIME is supported by Android's package installer
-        // on more OEM devices than ACTION_INSTALL_PACKAGE with a content URI.
-        Intent install = new Intent(Intent.ACTION_VIEW);
-        install.setDataAndType(uri, "application/vnd.android.package-archive");
+        // Installation must be handled by Android's package installer, not by
+        // the generic file viewer (ACTION_VIEW), which may show a chooser or
+        // immediately close after a third-party APK handler receives the file.
+        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        install.setData(uri);
         install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         install.putExtra(Intent.EXTRA_RETURN_RESULT, false);
 
-        // Prefer Android/OEM's system package installer. This avoids the generic
-        // "Open with" chooser where third-party APK handlers can intercept the
-        // file and immediately return without showing Android's confirmation UI.
+        // Prefer the OS installer explicitly when package visibility permits.
+        // Do not select the first "system" ACTION_VIEW file handler, as it may
+        // be a document viewer instead of Android's package installer.
         List<ResolveInfo> handlers = manager.queryIntentActivities(
             install,
             PackageManager.MATCH_DEFAULT_ONLY
@@ -229,6 +230,9 @@ public class CriBloUpdaterPlugin extends Plugin {
             }
         }
 
+        // Even when Android hides installer packages from queries, launching
+        // ACTION_INSTALL_PACKAGE can still succeed via the system resolver.
+        // Never fall back to ACTION_VIEW or an unrestricted APK-file chooser.
         if (systemInstallerPackage != null) {
             install.setPackage(systemInstallerPackage);
             activity.grantUriPermission(
@@ -236,35 +240,15 @@ public class CriBloUpdaterPlugin extends Plugin {
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             );
-            activity.startActivity(install);
-            return;
         }
-
-        // If Android hides the handler list because of package-visibility rules,
-        // resolve its default installer directly and grant that package access.
-        ResolveInfo resolved = manager.resolveActivity(install, PackageManager.MATCH_DEFAULT_ONLY);
-        if (resolved != null && resolved.activityInfo != null) {
-            String targetPackage = resolved.activityInfo.packageName;
-            install.setPackage(targetPackage);
-            activity.grantUriPermission(
-                targetPackage,
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
+        try {
+            activity.startActivity(install);
+        } catch (android.content.ActivityNotFoundException error) {
+            throw new IllegalStateException(
+                "Android n'a pas trouvé son installateur système pour la mise à jour.",
+                error
             );
-            activity.startActivity(install);
-            return;
         }
-
-        // If package visibility hides the VIEW handlers, try Android's
-        // explicit package-install action as a secondary supported route.
-        Intent fallback = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-        fallback.setData(uri);
-        fallback.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
-        fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        if (fallback.resolveActivity(manager) == null) {
-            throw new IllegalStateException("Aucun installateur APK Android disponible.");
-        }
-        activity.startActivity(fallback);
     }
 
     private HttpURLConnection openDownload(String startUrl) throws Exception {
