@@ -1,10 +1,11 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
-export type NativeUpdateStatus = "permission_required" | "installer_opened";
+export type NativeUpdateStatus = "permission_required" | "installer_requested";
 
 export interface NativeUpdateResult {
   status: NativeUpdateStatus;
   message?: string;
+  downloadPath?: string;
 }
 
 interface CriBloUpdaterPlugin {
