@@ -61,7 +61,7 @@ for (const model of ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.8-fl
   assert.equal(sent.transport, "web");
   assert.equal(sent.body.model, model);
   assert.equal(sent.body.reasoning_effort, model.includes("3.5") ? "minimal" : "low");
-  assert.equal(sent.body.max_tokens, 220);
+  assert.equal(sent.body.max_tokens, model.includes("3.5") ? 220 : 1536);
   assert.equal(sent.headers.Authorization, "Bearer TEST_ONLY_FAKE_KEY");
 }
 
