@@ -569,26 +569,46 @@ forbidText(
   "Primary updater handoff must not use generic ACTION_VIEW",
 );
 
-/* Gemini field-note requests must be low-latency and resilient on mobile networks. */
+/* Gemini field-note requests must be genuinely fast and produce a real rewrite. */
 requireText(
   "src/lib/ai/independent.ts",
-  /config\.provider\s*===\s*"gemini"[\s\S]{0,1200}reasoning_effort:\s*"low"/,
-  "Gemini requests must use low reasoning effort for fast field-note rewriting",
+  /model:\s*"gemini-3\.5-flash-lite"/,
+  "Gemini default must use the current Flash-Lite model for low-latency field notes",
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /readTimeout:\s*120000/,
-  "Native AI HTTP must allow enough time for mobile-network responses",
+  /reasoning_effort:\s*options\?\.fast\s*\?\s*"minimal"\s*:\s*"low"/,
+  "Fast Gemini calls must use minimal reasoning effort",
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /isTimeoutError[\s\S]{0,2200}retry/i,
-  "Gemini native HTTP must retry once after a timeout",
+  /readTimeout:\s*provider\s*===\s*"gemini"[\s\S]{0,120}35000/,
+  "Gemini native HTTP must fail quickly instead of waiting minutes",
+);
+requireText(
+  "src/lib/ai/independent.ts",
+  /max_tokens:\s*options\?\.maxTokens/,
+  "AI calls must support a small output budget for field-note speed",
 );
 requireText(
   "src/routes/assistant.tsx",
-  /Gemini[\s\S]{0,1500}timeout|timeout[\s\S]{0,1500}Gemini/i,
-  "Assistant must surface Gemini timeout clearly instead of silently pretending the offline rewrite was AI",
+  /maxTokens:\s*220[\s\S]{0,200}fast:\s*true/,
+  "Main Assistant must use the fast small-output AI path",
+);
+requireText(
+  "src/routes/assistant.tsx",
+  /sameNormalizedText/,
+  "Main Assistant must detect an unchanged AI response",
+);
+requireText(
+  "src/routes/assistant.tsx",
+  /OBJECTIVE_INSTRUCTIONS/,
+  "Each Assistant objective must use a concise dedicated instruction",
+);
+requireText(
+  "src/routes/assistant.tsx",
+  /PRIMARY_TONES[\s\S]{0,500}ADVANCED_TONES/,
+  "Common Assistant objectives must stay visible while email/explanation move under More",
 );
 requireText(
   "src/routes/assistant.tsx",

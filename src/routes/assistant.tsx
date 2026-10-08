@@ -63,13 +63,43 @@ const OUT_LANGS: { id: Lang; label: string }[] = [
   { id: "en", label: "🇬🇧 EN" },
   { id: "sq", label: "🇦🇱 AL" },
 ];
-const TONES: { id: Tone; label: string }[] = [
+const PRIMARY_TONES: { id: Tone; label: string }[] = [
   { id: "professional", label: "Professionnel" },
   { id: "simple", label: "Simple" },
   { id: "translate", label: "Traduction" },
+];
+
+const ADVANCED_TONES: { id: Tone; label: string }[] = [
   { id: "email", label: "E-mail" },
   { id: "explain", label: "Explication" },
 ];
+
+const OBJECTIVE_INSTRUCTIONS: Record<Tone, string> = {
+  professional:
+    "Réécris réellement la note en compte-rendu télécom professionnel. Corrige grammaire et orthographe, change la structure des phrases, et organise si possible en constat/défaut, action réalisée, résultat. 2 à 3 phrases maximum. Ne recopie pas la phrase source mot pour mot.",
+  simple:
+    "Réécris la note en une phrase courte, claire et correcte. Garde uniquement l'essentiel et ne recopie pas la formulation source mot pour mot.",
+  translate:
+    "Traduis fidèlement dans la langue de sortie. Conserve exactement les nombres, références, mesures, noms de lieux et sigles télécom. Ne donne aucune explication.",
+  email:
+    "Transforme la note en un e-mail professionnel très court, maximum 4 lignes, sans inventer de destinataire, de date ni d'information.",
+  explain:
+    "Explique la note simplement pour quelqu'un qui ne connaît pas le contexte, maximum 3 phrases, sans ajouter de faits.",
+};
+
+function normalizeForComparison(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function sameNormalizedText(a: string, b: string): boolean {
+  return normalizeForComparison(a) === normalizeForComparison(b);
+}
 
 function Assistant() {
   const online = useOnline();
@@ -77,6 +107,7 @@ function Assistant() {
   const [inputLang, setInputLang] = useState<InLang>("auto");
   const [outputLang, setOutputLang] = useState<Lang>("fr");
   const [tone, setTone] = useState<Tone>("professional");
+  const [showMoreObjectives, setShowMoreObjectives] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -106,12 +137,13 @@ function Assistant() {
         }
         output = translateNotes(clean);
       } else {
-        const context = chat
-          ? `${chat.messages
-              .slice(-4)
+        const shortHistory = chat
+          ? chat.messages
+              .slice(-2)
               .map((m) => `${m.role === "user" ? "Note" : "Réponse"} : ${m.text}`)
-              .join("\n")}\n\nNouvelle demande : ${clean}`
-          : clean;
+              .join("\n")
+              .slice(0, 1200)
+          : "";
         const settings = await getSettings();
         const aiConfig = buildAiConfig(settings);
         activeProvider = aiConfig?.provider ?? null;
@@ -119,21 +151,46 @@ function Assistant() {
           setError("Aucun fournisseur IA configuré — moteur local utilisé.");
           output = outputLang === "fr" ? translateNotes(clean) : "";
         } else {
-          output = await callIndependentAi(
-            aiConfig,
-            `Langue d'entrée : ${inputLang}. Langue de sortie : ${outputLang}. Ton : ${tone}.\n\n${context.slice(0, 6000)}`,
-            {
-              system:
-                "Tu es l'assistant de rédaction CRI BLO. N'invente aucune information. Conserve exactement les références, nombres, distances et noms de lieux. Réponds uniquement avec le texte final demandé.",
-            },
-          );
+          const instruction = OBJECTIVE_INSTRUCTIONS[tone];
+          const request = [
+            `Langue d'entrée : ${inputLang}. Langue de sortie : ${outputLang}.`,
+            instruction,
+            shortHistory ? `Contexte récent :\n${shortHistory}` : "",
+            `Note à traiter :\n${clean.slice(0, 2500)}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+
+          output = await callIndependentAi(aiConfig, request, {
+            system:
+              "Assistant CRI BLO pour techniciens fibre. N'invente rien. Conserve exactement nombres, références, mesures, lieux et sigles. Réponds uniquement avec le texte final.",
+            maxTokens: 220,
+            fast: true,
+          });
+
+          if (tone !== "translate" && sameNormalizedText(output, clean)) {
+            output = await callIndependentAi(
+              aiConfig,
+              `${request}\n\nLa réponse précédente était trop proche de la note. Reformule avec une structure et des mots réellement différents sans changer aucun fait.`,
+              {
+                system:
+                  "Assistant CRI BLO pour techniciens fibre. N'invente rien. Conserve exactement nombres, références, mesures, lieux et sigles. Réponds uniquement avec le texte final.",
+                maxTokens: 220,
+                fast: true,
+              },
+            );
+          }
+
+          if (tone !== "translate" && sameNormalizedText(output, clean)) {
+            throw new Error("L’IA a renvoyé pratiquement le même texte. Réessayez.");
+          }
         }
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : "Assistant indisponible.";
       const timeout = /timeout|timed out|time out|délai dépassé/i.test(detail);
       if (timeout && activeProvider === "gemini") {
-        setError("Google Gemini : délai dépassé après deux tentatives. Votre note est conservée : réessayez.");
+        setError("Google Gemini : délai dépassé. Votre note est conservée : réessayez.");
         output = "";
       } else {
         setError(`${detail} — texte mis en forme hors-ligne.`);
@@ -309,11 +366,24 @@ function Assistant() {
       </Row>
 
       <Row label="Objectif">
-        {TONES.map((t) => (
+        {PRIMARY_TONES.map((t) => (
           <Chip key={t.id} active={tone === t.id} onClick={() => setTone(t.id)}>
             {t.label}
           </Chip>
         ))}
+        <button
+          type="button"
+          onClick={() => setShowMoreObjectives((value) => !value)}
+          className="rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground active:scale-95"
+        >
+          {showMoreObjectives ? "Moins" : "Plus"}
+        </button>
+        {showMoreObjectives &&
+          ADVANCED_TONES.map((t) => (
+            <Chip key={t.id} active={tone === t.id} onClick={() => setTone(t.id)}>
+              {t.label}
+            </Chip>
+          ))}
       </Row>
 
       <textarea
