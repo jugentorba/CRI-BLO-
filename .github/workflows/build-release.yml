@@ -52,6 +52,12 @@ jobs:
         working-directory: source
         run: npm install --no-audit --no-fund
 
+      - name: Run regression and Gemini transport tests before signing
+        working-directory: source
+        run: |
+          node scripts/test-ai-models.mjs
+          node scripts/test-repair-regressions.mjs
+
       - name: Set release version
         env:
           RUN_NUMBER: ${{ github.run_number }}

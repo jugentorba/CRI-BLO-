@@ -563,10 +563,10 @@ requireText(
   /grantUriPermission/,
   "Updater must explicitly grant the selected installer read access to the APK URI",
 );
-forbidText(
+requireText(
   "scripts/patch-android-updater.mjs",
-  /Intent install = new Intent\(Intent\.ACTION_VIEW\);/,
-  "Primary updater handoff must not use generic ACTION_VIEW",
+  /install\.setPackage\(systemInstallerPackage\)/,
+  "Primary APK handler must be explicitly restricted to a system package installer",
 );
 
 /* Gemini field-note requests must be genuinely fast and produce a real rewrite. */
@@ -577,8 +577,8 @@ requireText(
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /reasoning_effort:\s*options\?\.fast\s*\?\s*"minimal"\s*:\s*"low"/,
-  "Fast Gemini calls must use minimal reasoning effort",
+  /getGeminiReasoningEffort\(config\.model,\s*options\?\.fast\s*\?\?\s*false\)/,
+  "Fast Gemini calls must choose a model-compatible reasoning level",
 );
 requireText(
   "src/lib/ai/independent.ts",
