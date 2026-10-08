@@ -446,6 +446,53 @@ requireText(
   "Native Android exports must stream files in chunks instead of sending one huge bridge payload",
 );
 
+/* Android updater must validate the downloaded APK before opening Package Installer. */
+requireText(
+  "src/lib/updates/github.ts",
+  /downloadSize\?:\s*number/,
+  "Update metadata must carry the GitHub APK asset size",
+);
+requireText(
+  "src/components/AppUpdateSection.tsx",
+  /info\.downloadSize/,
+  "Android update action must pass the expected APK size into the native downloader",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /expectedSize/,
+  "Native updater must receive the expected GitHub APK size",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /PK\\u0003\\u0004|0x50[\s\S]{0,120}0x4b/,
+  "Native updater must reject files that do not have an APK ZIP header",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /getPackageArchiveInfo/,
+  "Native updater must parse the downloaded APK before opening the installer",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /activity\.getPackageName\(\)/,
+  "Native updater must verify the downloaded package belongs to CRI BLO",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /GET_SIGNING_CERTIFICATES/,
+  "Native updater must verify APK signing certificate compatibility",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /Content-Type|contentType/i,
+  "Native updater must reject HTML/JSON responses masquerading as APK downloads",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /ClipData/,
+  "Installer handoff must grant the APK content URI explicitly",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",

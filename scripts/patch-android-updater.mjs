@@ -33,7 +33,11 @@ fs.writeFileSync(path.join(javaDir, "MainActivity.java"), mainActivity);
 const plugin = `package ${appPackage};
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -48,17 +52,24 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
 
 @CapacitorPlugin(name = "CriBloUpdater")
 public class CriBloUpdaterPlugin extends Plugin {
+    private static final int MAX_REDIRECTS = 8;
+
     @PluginMethod
     public void downloadAndInstall(PluginCall call) {
         String url = call.getString("url");
         String requestedName = call.getString("fileName");
+        Long expectedSizeValue = call.getLong("expectedSize");
+        long expectedSize = expectedSizeValue == null ? 0L : expectedSizeValue.longValue();
+
         if (url == null || !url.startsWith("https://")) {
             call.reject("URL de mise à jour invalide.");
             return;
@@ -92,6 +103,7 @@ public class CriBloUpdaterPlugin extends Plugin {
 
         new Thread(() -> {
             HttpURLConnection connection = null;
+            File apk = null;
             try {
                 File directory = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
                 if (directory == null) directory = activity.getFilesDir();
@@ -99,35 +111,60 @@ public class CriBloUpdaterPlugin extends Plugin {
                     throw new IllegalStateException("Impossible de créer le dossier de mise à jour.");
                 }
 
-                File apk = new File(directory, safeFileName);
-                connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setInstanceFollowRedirects(true);
-                connection.setConnectTimeout(15000);
-                connection.setReadTimeout(120000);
-                connection.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
-                connection.setRequestProperty("User-Agent", "CRI-BLO-Updater");
-                connection.connect();
+                apk = new File(directory, safeFileName);
+                if (apk.exists() && !apk.delete()) {
+                    throw new IllegalStateException("Impossible de remplacer l'ancien fichier de mise à jour.");
+                }
 
+                connection = openDownload(url);
                 int status = connection.getResponseCode();
                 if (status < 200 || status >= 300) {
                     throw new IllegalStateException("Téléchargement refusé (HTTP " + status + ").");
                 }
 
+                String contentType = connection.getContentType();
+                if (contentType != null) {
+                    String lower = contentType.toLowerCase();
+                    if (lower.contains("text/html") || lower.contains("application/json") || lower.contains("text/plain")) {
+                        throw new IllegalStateException("GitHub n'a pas renvoyé un fichier APK (Content-Type " + contentType + ").");
+                    }
+                }
+
+                long responseLength = connection.getContentLengthLong();
+                if (expectedSize > 0 && responseLength > 0 && responseLength != expectedSize) {
+                    throw new IllegalStateException(
+                        "Taille APK inattendue avant téléchargement (" + responseLength + " au lieu de " + expectedSize + " octets)."
+                    );
+                }
+
+                long total = 0;
                 try (InputStream input = connection.getInputStream();
                      FileOutputStream output = new FileOutputStream(apk, false)) {
                     byte[] buffer = new byte[32768];
                     int read;
-                    long total = 0;
                     while ((read = input.read(buffer)) >= 0) {
                         if (read == 0) continue;
                         output.write(buffer, 0, read);
                         total += read;
                     }
                     output.flush();
-                    if (total < 1024) {
-                        throw new IllegalStateException("Le fichier APK téléchargé est vide ou incomplet.");
-                    }
+                    output.getFD().sync();
                 }
+
+                if (total < 1024) {
+                    throw new IllegalStateException("Le fichier APK téléchargé est vide ou incomplet.");
+                }
+                if (expectedSize > 0 && total != expectedSize) {
+                    throw new IllegalStateException(
+                        "Téléchargement APK incomplet (" + total + " au lieu de " + expectedSize + " octets)."
+                    );
+                }
+                if (apk.length() != total) {
+                    throw new IllegalStateException("Le fichier APK écrit sur le téléphone est incomplet.");
+                }
+
+                validateZipHeader(apk);
+                validatePackageAndSigner(activity, apk);
 
                 File finalApk = apk;
                 activity.runOnUiThread(() -> {
@@ -139,23 +176,125 @@ public class CriBloUpdaterPlugin extends Plugin {
                         );
                         Intent install = new Intent(Intent.ACTION_VIEW);
                         install.setDataAndType(uri, "application/vnd.android.package-archive");
+                        install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
                         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         activity.startActivity(install);
 
                         JSObject result = new JSObject();
                         result.put("status", "installer_opened");
-                        result.put("message", "APK téléchargé. Confirmez l'installation Android.");
+                        result.put("message", "APK vérifié. Confirmez l'installation Android.");
                         call.resolve(result);
                     } catch (Exception error) {
-                        call.reject("APK téléchargé mais impossible d'ouvrir l'installateur Android.", error);
+                        call.reject("APK vérifié mais impossible d'ouvrir l'installateur Android.", error);
                     }
                 });
             } catch (Exception error) {
+                if (apk != null && apk.exists()) {
+                    // Ne jamais laisser un fichier partiel être réutilisé au prochain essai.
+                    //noinspection ResultOfMethodCallIgnored
+                    apk.delete();
+                }
                 call.reject("Téléchargement de la mise à jour impossible: " + error.getMessage(), error);
             } finally {
                 if (connection != null) connection.disconnect();
             }
         }, "criblo-updater").start();
+    }
+
+    private HttpURLConnection openDownload(String startUrl) throws Exception {
+        String current = startUrl;
+        for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+            URL parsed = new URL(current);
+            if (!"https".equalsIgnoreCase(parsed.getProtocol())) {
+                throw new IllegalStateException("Redirection de mise à jour non sécurisée.");
+            }
+
+            HttpURLConnection connection = (HttpURLConnection) parsed.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(120000);
+            connection.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
+            connection.setRequestProperty("User-Agent", "CRI-BLO-Updater");
+            connection.connect();
+
+            int status = connection.getResponseCode();
+            if (status == HttpURLConnection.HTTP_MOVED_PERM ||
+                status == HttpURLConnection.HTTP_MOVED_TEMP ||
+                status == HttpURLConnection.HTTP_SEE_OTHER ||
+                status == 307 ||
+                status == 308) {
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null || location.trim().isEmpty()) {
+                    throw new IllegalStateException("Redirection GitHub sans destination.");
+                }
+                current = new URL(parsed, location).toString();
+                continue;
+            }
+            return connection;
+        }
+        throw new IllegalStateException("Trop de redirections pendant le téléchargement de l'APK.");
+    }
+
+    private void validateZipHeader(File apk) throws Exception {
+        byte[] header = new byte[4];
+        try (FileInputStream input = new FileInputStream(apk)) {
+            if (input.read(header) != 4) {
+                throw new IllegalStateException("APK vide ou illisible.");
+            }
+        }
+        boolean zip =
+            (header[0] & 0xff) == 0x50 &&
+            (header[1] & 0xff) == 0x4b &&
+            (header[2] & 0xff) == 0x03 &&
+            (header[3] & 0xff) == 0x04;
+        if (!zip) {
+            throw new IllegalStateException("Le fichier téléchargé n'est pas un APK valide (en-tête ZIP absent).");
+        }
+    }
+
+    private void validatePackageAndSigner(Activity activity, File apk) throws Exception {
+        PackageManager manager = activity.getPackageManager();
+        int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? PackageManager.GET_SIGNING_CERTIFICATES
+            : PackageManager.GET_SIGNATURES;
+
+        PackageInfo candidate = manager.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
+        if (candidate == null) {
+            throw new IllegalStateException("Android ne reconnaît pas le fichier téléchargé comme un APK.");
+        }
+        if (!activity.getPackageName().equals(candidate.packageName)) {
+            throw new IllegalStateException("L'APK téléchargé n'appartient pas à CRI BLO.");
+        }
+
+        PackageInfo installed = manager.getPackageInfo(activity.getPackageName(), flags);
+        Signature[] candidateSigners = getSigners(candidate);
+        Signature[] installedSigners = getSigners(installed);
+        if (candidateSigners.length == 0 || installedSigners.length == 0) {
+            throw new IllegalStateException("Signature APK introuvable.");
+        }
+
+        boolean sameSigner = false;
+        for (Signature next : candidateSigners) {
+            for (Signature current : installedSigners) {
+                if (MessageDigest.isEqual(next.toByteArray(), current.toByteArray())) {
+                    sameSigner = true;
+                    break;
+                }
+            }
+            if (sameSigner) break;
+        }
+        if (!sameSigner) {
+            throw new IllegalStateException("La signature de la mise à jour ne correspond pas à l'application installée.");
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private Signature[] getSigners(PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.signingInfo != null) {
+            return info.signingInfo.getApkContentsSigners();
+        }
+        return info.signatures == null ? new Signature[0] : info.signatures;
     }
 }
 `;

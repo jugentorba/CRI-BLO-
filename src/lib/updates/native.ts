@@ -8,7 +8,7 @@ export interface NativeUpdateResult {
 }
 
 interface CriBloUpdaterPlugin {
-  downloadAndInstall(options: { url: string; fileName?: string }): Promise<NativeUpdateResult>;
+  downloadAndInstall(options: { url: string; fileName?: string; expectedSize?: number }): Promise<NativeUpdateResult>;
 }
 
 const CriBloUpdater = registerPlugin<CriBloUpdaterPlugin>("CriBloUpdater");
@@ -20,6 +20,7 @@ export function canInstallUpdateNatively(): boolean {
 export async function downloadAndInstallUpdate(
   url: string,
   fileName = "CRI-BLO.apk",
+  expectedSize?: number,
 ): Promise<NativeUpdateResult> {
   if (!canInstallUpdateNatively()) {
     throw new Error("L'installation directe est disponible uniquement dans l'application Android CRI BLO.");
@@ -27,5 +28,5 @@ export async function downloadAndInstallUpdate(
   if (!/^https:\/\//i.test(url)) {
     throw new Error("URL de mise à jour non sécurisée.");
   }
-  return CriBloUpdater.downloadAndInstall({ url, fileName });
+  return CriBloUpdater.downloadAndInstall({ url, fileName, expectedSize });
 }
