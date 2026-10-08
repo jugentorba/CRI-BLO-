@@ -56,9 +56,9 @@ export const GEMINI_MODEL_OPTIONS: ReadonlyArray<{
 
 export function getGeminiReasoningEffort(model: string, fast: boolean): "minimal" | "low" | undefined {
   // Gemini 3.7/3.8 Flash reject "minimal", returning HTTP 400.
-  if (/^gemini-3\\.(?:7|8)-flash(?:$|-)/.test(model)) return "low";
+  if (/^gemini-3\.(?:7|8)-flash(?:$|-)/.test(model)) return "low";
   // Earlier 3.x Flash and Flash-Lite accept minimal thinking on short jobs.
-  if (/^gemini-3\\.(?:5|6)-flash(?:-lite)?(?:$|-)/.test(model)) return fast ? "minimal" : "low";
+  if (/^gemini-3\.(?:5|6)-flash(?:-lite)?(?:$|-)/.test(model)) return fast ? "minimal" : "low";
   // For manually entered or legacy IDs, use the provider's default instead
   // of guessing an unsupported reasoning value.
   return undefined;
@@ -327,7 +327,7 @@ export async function callIndependentAi(
       messages,
       // Reasoning tokens count against the output limit. A tiny limit such as
       // 220 can silently return no user-visible text on 3.7/3.8 Flash.
-      max_tokens: config.provider === "gemini" && /^gemini-3\\.(?:7|8)-flash(?:$|-)/.test(config.model)
+      max_tokens: config.provider === "gemini" && /^gemini-3\.(?:7|8)-flash(?:$|-)/.test(config.model)
         ? Math.max(options?.maxTokens ?? 1200, 1536)
         : options?.maxTokens ?? 1200,
       ...(config.provider === "gemini" && getGeminiReasoningEffort(config.model, options?.fast ?? false)
