@@ -34,6 +34,7 @@ export interface AppUpdateInfo {
   platform: AppPlatform;
   downloadUrl?: string;
   downloadName?: string;
+  downloadSize?: number;
 }
 
 function versionParts(version: string): number[] {
@@ -128,6 +129,7 @@ export async function checkForAppUpdate(signal?: AbortSignal): Promise<AppUpdate
     platform,
     downloadUrl: asset?.browser_download_url,
     downloadName: asset?.name,
+    downloadSize: asset?.size,
   };
 }
 
