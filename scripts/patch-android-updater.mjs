@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CriBloUpdaterPlugin.class);
+        registerPlugin(CriBloStoragePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
@@ -159,6 +160,247 @@ public class CriBloUpdaterPlugin extends Plugin {
 }
 `;
 fs.writeFileSync(path.join(javaDir, "CriBloUpdaterPlugin.java"), plugin);
+
+const storagePlugin = `package ${appPackage};
+
+import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.DocumentsContract;
+import android.util.Base64;
+
+import androidx.activity.result.ActivityResult;
+
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.io.OutputStream;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+@CapacitorPlugin(name = "CriBloStorage")
+public class CriBloStoragePlugin extends Plugin {
+    private static final String PREFS = "criblo_storage";
+    private static final String KEY_TREE_URI = "export_tree_uri";
+    private final Map<String, OutputStream> openStreams = new ConcurrentHashMap<>();
+
+    private SharedPreferences prefs() {
+        return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    @PluginMethod
+    public void pickFolder(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION |
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION |
+            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+        );
+        startActivityForResult(call, intent, "folderPicked");
+    }
+
+    @ActivityCallback
+    private void folderPicked(PluginCall call, ActivityResult result) {
+        JSObject response = new JSObject();
+        if (call == null || result == null || result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            response.put("status", "cancelled");
+            if (call != null) call.resolve(response);
+            return;
+        }
+
+        Uri treeUri = result.getData().getData();
+        if (treeUri == null) {
+            response.put("status", "cancelled");
+            call.resolve(response);
+            return;
+        }
+
+        try {
+            int takeFlags = result.getData().getFlags() &
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            if (takeFlags != 0) {
+                getContext().getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
+            }
+            prefs().edit().putString(KEY_TREE_URI, treeUri.toString()).apply();
+
+            response.put("status", "selected");
+            response.put("name", folderName(treeUri));
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("Impossible de conserver l'accès au dossier sélectionné.", error);
+        }
+    }
+
+    @PluginMethod
+    public void beginWrite(PluginCall call) {
+        String tree = prefs().getString(KEY_TREE_URI, null);
+        if (tree == null || tree.isEmpty()) {
+            JSObject response = new JSObject();
+            response.put("wrote", false);
+            call.resolve(response);
+            return;
+        }
+
+        String fileName = call.getString("fileName");
+        String mimeType = call.getString("mimeType", "application/octet-stream");
+        if (fileName == null || fileName.trim().isEmpty()) {
+            call.reject("Nom de fichier manquant.");
+            return;
+        }
+
+        fileName = fileName.replace("/", "_").replace("\\\\", "_");
+
+        try {
+            Uri treeUri = Uri.parse(tree);
+            ContentResolver resolver = getContext().getContentResolver();
+            Uri documentUri = findChild(resolver, treeUri, fileName);
+            if (documentUri == null) {
+                Uri parent = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                );
+                documentUri = DocumentsContract.createDocument(resolver, parent, mimeType, fileName);
+            }
+            if (documentUri == null) throw new IllegalStateException("Impossible de créer le fichier.");
+
+            OutputStream output = resolver.openOutputStream(documentUri, "wt");
+            if (output == null) throw new IllegalStateException("Impossible d'ouvrir le fichier.");
+
+            String token = UUID.randomUUID().toString();
+            openStreams.put(token, output);
+
+            JSObject response = new JSObject();
+            response.put("wrote", true);
+            response.put("token", token);
+            response.put("folderName", folderName(treeUri));
+            call.resolve(response);
+        } catch (SecurityException error) {
+            prefs().edit().remove(KEY_TREE_URI).apply();
+            JSObject response = new JSObject();
+            response.put("wrote", false);
+            call.resolve(response);
+        } catch (Exception error) {
+            call.reject("Impossible de préparer l'export dans le dossier choisi.", error);
+        }
+    }
+
+    @PluginMethod
+    public void writeChunk(PluginCall call) {
+        String token = call.getString("token");
+        String base64 = call.getString("base64");
+        if (token == null || base64 == null) {
+            call.reject("Bloc d'export invalide.");
+            return;
+        }
+
+        OutputStream output = openStreams.get(token);
+        if (output == null) {
+            call.reject("Session d'export introuvable.");
+            return;
+        }
+
+        try {
+            output.write(Base64.decode(base64, Base64.DEFAULT));
+            call.resolve();
+        } catch (Exception error) {
+            call.reject("Écriture du fichier impossible.", error);
+        }
+    }
+
+    @PluginMethod
+    public void finishWrite(PluginCall call) {
+        String token = call.getString("token");
+        OutputStream output = token == null ? null : openStreams.remove(token);
+        if (output == null) {
+            call.reject("Session d'export introuvable.");
+            return;
+        }
+        try {
+            output.flush();
+            output.close();
+            call.resolve();
+        } catch (Exception error) {
+            call.reject("Impossible de finaliser le fichier exporté.", error);
+        }
+    }
+
+    @PluginMethod
+    public void abortWrite(PluginCall call) {
+        String token = call.getString("token");
+        OutputStream output = token == null ? null : openStreams.remove(token);
+        if (output != null) {
+            try {
+                output.close();
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+        call.resolve();
+    }
+
+    private Uri findChild(ContentResolver resolver, Uri treeUri, String fileName) {
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        );
+        String[] projection = new String[] {
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        };
+
+        try (Cursor cursor = resolver.query(children, projection, null, null, null)) {
+            if (cursor == null) return null;
+            int idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            while (cursor.moveToNext()) {
+                if (nameIndex >= 0 && fileName.equals(cursor.getString(nameIndex))) {
+                    String id = cursor.getString(idIndex);
+                    return DocumentsContract.buildDocumentUriUsingTree(treeUri, id);
+                }
+            }
+        }
+        return null;
+    }
+
+    private String folderName(Uri treeUri) {
+        try {
+            String documentId = Uri.decode(DocumentsContract.getTreeDocumentId(treeUri));
+            int colon = documentId.indexOf(':');
+            String folderPath = colon >= 0 ? documentId.substring(colon + 1) : documentId;
+            while (folderPath.endsWith("/")) folderPath = folderPath.substring(0, folderPath.length() - 1);
+            int slash = folderPath.lastIndexOf('/');
+            String name = slash >= 0 ? folderPath.substring(slash + 1) : folderPath;
+            return name == null || name.isEmpty() ? "Dossier CRI BLO" : name;
+        } catch (Exception ignored) {
+            return "Dossier CRI BLO";
+        }
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        for (OutputStream output : openStreams.values()) {
+            try {
+                output.close();
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+        openStreams.clear();
+        super.handleOnDestroy();
+    }
+}
+`;
+fs.writeFileSync(path.join(javaDir, "CriBloStoragePlugin.java"), storagePlugin);
 
 const pathsXml = `<?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
