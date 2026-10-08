@@ -35,8 +35,10 @@ const plugin = `package ${appPackage};
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
@@ -58,6 +60,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.List;
 
 @CapacitorPlugin(name = "CriBloUpdater")
 public class CriBloUpdaterPlugin extends Plugin {
@@ -174,11 +177,7 @@ public class CriBloUpdaterPlugin extends Plugin {
                             activity.getPackageName() + ".criblo.updater.fileprovider",
                             finalApk
                         );
-                        Intent install = new Intent(Intent.ACTION_VIEW);
-                        install.setDataAndType(uri, "application/vnd.android.package-archive");
-                        install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
-                        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        activity.startActivity(install);
+                        openSystemPackageInstaller(activity, uri);
 
                         JSObject result = new JSObject();
                         result.put("status", "installer_opened");
@@ -199,6 +198,67 @@ public class CriBloUpdaterPlugin extends Plugin {
                 if (connection != null) connection.disconnect();
             }
         }, "criblo-updater").start();
+    }
+
+    private void openSystemPackageInstaller(Activity activity, Uri uri) {
+        PackageManager manager = activity.getPackageManager();
+
+        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        install.setData(uri);
+        install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
+        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        install.putExtra(Intent.EXTRA_RETURN_RESULT, false);
+
+        // Prefer Android/OEM's system package installer. This avoids the generic
+        // "Open with" chooser where third-party APK handlers can intercept the
+        // file and immediately return without showing Android's confirmation UI.
+        List<ResolveInfo> handlers = manager.queryIntentActivities(
+            install,
+            PackageManager.MATCH_DEFAULT_ONLY
+        );
+        String systemInstallerPackage = null;
+        for (ResolveInfo info : handlers) {
+            if (info.activityInfo == null || info.activityInfo.applicationInfo == null) continue;
+            ApplicationInfo app = info.activityInfo.applicationInfo;
+            int systemFlags = ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP;
+            if ((app.flags & systemFlags) != 0) {
+                systemInstallerPackage = info.activityInfo.packageName;
+                break;
+            }
+        }
+
+        if (systemInstallerPackage != null) {
+            install.setPackage(systemInstallerPackage);
+            activity.grantUriPermission(
+                systemInstallerPackage,
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+            activity.startActivity(install);
+            return;
+        }
+
+        // If Android hides the handler list because of package-visibility rules,
+        // resolve its default installer directly and grant that package access.
+        ResolveInfo resolved = manager.resolveActivity(install, PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolved != null && resolved.activityInfo != null) {
+            String targetPackage = resolved.activityInfo.packageName;
+            install.setPackage(targetPackage);
+            activity.grantUriPermission(
+                targetPackage,
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+            activity.startActivity(install);
+            return;
+        }
+
+        // Last-resort compatibility path for unusual OEM builds.
+        Intent fallback = new Intent(Intent.ACTION_VIEW);
+        fallback.setDataAndType(uri, "application/vnd.android.package-archive");
+        fallback.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
+        fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        activity.startActivity(fallback);
     }
 
     private HttpURLConnection openDownload(String startUrl) throws Exception {
