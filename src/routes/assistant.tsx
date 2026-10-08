@@ -185,11 +185,12 @@ function Assistant() {
             throw new Error("L’IA a renvoyé pratiquement le même texte. Réessayez.");
           }
         }
+      }
     } catch (e) {
       const detail = e instanceof Error ? e.message : "Assistant indisponible.";
       const timeout = /timeout|timed out|time out|délai dépassé/i.test(detail);
       if (timeout && activeProvider === "gemini") {
-        setError("Google Gemini : délai dépassé après deux tentatives. Votre note est conservée : réessayez.");
+        setError("Google Gemini : délai dépassé. Votre note est conservée : réessayez.");
         output = "";
       } else {
         setError(`${detail} — texte mis en forme hors-ligne.`);
