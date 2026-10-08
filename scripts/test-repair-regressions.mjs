@@ -597,6 +597,18 @@ requireText(
 );
 
 
+/* Android app update must be one-tap after checking. */
+requireText(
+  "src/components/AppUpdateSection.tsx",
+  /const info = await checkForAppUpdate\(\)[\s\S]{0,900}openUpdate\(info\)/,
+  "Android update check must immediately start the signed APK install flow when an update is found",
+);
+requireText(
+  "src/components/AppUpdateSection.tsx",
+  /Télécharger et installer/,
+  "Update card must keep an explicit manual Download & Install retry button",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",

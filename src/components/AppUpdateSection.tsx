@@ -21,7 +21,20 @@ export function AppUpdateSection() {
     setInstallMessage(null);
     try {
       await refreshPwaServiceWorker();
-      setResult(await checkForAppUpdate());
+      const info = await checkForAppUpdate();
+      setResult(info);
+
+      // On Android, one tap should be enough: once a newer signed APK is found,
+      // immediately start the native download/install flow. The explicit button
+      // below remains available as a retry path.
+      if (
+        info.updateAvailable &&
+        info.platform === "android" &&
+        info.downloadUrl &&
+        canInstallUpdateNatively()
+      ) {
+        await openUpdate(info);
+      }
     } catch (err) {
       setResult(null);
       setError(err instanceof Error ? err.message : "Impossible de vérifier les mises à jour.");
