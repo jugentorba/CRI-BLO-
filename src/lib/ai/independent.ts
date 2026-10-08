@@ -44,7 +44,7 @@ const PRESETS: Record<
 > = {
   gemini: {
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    model: "gemini-3.8-flash",
+    model: "gemini-3.5-flash-lite",
     protocol: "openai",
   },
   openai: {
@@ -113,11 +113,16 @@ export function buildAiConfig(settings: AiSettingsLike): IndependentAiConfig | n
   }
 
   const preset = PRESETS[provider];
+  const configuredModel = settings.aiModel?.trim() ?? "";
+  const model =
+    provider === "gemini" && configuredModel === "gemini-3.8-flash"
+      ? preset.model
+      : configuredModel || preset.model;
   return {
     provider,
     endpoint: preset.endpoint,
     apiKey,
-    model: settings.aiModel?.trim() || preset.model,
+    model,
     protocol: preset.protocol,
   };
 }
@@ -159,9 +164,10 @@ async function postProviderJson(
   headers: Record<string, string>,
   data: Record<string, unknown>,
   provider?: AiProvider,
+  fast = false,
 ): Promise<ProviderHttpResponse> {
   if (Capacitor.isNativePlatform()) {
-    const attempts = provider === "gemini" ? 2 : 1;
+    const attempts = provider === "gemini" && !fast ? 2 : 1;
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -170,8 +176,8 @@ async function postProviderJson(
           url,
           headers,
           data,
-          connectTimeout: 20000,
-          readTimeout: 120000,
+          connectTimeout: fast ? 10000 : 20000,
+          readTimeout: provider === "gemini" && fast ? 35000 : 120000,
         });
         return { status: response.status, data: normalizeHttpData(response.data) };
       } catch (error) {
@@ -252,7 +258,7 @@ function extractAnthropicText(data: unknown): string {
 export async function callIndependentAi(
   config: IndependentAiConfig,
   input: string,
-  options?: { system?: string },
+  options?: { system?: string; maxTokens?: number; fast?: boolean },
 ): Promise<string> {
   if (!config.endpoint.trim()) throw new Error("Endpoint IA non configuré.");
   if (!config.apiKey.trim()) throw new Error("Clé API manquante.");
@@ -268,11 +274,12 @@ export async function callIndependentAi(
       },
       {
         model: config.model,
-        max_tokens: 1200,
+        max_tokens: options?.maxTokens ?? 1200,
         ...(options?.system ? { system: options.system } : {}),
         messages: [{ role: "user", content: input }],
       },
       config.provider,
+      options?.fast ?? false,
     );
     if (response.status < 200 || response.status >= 300) {
       await throwProviderError(response, config.provider);
@@ -295,9 +302,13 @@ export async function callIndependentAi(
     {
       model: config.model,
       messages,
-      ...(config.provider === "gemini" ? { reasoning_effort: "low" } : {}),
+      max_tokens: options?.maxTokens ?? 1200,
+      ...(config.provider === "gemini"
+        ? { reasoning_effort: options?.fast ? "minimal" : "low" }
+        : {}),
     },
     config.provider,
+    options?.fast ?? false,
   );
   if (response.status < 200 || response.status >= 300) {
     await throwProviderError(response, config.provider);
@@ -308,5 +319,5 @@ export async function callIndependentAi(
 }
 
 export async function testAiConnection(config: IndependentAiConfig): Promise<void> {
-  await callIndependentAi(config, "Réponds uniquement par OK.");
+  await callIndependentAi(config, "Réponds uniquement par OK.", { maxTokens: 12, fast: true });
 }
