@@ -547,6 +547,28 @@ requireText(
   "Comment assistant must retry once when Gemini returns unchanged text",
 );
 
+/* Android updater must hand the APK to the system package installer, not a generic chooser. */
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /Intent\.ACTION_INSTALL_PACKAGE/,
+  "Updater must use Android's install-package action",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /FLAG_SYSTEM/,
+  "Updater must prefer the system package installer over third-party APK handlers",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /grantUriPermission/,
+  "Updater must explicitly grant the selected installer read access to the APK URI",
+);
+forbidText(
+  "scripts/patch-android-updater.mjs",
+  /Intent install = new Intent\(Intent\.ACTION_VIEW\);/,
+  "Primary updater handoff must not use generic ACTION_VIEW",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
