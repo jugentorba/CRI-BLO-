@@ -10,6 +10,7 @@ import { OneDriveSection } from "@/components/OneDriveSection";
 import { GoogleDriveSection } from "@/components/GoogleDriveSection";
 import { LocalBackupSection } from "@/components/LocalBackupSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
+import { nativeCloudFolderSupported, pickCloudBackupFolder } from "@/lib/cloud/folder-sync";
 import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
 import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
 
@@ -30,6 +31,7 @@ function Parametres() {
   const [saved, setSaved] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [cloudFolderBusy, setCloudFolderBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [aiTestBusy, setAiTestBusy] = useState(false);
   const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
@@ -68,6 +70,23 @@ function Parametres() {
       alert(message);
     } finally {
       setFolderBusy(false);
+    }
+  }
+
+  async function chooseCloudFolder() {
+    setCloudFolderBusy(true);
+    setSyncMessage(null);
+    try {
+      const picked = await pickCloudBackupFolder();
+      if (picked) {
+        setSettings(await getSettings());
+        markCloudBackupDirty();
+        setSyncMessage(`Dossier cloud sélectionné : ${picked.name}`);
+      }
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "Impossible de choisir le dossier cloud.");
+    } finally {
+      setCloudFolderBusy(false);
     }
   }
 
@@ -180,19 +199,50 @@ function Parametres() {
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Synchronisation multi-appareils</h2>
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
-            <p className="text-xs text-muted-foreground">Sauvegardez vos données CRI BLO dans le fournisseur cloud sélectionné (Google Drive recommandé ou OneDrive), puis restaurez-les sur un autre appareil.</p>
+            <p className="text-xs text-muted-foreground">
+              Sauvegardez toute la base CRI BLO (historique, photos, pièces jointes, réglages) puis restaurez-la sur un autre appareil.
+              Sur Android, le mode « Dossier cloud » peut utiliser Google Drive, OneDrive, Dropbox, USB ou un dossier local via le sélecteur système, sans identifiant OAuth à configurer.
+            </p>
             <label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Fournisseur principal</label>
             <select
-              value={settings.cloudProvider ?? "google-drive"}
+              value={settings.cloudProvider ?? "cloud-folder"}
               onChange={(e) => {
                 markCloudBackupDirty();
-                void patchSettings({ cloudProvider: e.target.value as "google-drive" | "onedrive", cloudSyncEnabled: true });
+                void patchSettings({
+                  cloudProvider: e.target.value as "google-drive" | "onedrive" | "cloud-folder",
+                  cloudSyncEnabled: true,
+                });
               }}
               className="mt-1 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs"
             >
-              <option value="google-drive">Google Drive (recommandé)</option>
-              <option value="onedrive">Microsoft OneDrive</option>
+              <option value="cloud-folder">Dossier cloud Android (recommandé)</option>
+              <option value="google-drive">Google Drive API</option>
+              <option value="onedrive">Microsoft OneDrive API</option>
             </select>
+            {settings.cloudProvider === "cloud-folder" && (
+              <div className="mt-3 rounded-xl border border-primary/25 bg-primary/5 p-3">
+                <div className="text-xs font-bold text-foreground">Dossier cloud Android</div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  {settings.cloudFolderName
+                    ? `Actuel : ${settings.cloudFolderName}`
+                    : nativeCloudFolderSupported()
+                      ? "Choisissez un dossier dans Google Drive, OneDrive, Dropbox, USB ou le stockage du téléphone."
+                      : "Disponible dans l’application Android CRI BLO."}
+                </div>
+                <button
+                  type="button"
+                  disabled={cloudFolderBusy || !nativeCloudFolderSupported()}
+                  onClick={() => void chooseCloudFolder()}
+                  className="mt-2 h-10 w-full rounded-xl border border-primary/40 bg-background text-xs font-bold text-primary disabled:opacity-50"
+                >
+                  {cloudFolderBusy
+                    ? "Ouverture…"
+                    : settings.cloudFolderName
+                      ? "Changer le dossier cloud"
+                      : "Choisir le dossier cloud"}
+                </button>
+              </div>
+            )}
             <label className="mt-3 flex items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-foreground">Sauvegarde automatique</div>
@@ -308,7 +358,7 @@ function Parametres() {
                   <p className="rounded-lg bg-muted/50 p-2 text-[11px] text-foreground">{aiTestMessage}</p>
                 )}
                 <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  La clé reste uniquement sur cet appareil : elle n’est ni intégrée dans l’APK ni incluse dans les sauvegardes OneDrive.
+                  La clé reste uniquement sur cet appareil : elle n’est ni intégrée dans l’APK ni incluse dans les sauvegardes cloud.
                 </p>
               </>
             )}
