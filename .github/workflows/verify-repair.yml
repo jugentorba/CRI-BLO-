@@ -60,6 +60,9 @@ jobs:
           grep -q 'class CriBloUpdaterPlugin' android/app/src/main/java/com/criblo/app/CriBloUpdaterPlugin.java
           grep -q 'class CriBloStoragePlugin' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
           grep -q 'ACTION_OPEN_DOCUMENT_TREE' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
+          grep -q 'cloud_tree_uri' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
+          grep -q 'void beginRead' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
+          grep -q 'void readChunk' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
 
       - name: Compile Android debug APK
         working-directory: android
