@@ -12,7 +12,7 @@ import { LocalBackupSection } from "@/components/LocalBackupSection";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
 import { nativeCloudFolderSupported, pickCloudBackupFolder } from "@/lib/cloud/folder-sync";
 import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
-import { AI_PROVIDER_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
+import { AI_PROVIDER_OPTIONS, GEMINI_MODEL_OPTIONS, buildAiConfig, getAiProviderLabel, getAiProviderPreset, testAiConnection, type AiProvider } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/parametres")({
   head: () => ({
@@ -34,6 +34,7 @@ function Parametres() {
   const [cloudFolderBusy, setCloudFolderBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [aiTestBusy, setAiTestBusy] = useState(false);
+  const [customGeminiModel, setCustomGeminiModel] = useState(false);
   const [aiTestMessage, setAiTestMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,6 +94,7 @@ function Parametres() {
   async function changeAiProvider(provider: AiProvider) {
     if (!settings) return;
     setAiTestMessage(null);
+    setCustomGeminiModel(false);
     const preset = getAiProviderPreset(provider);
     await patchSettings({
       aiProvider: provider,
@@ -110,7 +112,7 @@ function Parametres() {
       const config = buildAiConfig(current);
       if (!config) throw new Error("Choisissez d’abord un fournisseur IA.");
       await testAiConnection(config);
-      setAiTestMessage(`${getAiProviderLabel(config.provider)} : connexion réussie ✓`);
+      setAiTestMessage(`${getAiProviderLabel(config.provider)} (${config.model}) : connexion réussie ✓`);
     } catch (e) {
       setAiTestMessage(e instanceof Error ? e.message : "Test de connexion impossible.");
     } finally {
@@ -119,6 +121,10 @@ function Parametres() {
   }
 
   if (!settings) return <AppShell title="Paramètres" showBack><div /></AppShell>;
+
+  const geminiModel = settings.aiModel?.trim() || getAiProviderPreset("gemini")?.model || "";
+  const selectedGeminiOption = GEMINI_MODEL_OPTIONS.find((option) => option.id === geminiModel);
+  const useCustomGeminiModel = customGeminiModel || !selectedGeminiOption;
 
   return (
     <AppShell title="Paramètres" subtitle="Profil et préférences" showBack>
@@ -315,18 +321,69 @@ function Parametres() {
                 />
 
                 <label className="block pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Modèle</label>
-                <input
-                  value={settings.aiModel ?? ""}
-                  onChange={(e) => {
-                    setAiTestMessage(null);
-                    void patchSettings({ aiModel: e.target.value });
-                  }}
-                  placeholder={getAiProviderPreset(settings.aiProvider ?? "none")?.model ?? "Nom du modèle"}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
-                />
+                {settings.aiProvider === "gemini" ? (
+                  <div className="space-y-2">
+                    <select
+                      aria-label="Choisir un modèle Gemini"
+                      value={useCustomGeminiModel ? "__custom__" : geminiModel}
+                      onChange={(e) => {
+                        setAiTestMessage(null);
+                        if (e.target.value === "__custom__") {
+                          setCustomGeminiModel(true);
+                          void patchSettings({ aiModel: "" });
+                        } else {
+                          setCustomGeminiModel(false);
+                          void patchSettings({ aiModel: e.target.value });
+                        }
+                      }}
+                      className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                    >
+                      {GEMINI_MODEL_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} — {option.speed}
+                        </option>
+                      ))}
+                      <option value="__custom__">Autre modèle (ID manuel)</option>
+                    </select>
+                    {!useCustomGeminiModel && selectedGeminiOption && (
+                      <p className="text-xs text-muted-foreground">
+                        {selectedGeminiOption.speed} · {selectedGeminiOption.usage}
+                      </p>
+                    )}
+                    {useCustomGeminiModel && (
+                      <input
+                        aria-label="Identifiant du modèle Gemini"
+                        value={settings.aiModel ?? ""}
+                        onChange={(e) => {
+                          setAiTestMessage(null);
+                          void patchSettings({ aiModel: e.target.value });
+                        }}
+                        placeholder="Ex : gemini-3.7-flash"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
+                      />
+                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      La vitesse indiquée est indicative. La disponibilité dépend de votre clé API.
+                      Le bouton ci-dessous teste précisément le modèle sélectionné.
+                    </p>
+                  </div>
+                ) : (
+                  <input
+                    value={settings.aiModel ?? ""}
+                    onChange={(e) => {
+                      setAiTestMessage(null);
+                      void patchSettings({ aiModel: e.target.value });
+                    }}
+                    placeholder={getAiProviderPreset(settings.aiProvider ?? "none")?.model ?? "Nom du modèle"}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="h-10 w-full rounded-lg border border-border bg-background px-3 text-xs"
+                  />
+                )}
 
                 {(settings.aiProvider ?? "none") === "custom" && (
                   <>
