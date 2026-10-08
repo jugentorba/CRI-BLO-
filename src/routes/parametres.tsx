@@ -63,8 +63,9 @@ function Parametres() {
     try {
       const h = await pickExportFolder();
       if (h) setSettings(await getSettings());
-    } catch {
-      /* annulé */
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Impossible d'ouvrir le sélecteur de dossier.";
+      alert(message);
     } finally {
       setFolderBusy(false);
     }

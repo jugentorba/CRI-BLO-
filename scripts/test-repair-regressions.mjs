@@ -414,6 +414,38 @@ forbidText(
   "Release certificate parser must not depend on the old Signer #1 label",
 );
 
+/* Android export-folder picker must use the native Storage Access Framework. */
+requireText(
+  "src/lib/export/folder.ts",
+  /Capacitor\.isNativePlatform\(\)/,
+  "Export folder logic must select a native Android path inside the APK",
+);
+requireText(
+  "src/lib/export/native-folder.ts",
+  /registerPlugin.*CriBloStorage/s,
+  "Web layer must register the native CRI BLO storage bridge",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /ACTION_OPEN_DOCUMENT_TREE/,
+  "Android folder selection must open the native Storage Access Framework folder picker",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /takePersistableUriPermission/,
+  "Selected Android export folder permission must persist across app restarts",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /CriBloStoragePlugin\.class/,
+  "The generated Android activity must register the CRI BLO storage plugin",
+);
+requireText(
+  "src/lib/export/folder.ts",
+  /beginWrite[\s\S]{0,2000}writeChunk[\s\S]{0,2000}finishWrite/,
+  "Native Android exports must stream files in chunks instead of sending one huge bridge payload",
+);
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",
