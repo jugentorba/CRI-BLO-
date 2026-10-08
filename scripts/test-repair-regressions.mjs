@@ -577,8 +577,8 @@ requireText(
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /reasoning_effort:\s*options\?\.fast\s*\?\s*"minimal"\s*:\s*"low"/,
-  "Fast Gemini calls must use minimal reasoning effort",
+  /getGeminiReasoningEffort\(config\.model,\s*options\?\.fast\s*\?\?\s*false\)/,
+  "Fast Gemini calls must choose a model-compatible reasoning level",
 );
 requireText(
   "src/lib/ai/independent.ts",
