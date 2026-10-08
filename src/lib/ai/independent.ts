@@ -304,7 +304,7 @@ export async function callIndependentAi(
       messages,
       max_tokens: options?.maxTokens ?? 1200,
       ...(config.provider === "gemini"
-        ? { reasoning_effort: options?.fast ? "minimal" : "low" }
+        ? { reasoning_effort: "low" }
         : {}),
     },
     config.provider,
