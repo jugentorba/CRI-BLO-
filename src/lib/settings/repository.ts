@@ -16,7 +16,8 @@ export interface AppSettings {
   /** Custom scale in percent, 80–110. Defaults to 100. */
   scale: number;
   cloudSyncEnabled?: boolean;
-  cloudProvider?: "onedrive" | "google-drive";
+  cloudProvider?: "onedrive" | "google-drive" | "cloud-folder";
+  cloudFolderName?: string;
   cloudAutoBackupEnabled?: boolean;
   cloudAutoBackupIntervalHours?: number;
   lastSyncAt?: string;
@@ -38,7 +39,7 @@ const DEFAULTS: AppSettings = {
   density: "comfortable",
   scale: 100,
   cloudSyncEnabled: false,
-  cloudProvider: "google-drive",
+  cloudProvider: "cloud-folder",
   cloudAutoBackupEnabled: false,
   cloudAutoBackupIntervalHours: 6,
   aiProvider: "none",
