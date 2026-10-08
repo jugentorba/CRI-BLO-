@@ -590,6 +590,12 @@ requireText(
   /Gemini[\s\S]{0,1500}timeout|timeout[\s\S]{0,1500}Gemini/i,
   "Assistant must surface Gemini timeout clearly instead of silently pretending the offline rewrite was AI",
 );
+requireText(
+  "src/routes/assistant.tsx",
+  /timeout\s*&&\s*activeProvider\s*===\s*"gemini"[\s\S]{0,500}output\s*=\s*""/,
+  "Gemini timeout must not be saved as a fake offline Assistant response",
+);
+
 
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
