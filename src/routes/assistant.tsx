@@ -133,11 +133,12 @@ function Assistant() {
       const detail = e instanceof Error ? e.message : "Assistant indisponible.";
       const timeout = /timeout|timed out|time out|délai dépassé/i.test(detail);
       if (timeout && activeProvider === "gemini") {
-        setError(`Google Gemini : délai dépassé après nouvelle tentative — texte mis en forme hors-ligne.`);
+        setError("Google Gemini : délai dépassé après deux tentatives. Votre note est conservée : réessayez.");
+        output = "";
       } else {
         setError(`${detail} — texte mis en forme hors-ligne.`);
+        output = outputLang === "fr" ? translateNotes(clean) : "";
       }
-      output = outputLang === "fr" ? translateNotes(clean) : "";
     } finally {
       setBusy(false);
     }
