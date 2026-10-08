@@ -149,20 +149,43 @@ function normalizeHttpData(data: unknown): unknown {
   }
 }
 
+function isTimeoutError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /timeout|timed out|time out|délai dépassé/i.test(message);
+}
+
 async function postProviderJson(
   url: string,
   headers: Record<string, string>,
   data: Record<string, unknown>,
+  provider?: AiProvider,
 ): Promise<ProviderHttpResponse> {
   if (Capacitor.isNativePlatform()) {
-    const response = await CapacitorHttp.post({
-      url,
-      headers,
-      data,
-      connectTimeout: 15000,
-      readTimeout: 60000,
-    });
-    return { status: response.status, data: normalizeHttpData(response.data) };
+    const attempts = provider === "gemini" ? 2 : 1;
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const response = await CapacitorHttp.post({
+          url,
+          headers,
+          data,
+          connectTimeout: 20000,
+          readTimeout: 120000,
+        });
+        return { status: response.status, data: normalizeHttpData(response.data) };
+      } catch (error) {
+        lastError = error;
+        const retry = provider === "gemini" && attempt === 0 && isTimeoutError(error);
+        if (!retry) break;
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+
+    if (provider === "gemini" && isTimeoutError(lastError)) {
+      throw new Error("Google Gemini : délai dépassé après deux tentatives.");
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "Requête IA impossible."));
   }
 
   const response = await fetch(url, {
@@ -249,6 +272,7 @@ export async function callIndependentAi(
         ...(options?.system ? { system: options.system } : {}),
         messages: [{ role: "user", content: input }],
       },
+      config.provider,
     );
     if (response.status < 200 || response.status >= 300) {
       await throwProviderError(response, config.provider);
@@ -271,7 +295,9 @@ export async function callIndependentAi(
     {
       model: config.model,
       messages,
+      ...(config.provider === "gemini" ? { reasoning_effort: "low" } : {}),
     },
+    config.provider,
   );
   if (response.status < 200 || response.status >= 300) {
     await throwProviderError(response, config.provider);

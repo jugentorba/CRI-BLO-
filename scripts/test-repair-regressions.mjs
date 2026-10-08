@@ -569,6 +569,34 @@ forbidText(
   "Primary updater handoff must not use generic ACTION_VIEW",
 );
 
+/* Gemini field-note requests must be low-latency and resilient on mobile networks. */
+requireText(
+  "src/lib/ai/independent.ts",
+  /config\.provider\s*===\s*"gemini"[\s\S]{0,1200}reasoning_effort:\s*"low"/,
+  "Gemini requests must use low reasoning effort for fast field-note rewriting",
+);
+requireText(
+  "src/lib/ai/independent.ts",
+  /readTimeout:\s*120000/,
+  "Native AI HTTP must allow enough time for mobile-network responses",
+);
+requireText(
+  "src/lib/ai/independent.ts",
+  /isTimeoutError[\s\S]{0,2200}retry/i,
+  "Gemini native HTTP must retry once after a timeout",
+);
+requireText(
+  "src/routes/assistant.tsx",
+  /Gemini[\s\S]{0,1500}timeout|timeout[\s\S]{0,1500}Gemini/i,
+  "Assistant must surface Gemini timeout clearly instead of silently pretending the offline rewrite was AI",
+);
+requireText(
+  "src/routes/assistant.tsx",
+  /timeout\s*&&\s*activeProvider\s*===\s*"gemini"[\s\S]{0,500}output\s*=\s*""/,
+  "Gemini timeout must not be saved as a fake offline Assistant response",
+);
+
+
 /* Provider defaults must be model IDs that are currently published by each provider. */
 requireText(
   "src/lib/ai/independent.ts",

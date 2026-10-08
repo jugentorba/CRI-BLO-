@@ -98,6 +98,7 @@ function Assistant() {
     setBusy(true);
     setError(null);
     let output = "";
+    let activeProvider: string | null = null;
     try {
       if (!online) {
         if (outputLang !== "fr") {
@@ -113,6 +114,7 @@ function Assistant() {
           : clean;
         const settings = await getSettings();
         const aiConfig = buildAiConfig(settings);
+        activeProvider = aiConfig?.provider ?? null;
         if (!aiConfig) {
           setError("Aucun fournisseur IA configuré — moteur local utilisé.");
           output = outputLang === "fr" ? translateNotes(clean) : "";
@@ -129,8 +131,14 @@ function Assistant() {
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : "Assistant indisponible.";
-      setError(`${detail} — texte mis en forme hors-ligne.`);
-      output = outputLang === "fr" ? translateNotes(clean) : "";
+      const timeout = /timeout|timed out|time out|délai dépassé/i.test(detail);
+      if (timeout && activeProvider === "gemini") {
+        setError("Google Gemini : délai dépassé après deux tentatives. Votre note est conservée : réessayez.");
+        output = "";
+      } else {
+        setError(`${detail} — texte mis en forme hors-ligne.`);
+        output = outputLang === "fr" ? translateNotes(clean) : "";
+      }
     } finally {
       setBusy(false);
     }
