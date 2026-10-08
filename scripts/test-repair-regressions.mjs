@@ -551,17 +551,17 @@ requireText(
    startActivity returned, and always leave the verified APK in a public download. */
 requireText(
   "scripts/patch-android-updater.mjs",
-  /Intent install = new Intent\\(Intent\\.ACTION_INSTALL_PACKAGE\\)/,
+  /Intent install = new Intent\(Intent\.ACTION_INSTALL_PACKAGE\)/,
   "The PRIMARY installer intent must use ACTION_INSTALL_PACKAGE",
 );
 forbidText(
   "scripts/patch-android-updater.mjs",
-  /Intent install = new Intent\\(Intent\\.ACTION_VIEW\\)/,
+  /Intent install = new Intent\(Intent\.ACTION_VIEW\)/,
   "Primary install intent must never use ACTION_VIEW (silent file handlers)",
 );
 requireText(
   "scripts/patch-android-updater.mjs",
-  /MediaStore\\.Downloads\\.EXTERNAL_CONTENT_URI/,
+  /MediaStore\.Downloads\.EXTERNAL_CONTENT_URI/,
   "Updater must copy verified APKs to public Downloads so users can recover them",
 );
 requireText(
@@ -571,7 +571,7 @@ requireText(
 );
 requireText(
   "scripts/patch-android-updater.mjs",
-  /openSystemPackageInstaller\\(activity, publicApk\\)/,
+  /openSystemPackageInstaller\(activity, publicApk\)/,
   "Installer should receive the readable published APK content URI",
 );
 requireText(
