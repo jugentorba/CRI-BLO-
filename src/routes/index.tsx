@@ -121,7 +121,7 @@ function Accueil() {
           }
         >
           {cloud ? <Cloud className="h-3 w-3" /> : <CloudOff className="h-3 w-3" />}
-          {cloud ? "OneDrive actif" : "OneDrive inactif"}
+          {cloud ? "Cloud actif" : "Cloud inactif"}
         </span>
         <span className="ml-auto text-muted-foreground">Aujourd'hui : {today}</span>
       </div>
