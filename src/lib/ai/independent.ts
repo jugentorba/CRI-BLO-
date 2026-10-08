@@ -38,6 +38,32 @@ export const AI_PROVIDER_OPTIONS: AiProviderOption[] = [
   { id: "custom", label: "Autre / endpoint compatible OpenAI" },
 ];
 
+/** Verified Google Gemini API model IDs (October 2026).
+ * Speed and quality labels are guidance, not measured latency or an availability guarantee.
+ */
+export const GEMINI_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  speed: string;
+  usage: string;
+}> = [
+  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite", speed: "Très rapide", usage: "Recommandé : corrections, notes et traductions courtes" },
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", speed: "Rapide", usage: "Bon équilibre : rédaction et reformulation" },
+  { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", speed: "Équilibré", usage: "Travaux nécessitant plus de raisonnement" },
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", speed: "Équilibré", usage: "Analyses détaillées et consignes complexes" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", speed: "Qualité prioritaire", usage: "Travaux complexes, généralement moins économique" },
+];
+
+export function getGeminiReasoningEffort(model: string, fast: boolean): "minimal" | "low" | undefined {
+  // Gemini 3.7/3.8 Flash reject "minimal", returning HTTP 400.
+  if (/^gemini-3\\.(?:7|8)-flash(?:$|-)/.test(model)) return "low";
+  // Earlier 3.x Flash and Flash-Lite accept minimal thinking on short jobs.
+  if (/^gemini-3\\.(?:5|6)-flash(?:-lite)?(?:$|-)/.test(model)) return fast ? "minimal" : "low";
+  // For manually entered or legacy IDs, use the provider's default instead
+  // of guessing an unsupported reasoning value.
+  return undefined;
+}
+
 const PRESETS: Record<
   Exclude<AiProvider, "none" | "custom">,
   { endpoint: string; model: string; protocol: AiProtocol }
@@ -114,10 +140,7 @@ export function buildAiConfig(settings: AiSettingsLike): IndependentAiConfig | n
 
   const preset = PRESETS[provider];
   const configuredModel = settings.aiModel?.trim() ?? "";
-  const model =
-    provider === "gemini" && configuredModel === "gemini-3.8-flash"
-      ? preset.model
-      : configuredModel || preset.model;
+  const model = configuredModel || preset.model;
   return {
     provider,
     endpoint: preset.endpoint,
@@ -303,8 +326,8 @@ export async function callIndependentAi(
       model: config.model,
       messages,
       max_tokens: options?.maxTokens ?? 1200,
-      ...(config.provider === "gemini"
-        ? { reasoning_effort: "low" }
+      ...(config.provider === "gemini" && getGeminiReasoningEffort(config.model, options?.fast ?? false)
+        ? { reasoning_effort: getGeminiReasoningEffort(config.model, options?.fast ?? false) }
         : {}),
     },
     config.provider,
@@ -319,5 +342,7 @@ export async function callIndependentAi(
 }
 
 export async function testAiConnection(config: IndependentAiConfig): Promise<void> {
-  await callIndependentAi(config, "Réponds uniquement par OK.", { maxTokens: 12, fast: true });
+  // Reasoning tokens can consume the small completion budget before visible text.
+  // Use enough headroom for a genuine provider round-trip even in low-thinking mode.
+  await callIndependentAi(config, "Réponds uniquement par OK.", { maxTokens: 1024, fast: true });
 }
