@@ -20,7 +20,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund
       - name: Test Gemini model requests (mock HTTP)
         run: node scripts/test-ai-models.mjs
       - name: Check known CRI BLO regressions
