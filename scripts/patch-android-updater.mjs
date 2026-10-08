@@ -601,7 +601,7 @@ public class CriBloStoragePlugin extends Plugin {
     }
 
     private String safeFileName(String value) {
-        return value.replace("/", "_").replace("\\", "_");
+        return value.replace("/", "_").replace("\\\\", "_");
     }
 
     private Uri findChild(ContentResolver resolver, Uri treeUri, String fileName) {
