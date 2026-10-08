@@ -203,8 +203,10 @@ public class CriBloUpdaterPlugin extends Plugin {
     private void openSystemPackageInstaller(Activity activity, Uri uri) {
         PackageManager manager = activity.getPackageManager();
 
-        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-        install.setData(uri);
+        // ACTION_VIEW with APK MIME is supported by Android's package installer
+        // on more OEM devices than ACTION_INSTALL_PACKAGE with a content URI.
+        Intent install = new Intent(Intent.ACTION_VIEW);
+        install.setDataAndType(uri, "application/vnd.android.package-archive");
         install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         install.putExtra(Intent.EXTRA_RETURN_RESULT, false);
@@ -253,11 +255,15 @@ public class CriBloUpdaterPlugin extends Plugin {
             return;
         }
 
-        // Last-resort compatibility path for unusual OEM builds.
-        Intent fallback = new Intent(Intent.ACTION_VIEW);
-        fallback.setDataAndType(uri, "application/vnd.android.package-archive");
+        // If package visibility hides the VIEW handlers, try Android's
+        // explicit package-install action as a secondary supported route.
+        Intent fallback = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        fallback.setData(uri);
         fallback.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
         fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (fallback.resolveActivity(manager) == null) {
+            throw new IllegalStateException("Aucun installateur APK Android disponible.");
+        }
         activity.startActivity(fallback);
     }
 
