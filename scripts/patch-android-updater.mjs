@@ -33,6 +33,8 @@ fs.writeFileSync(path.join(javaDir, "MainActivity.java"), mainActivity);
 const plugin = `package ${appPackage};
 
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -44,6 +46,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.provider.MediaStore;
 
 import androidx.core.content.FileProvider;
 
@@ -57,6 +60,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -169,22 +173,31 @@ public class CriBloUpdaterPlugin extends Plugin {
                 validateZipHeader(apk);
                 validatePackageAndSigner(activity, apk);
 
+                // Android's app-specific Download folder is invisible in the
+                // user's ordinary Downloads. Keep a verified public copy.
+                Uri publicApk = saveVerifiedApkToDownloads(activity, apk, safeFileName);
+                final String savedLocation = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    ? "Téléchargements/CRI-BLO/" + safeFileName
+                    : "Dossier de CRI BLO (Android 9 ou antérieur)";
+
                 File finalApk = apk;
                 activity.runOnUiThread(() -> {
                     try {
-                        Uri uri = FileProvider.getUriForFile(
-                            activity,
-                            activity.getPackageName() + ".criblo.updater.fileprovider",
-                            finalApk
-                        );
-                        openSystemPackageInstaller(activity, uri);
+                        openSystemPackageInstaller(activity, publicApk);
 
                         JSObject result = new JSObject();
-                        result.put("status", "installer_opened");
-                        result.put("message", "APK vérifié. Confirmez l'installation Android.");
+                        // startActivity returning only proves the request was
+                        // dispatched, NOT that the installation UI appeared.
+                        result.put("status", "installer_requested");
+                        result.put("downloadPath", savedLocation);
+                        result.put("message", "APK enregistré dans " + savedLocation + ". Demande d'installation envoyée à Android.");
                         call.resolve(result);
                     } catch (Exception error) {
-                        call.reject("APK vérifié mais impossible d'ouvrir l'installateur Android.", error);
+                        call.reject(
+                            "APK enregistré dans " + savedLocation +
+                            ", mais Android n'a pas lancé l'installation : " + error.getMessage(),
+                            error
+                        );
                     }
                 });
             } catch (Exception error) {
@@ -200,20 +213,72 @@ public class CriBloUpdaterPlugin extends Plugin {
         }, "criblo-updater").start();
     }
 
+    private Uri saveVerifiedApkToDownloads(Activity activity, File apk, String fileName) throws Exception {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            // Legacy fallback for devices without MediaStore.Downloads.
+            return FileProvider.getUriForFile(
+                activity,
+                activity.getPackageName() + ".criblo.updater.fileprovider",
+                apk
+            );
+        }
+
+        ContentResolver resolver = activity.getContentResolver();
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        values.put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive");
+        values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/CRI-BLO");
+        values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        Uri saved = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (saved == null) {
+            throw new IllegalStateException("Android n'a pas autorisé l'enregistrement dans Téléchargements.");
+        }
+
+        boolean complete = false;
+        try {
+            long copied = 0;
+            try (InputStream input = new FileInputStream(apk);
+                 OutputStream output = resolver.openOutputStream(saved, "w")) {
+                if (output == null) throw new IllegalStateException("Impossible d'ouvrir Téléchargements.");
+                byte[] buffer = new byte[32768];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read == 0) continue;
+                    output.write(buffer, 0, read);
+                    copied += read;
+                }
+                output.flush();
+            }
+            if (copied != apk.length()) {
+                throw new IllegalStateException("La copie APK dans Téléchargements est incomplète.");
+            }
+            ContentValues published = new ContentValues();
+            published.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            if (resolver.update(saved, published, null, null) < 1) {
+                throw new IllegalStateException("Le fichier APK n'a pas été publié dans Téléchargements.");
+            }
+            complete = true;
+            return saved;
+        } finally {
+            if (!complete) resolver.delete(saved, null, null);
+        }
+    }
+
     private void openSystemPackageInstaller(Activity activity, Uri uri) {
         PackageManager manager = activity.getPackageManager();
 
-        // ACTION_VIEW with APK MIME is supported by Android's package installer
-        // on more OEM devices than ACTION_INSTALL_PACKAGE with a content URI.
-        Intent install = new Intent(Intent.ACTION_VIEW);
-        install.setDataAndType(uri, "application/vnd.android.package-archive");
+        // Installation must be handled by Android's package installer, not by
+        // the generic file viewer (ACTION_VIEW), which may show a chooser or
+        // immediately close after a third-party APK handler receives the file.
+        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        install.setData(uri);
         install.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         install.putExtra(Intent.EXTRA_RETURN_RESULT, false);
 
-        // Prefer Android/OEM's system package installer. This avoids the generic
-        // "Open with" chooser where third-party APK handlers can intercept the
-        // file and immediately return without showing Android's confirmation UI.
+        // Prefer the OS installer explicitly when package visibility permits.
+        // Do not select the first "system" ACTION_VIEW file handler, as it may
+        // be a document viewer instead of Android's package installer.
         List<ResolveInfo> handlers = manager.queryIntentActivities(
             install,
             PackageManager.MATCH_DEFAULT_ONLY
@@ -229,6 +294,9 @@ public class CriBloUpdaterPlugin extends Plugin {
             }
         }
 
+        // Even when Android hides installer packages from queries, launching
+        // ACTION_INSTALL_PACKAGE can still succeed via the system resolver.
+        // Never fall back to ACTION_VIEW or an unrestricted APK-file chooser.
         if (systemInstallerPackage != null) {
             install.setPackage(systemInstallerPackage);
             activity.grantUriPermission(
@@ -236,35 +304,15 @@ public class CriBloUpdaterPlugin extends Plugin {
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             );
-            activity.startActivity(install);
-            return;
         }
-
-        // If Android hides the handler list because of package-visibility rules,
-        // resolve its default installer directly and grant that package access.
-        ResolveInfo resolved = manager.resolveActivity(install, PackageManager.MATCH_DEFAULT_ONLY);
-        if (resolved != null && resolved.activityInfo != null) {
-            String targetPackage = resolved.activityInfo.packageName;
-            install.setPackage(targetPackage);
-            activity.grantUriPermission(
-                targetPackage,
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
+        try {
+            activity.startActivity(install);
+        } catch (android.content.ActivityNotFoundException error) {
+            throw new IllegalStateException(
+                "Android n'a pas trouvé son installateur système pour la mise à jour.",
+                error
             );
-            activity.startActivity(install);
-            return;
         }
-
-        // If package visibility hides the VIEW handlers, try Android's
-        // explicit package-install action as a secondary supported route.
-        Intent fallback = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-        fallback.setData(uri);
-        fallback.setClipData(ClipData.newRawUri("CRI-BLO.apk", uri));
-        fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        if (fallback.resolveActivity(manager) == null) {
-            throw new IllegalStateException("Aucun installateur APK Android disponible.");
-        }
-        activity.startActivity(fallback);
     }
 
     private HttpURLConnection openDownload(String startUrl) throws Exception {

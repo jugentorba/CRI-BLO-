@@ -60,9 +60,9 @@ export function AppUpdateSection() {
           setInstallMessage(
             "Android a ouvert l'autorisation « Installer des applications inconnues ». Autorisez CRI BLO, revenez ici puis appuyez de nouveau sur Installer.",
           );
-        } else {
+        } else if (nativeResult.status === "installer_requested") {
           setInstallMessage(
-            "APK téléchargé. Android a ouvert l'installateur : confirmez la mise à jour pour conserver vos données.",
+            `APK enregistré dans ${nativeResult.downloadPath || "Téléchargements/CRI-BLO"}. La demande d'installation a été envoyée à Android, mais son écran n'est pas encore confirmé. Si rien ne s'affiche, ouvrez Mes fichiers > Téléchargements > CRI-BLO, puis touchez le fichier APK pour installer la mise à jour sans désinstaller l'application.`,
           );
         }
       } catch (err) {

@@ -547,6 +547,50 @@ requireText(
   "Comment assistant must retry once when Gemini returns unchanged text",
 );
 
+/* Android updater regression: never claim installation UI appeared merely because
+   startActivity returned, and always leave the verified APK in a public download. */
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /Intent install = new Intent\(Intent\.ACTION_INSTALL_PACKAGE\)/,
+  "The PRIMARY installer intent must use ACTION_INSTALL_PACKAGE",
+);
+forbidText(
+  "scripts/patch-android-updater.mjs",
+  /Intent install = new Intent\(Intent\.ACTION_VIEW\)/,
+  "Primary install intent must never use ACTION_VIEW (silent file handlers)",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /MediaStore\.Downloads\.EXTERNAL_CONTENT_URI/,
+  "Updater must copy verified APKs to public Downloads so users can recover them",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /IS_PENDING, 0/,
+  "Downloaded APK must be published and visible in Files after copy",
+);
+requireText(
+  "scripts/patch-android-updater.mjs",
+  /openSystemPackageInstaller\(activity, publicApk\)/,
+  "Installer should receive the readable published APK content URI",
+);
+requireText(
+  "src/components/AppUpdateSection.tsx",
+  /Mes fichiers > Téléchargements > CRI-BLO/,
+  "If no installer appears, update UI must tell the user where the APK is",
+);
+for (const path of [
+  "src/components/AppUpdateSection.tsx",
+  "src/lib/updates/native.ts",
+  "scripts/patch-android-updater.mjs",
+]) {
+  forbidText(
+    path,
+    /installer_opened|Android a ouvert l'installateur/,
+    "UI cannot falsely claim Android showed the installer screen",
+  );
+}
+
 /* Android updater must hand the APK to the system package installer, not a generic chooser. */
 requireText(
   "scripts/patch-android-updater.mjs",
