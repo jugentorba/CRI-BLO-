@@ -32,7 +32,10 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Regression checks
-        run: node scripts/test-repair-regressions.mjs
+        run: |
+          node scripts/test-repair-regressions.mjs
+          node --test scripts/test-native-file-flows.mjs
+          node scripts/test-ai-models.mjs
 
       - name: Type-check repair source
         run: npx tsc --noEmit
@@ -64,11 +67,14 @@ jobs:
           grep -q 'void beginRead' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
           grep -q 'void readChunk' android/app/src/main/java/com/criblo/app/CriBloStoragePlugin.java
 
+      - name: Prepare native regression tests
+        run: node scripts/setup-android-tests.mjs
+
       - name: Compile Android debug APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon
 
       - name: Verify APK exists
         run: test -s android/app/build/outputs/apk/debug/app-debug.apk

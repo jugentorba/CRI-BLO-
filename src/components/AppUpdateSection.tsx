@@ -60,10 +60,10 @@ export function AppUpdateSection() {
           setInstallMessage(
             "Android a ouvert l'autorisation « Installer des applications inconnues ». Autorisez CRI BLO, revenez ici puis appuyez de nouveau sur Installer.",
           );
+        } else if (nativeResult.status === "installed") {
+          setInstallMessage("Android a confirmé l'installation de la mise à jour.");
         } else {
-          setInstallMessage(
-            "APK téléchargé. Android a ouvert l'installateur : confirmez la mise à jour pour conserver vos données.",
-          );
+          setError(nativeResult.message || "Installation non confirmée ou annulée par Android. Vous pouvez réessayer.");
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Téléchargement de la mise à jour impossible.");
@@ -152,7 +152,7 @@ export function AppUpdateSection() {
             >
               {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               {installing
-                ? "Téléchargement de l'APK…"
+                ? "Téléchargement et confirmation Android…"
                 : result.platform === "android" && result.downloadUrl && canInstallUpdateNatively()
                   ? "Télécharger et installer"
                   : result.platform === "android" && result.downloadUrl

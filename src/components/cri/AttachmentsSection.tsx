@@ -7,11 +7,13 @@ import {
   listAttachments,
   type AttachmentRecord,
 } from "@/lib/attachments/repository";
-import { downloadBlob } from "@/lib/export/folder";
+import { openAttachment } from "@/lib/attachments/open";
 
 export function AttachmentsSection({ criId }: { criId: string }) {
   const [items, setItems] = useState<AttachmentRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -33,36 +35,16 @@ export function AttachmentsSection({ criId }: { criId: string }) {
   }
 
   async function handleOpen(a: AttachmentRecord) {
-    const mime = a.type || a.blob.type || "application/octet-stream";
-    const file = new File([a.blob], a.name, { type: mime });
-    const android = /Android/i.test(navigator.userAgent);
-    const browserPreviewable =
-      mime === "application/pdf" || mime.startsWith("image/") || mime.startsWith("text/");
-
-    // Sur Android, les fichiers Office/OTDR/etc. sont mieux remis au système
-    // afin qu'il propose directement l'application compatible installée.
-    if (android && navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: a.name });
-        return;
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      }
+    if (opening) return;
+    setOpening(a.id);
+    setError(null);
+    try {
+      await openAttachment(a);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible d'ouvrir ce fichier.");
+    } finally {
+      setOpening(null);
     }
-
-    if (browserPreviewable) {
-      const url = URL.createObjectURL(a.blob);
-      const win = window.open(url, "_blank");
-      if (win) {
-        setTimeout(() => URL.revokeObjectURL(url), 120_000);
-        return;
-      }
-      URL.revokeObjectURL(url);
-    }
-
-    // Dernier recours : enregistre une copie locale que l'utilisateur peut
-    // ouvrir depuis Android Files / l'application associée.
-    downloadBlob(a.name, a.blob);
   }
 
   async function handleDelete(id: string) {
@@ -81,6 +63,8 @@ export function AttachmentsSection({ criId }: { criId: string }) {
         Ils ne sont PAS ajoutés dans le CRI Excel — ils sont inclus dans l'export ZIP.
       </p>
 
+      {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
+      {opening && <p role="status" className="mb-3 text-xs">Ouverture du fichier…</p>}
       <div className="space-y-2">
         {items.length === 0 && (
           <div className="rounded-xl border border-dashed border-border bg-card p-4 text-center text-xs text-muted-foreground">
@@ -98,6 +82,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             <button
               type="button"
               onClick={() => void handleOpen(a)}
+              disabled={opening !== null}
               className="min-w-0 flex-1 text-left"
               aria-label={`Ouvrir ${a.name}`}
             >
@@ -109,6 +94,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             <button
               type="button"
               onClick={() => void handleOpen(a)}
+              disabled={opening !== null}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-primary transition active:scale-95"
               aria-label="Ouvrir le fichier"
             >

@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
-export type NativeUpdateStatus = "permission_required" | "installer_opened";
+export type NativeUpdateStatus = "permission_required" | "installed" | "cancelled";
 
 export interface NativeUpdateResult {
   status: NativeUpdateStatus;
@@ -28,5 +28,9 @@ export async function downloadAndInstallUpdate(
   if (!/^https:\/\//i.test(url)) {
     throw new Error("URL de mise à jour non sécurisée.");
   }
-  return CriBloUpdater.downloadAndInstall({ url, fileName, expectedSize });
+  const result = await CriBloUpdater.downloadAndInstall({ url, fileName, expectedSize });
+  if (!["permission_required", "installed", "cancelled"].includes(result.status)) {
+    throw new Error("Android n'a pas confirmé l'installation. La mise à jour reste non vérifiée.");
+  }
+  return result;
 }

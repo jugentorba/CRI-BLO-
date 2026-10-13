@@ -282,8 +282,8 @@ requireText(
 );
 requireText(
   "src/components/cri/AttachmentsSection.tsx",
-  /navigator\.share[\s\S]{0,900}downloadBlob/,
-  "Stored supplementary files must be openable/shareable from CRI BLO with a download fallback",
+  /openAttachment\(a\)/,
+  "Stored supplementary files must use the platform-aware attachment opener",
 );
 requireText(
   "src/lib/export/naming.ts",
