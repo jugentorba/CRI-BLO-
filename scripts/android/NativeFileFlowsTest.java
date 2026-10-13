@@ -49,7 +49,7 @@ public class NativeFileFlowsTest {
         Call(JSObject data) { super(null, "test", "test", "test", data); }
         @Override public void resolve(JSObject data) { response = data; resolved = true; }
         @Override public void resolve() { resolved = true; }
-        @Override public void reject(String message, String code, Exception ex, JSObject data) { error = message; }
+        @Override public void reject(String message, String code, Exception ex, JSObject data) { error = message; if (ex != null) ex.printStackTrace(); }
     }
     static class Files extends CriBloFilesPlugin {
         final Host host;
@@ -90,7 +90,9 @@ public class NativeFileFlowsTest {
     @Test public void missingViewerReturnsAnErrorNotSuccess() {
         Host host = host(); host.missingViewer = true; Files files = new Files(host); Call finish = copy(files);
         files.finishOpen(finish); Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
-        assertFalse(finish.resolved); assertTrue(finish.error.contains("Aucune application"));
+        assertFalse("Unexpected success; error=" + finish.error, finish.resolved);
+        assertNotNull("No error returned", finish.error);
+        assertTrue("Unexpected error: " + finish.error, finish.error.contains("Aucune application"));
     }
     private void launch(Updater updater, Host host, Call call) throws Exception {
         Method method = CriBloUpdaterPlugin.class.getDeclaredMethod("openSystemPackageInstaller", PluginCall.class, Activity.class, Uri.class);

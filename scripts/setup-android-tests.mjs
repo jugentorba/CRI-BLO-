@@ -7,6 +7,7 @@ let text=fs.readFileSync(gradle,'utf8');
 if(!text.includes('// CRI BLO native regression tests')) text += `
 // CRI BLO native regression tests
 android { testOptions { unitTests { includeAndroidResources = true } } }
+tasks.withType(Test).configureEach { testLogging { exceptionFormat = 'full'; showStandardStreams = true } }
 dependencies { testImplementation 'org.robolectric:robolectric:4.14.1' }
 `;
 fs.writeFileSync(gradle,text);
