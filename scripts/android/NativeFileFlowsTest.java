@@ -12,12 +12,16 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Base64;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
+import java.util.Map;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -63,6 +67,17 @@ public class NativeFileFlowsTest {
         @Override public void startActivityForResult(PluginCall call, Intent intent, String name) {
             requested = intent; callback = name;
         }
+    }
+    @Before public void resetFileProviderCacheBetweenSandboxDirectories() throws Exception {
+        // Robolectric gives each test a new cacheDir; FileProvider retains its static
+        // authority-to-root mapping across tests, so a prior test's path is stale.
+        // Clear only the JVM test cache, never application files or user history.
+        Field field = FileProvider.class.getDeclaredField("sCache");
+        field.setAccessible(true);
+        Object value = field.get(null);
+        if (!(value instanceof Map)) throw new IllegalStateException("FileProvider cache unavailable");
+        Map<?, ?> strategies = (Map<?, ?>) value;
+        synchronized (strategies) { strategies.clear(); }
     }
     private Host host() { return Robolectric.buildActivity(Host.class).setup().get(); }
     private Call copy(Files files) {
