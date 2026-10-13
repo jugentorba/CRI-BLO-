@@ -71,3 +71,16 @@ test('Android browser retains its compatible-app share handoff', async () => {
   await api.openAttachment({name:'plan.xlsx',blob:new Blob(['test'])});
   assert.equal(shared.files[0].name,'plan.xlsx');
 });
+
+test('Verified APK is made visible in Android Downloads before installer handoff', () => {
+  const java=fs.readFileSync('scripts/patch-android-updater.mjs','utf8');
+  const ui=fs.readFileSync('src/components/AppUpdateSection.tsx','utf8');
+  assert.match(java,/validatePackageAndSigner\\(activity, apk\\)[\\s\\S]{0,600}publishVerifiedApkToDownloads\\(activity, apk, safeFileName\\)/);
+  assert.match(java,/MediaStore\\.Downloads\\.EXTERNAL_CONTENT_URI/);
+  assert.match(java,/MediaStore\\.MediaColumns\\.IS_PENDING, 1/);
+  assert.match(java,/MediaStore\\.MediaColumns\\.IS_PENDING, 0/);
+  assert.match(java,/if \\(!complete\\) resolver\\.delete\\(saved, null, null\\)/);
+  assert.match(java,/openSystemPackageInstaller\\(call, activity, installUri\\)/);
+  assert.match(ui,/nativeResult\\.downloadPath/);
+  assert.match(ui,/Mes fichiers > Téléchargements > CRI-BLO/);
+});
