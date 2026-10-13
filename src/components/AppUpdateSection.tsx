@@ -63,7 +63,10 @@ export function AppUpdateSection() {
         } else if (nativeResult.status === "installed") {
           setInstallMessage("Android a confirmé l'installation de la mise à jour.");
         } else {
-          setError(nativeResult.message || "Installation non confirmée ou annulée par Android. Vous pouvez réessayer.");
+          const downloadHelp = nativeResult.downloadPath
+            ? ` Le fichier APK vérifié reste dans ${nativeResult.downloadPath}. Ouvrez Mes fichiers > Téléchargements > CRI-BLO pour relancer l'installation manuellement, sans désinstaller CRI BLO.`
+            : "";
+          setError((nativeResult.message || "Installation non confirmée ou annulée par Android.") + downloadHelp);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Téléchargement de la mise à jour impossible.");
