@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapPin,
@@ -88,6 +89,18 @@ function CriEditor() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const exportInProgress = useRef(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  // A save must never mark newer, unsaved edits as saved.
+  const editsVersion = useRef(0);
+  const saveQueue = useRef<Promise<CriRecord | null>>(Promise.resolve(null));
+
+  function markDirty() {
+    editsVersion.current += 1;
+    setDirty(true);
+    setOperationError(null);
+  }
   const [missing, setMissing] = useState<FieldDef[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [exportToast, setExportToast] = useState<{
@@ -126,7 +139,7 @@ function CriEditor() {
       if (!c.values?.numeroVoie && c.address?.streetNumber) autoPatch.numeroVoie = c.address.streetNumber;
       if (Object.keys(autoPatch).length) {
         setValues((v) => ({ ...v, ...autoPatch }));
-        setDirty(true);
+        markDirty();
       }
     })();
   }, [id, navigate]);
@@ -149,7 +162,9 @@ function CriEditor() {
     if (!settings?.autoSave) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
-      void persist();
+      void persist().catch((error: unknown) => {
+        setOperationError(error instanceof Error ? error.message : "Sauvegarde automatique impossible.");
+      });
     }, 700);
     return () => {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
@@ -157,10 +172,13 @@ function CriEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values, photos, gps, address, addressStatus, dirty, settings?.autoSave]);
 
-  const persist = useCallback(async () => {
-    if (!cri) return;
+  const persist = useCallback(async (): Promise<CriRecord | null> => {
+    if (!cri) return null;
+    const revision = editsVersion.current;
     const reference = (values.referenceOrange as string | undefined)?.trim() ?? cri.reference ?? "";
-    const updated = await updateCri(cri.id, {
+    // Capture an immutable snapshot and serialize writes, including a simultaneous
+    // manual Save, autosave and Export. Otherwise a slower, older save can win.
+    const patch: Partial<CriRecord> = {
       values,
       photos,
       gps,
@@ -173,10 +191,16 @@ function CriEditor() {
         lastName: profile?.lastName,
       },
       status: cri.status === "exported" ? "exported" : "draft",
-    });
-    setCri(updated);
-    setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
-    setDirty(false);
+    };
+    const task = saveQueue.current.catch(() => null).then(() => updateCri(cri.id, patch));
+    saveQueue.current = task;
+    const updated = await task;
+    setCri((current) => current?.id === updated.id ? updated : current);
+    if (editsVersion.current === revision) {
+      setSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      setDirty(false);
+    }
+    return updated;
   }, [cri, values, photos, gps, address, addressStatus, profile]);
 
   function applyAddressToValues(addr: Address) {
@@ -218,7 +242,7 @@ function CriEditor() {
       const coordsStr = `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
       // GPS principal pour le filigrane photo : premier capturé fait foi
       setGps((prev) => prev ?? coords);
-      setDirty(true);
+      markDirty();
 
       // Écrit les coordonnées dans le champ texte de la sous-section
       if (scope) {
@@ -288,7 +312,7 @@ function CriEditor() {
       // Défaut : pas de champ Adresse, on ne remplit que Commune / CP / Voie / Numéro.
       return next;
     });
-    setDirty(true);
+    markDirty();
   }
 
   // Reverse geocode manuel : parse "lat, lon" depuis le champ Coordonnées GPS
@@ -345,7 +369,7 @@ function CriEditor() {
           setAddress(addr);
           setAddressStatus("resolved");
           applyAddressToValues(addr);
-          setDirty(true);
+          markDirty();
         } catch {
           /* silencieux */
         }
@@ -368,7 +392,7 @@ function CriEditor() {
       setAddress((prev) => ({ ...prev, [k]: typeof v === "string" ? v : prev[k] }));
       setAddressStatus("manual");
     }
-    setDirty(true);
+    markDirty();
   }
 
   function setPhoto(slot: string, has: boolean) {
@@ -378,7 +402,7 @@ function CriEditor() {
       else delete next[slot];
       return next;
     });
-    setDirty(true);
+    markDirty();
   }
 
   async function handleSaveDraft() {
@@ -386,15 +410,26 @@ function CriEditor() {
     setSaving(true);
     try {
       await persist();
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "Impossible d'enregistrer le CRI.");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleExport(kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") {
-    // Sauvegarde d'abord
-    await persist();
-    if (!cri) return;
+    if (exportInProgress.current) return;
+    exportInProgress.current = true;
+    setExporting(true);
+    setOperationError(null);
+    const revision = editsVersion.current;
+    try {
+    // Save the exact snapshot that will be exported, not an older CRI object.
+    const saved = await persist();
+    if (!saved) return;
+    if (editsVersion.current !== revision) {
+      throw new Error("Le CRI a changé pendant l'enregistrement. Relancez l'export pour inclure vos dernières modifications.");
+    }
     // Validation des champs obligatoires
     const missingFields = CRI_SECTIONS.flatMap((s) => s.fields).filter((f) => {
       if (!f.required) return false;
@@ -408,16 +443,9 @@ function CriEditor() {
       setMissing(missingFields);
       return;
     }
-    const payload: CriRecord = {
-      ...cri,
-      values,
-      photos,
-      gps,
-      address,
-      addressStatus,
-    };
-    const reference = (values.referenceOrange as string) ?? cri.reference;
-    const communeVal = (values.commune as string) ?? address.commune ?? "";
+    const payload: CriRecord = saved;
+    const reference = (saved.values?.referenceOrange as string) ?? saved.reference;
+    const communeVal = (saved.values?.commune as string) ?? saved.address?.commune ?? "";
     let blob: Blob;
     let fileName: string;
     if (kind === "xlsx") {
@@ -433,7 +461,9 @@ function CriEditor() {
 
     // Choix de dossier si pas encore défini et supporté
     let folderName: string | undefined;
+    let attemptedFolderPicker = false;
     if (isFolderPickerSupported() && !settings?.exportFolderName) {
+      attemptedFolderPicker = true;
       try {
         const handle = await pickExportFolder();
         if (handle) {
@@ -446,15 +476,29 @@ function CriEditor() {
       }
     }
 
-    const res = await writeFileToExportFolder(fileName, blob);
+    let res = await writeFileToExportFolder(fileName, blob);
+    const nativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+    // A WebView blob download is not proof that Android saved anything. If a
+    // previous folder permission expired, let the user select a new destination.
+    if (!res.wrote && nativeAndroid && !attemptedFolderPicker) {
+      const selection = await pickExportFolder();
+      if (selection) res = await writeFileToExportFolder(fileName, blob);
+    }
     if (!res.wrote) {
+      if (nativeAndroid) {
+        throw new Error("Fichier non enregistré. Choisissez un dossier de destination Android et réessayez.");
+      }
       downloadBlob(fileName, blob);
     } else {
       folderName = res.folderName;
     }
-    await updateCri(cri.id, { status: "exported", exportedAt: new Date().toISOString(), exported: true });
+    if (editsVersion.current !== revision) {
+      throw new Error("Le fichier a été créé, mais le CRI a été modifié pendant l'export. Réexportez pour inclure les dernières modifications.");
+    }
+    const exportedRecord = await updateCri(saved.id, { status: "exported", exportedAt: new Date().toISOString(), exported: true });
+    setCri(exportedRecord);
     // Queue an OneDrive upload (local-first: local save already happened above).
-    if (settings?.cloudSyncEnabled) {
+    if (settings?.cloudSyncEnabled && settings.cloudProvider === "onedrive") {
       try {
         const { enqueueUpload, drainQueue } = await import("@/lib/onedrive/queue");
         await enqueueUpload(kind.startsWith("zip") ? "zip" : "excel", fileName, blob);
@@ -469,6 +513,12 @@ function CriEditor() {
       setExportToast(null);
       void navigate({ to: "/" });
     }, 2500);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "Export impossible. Vos données restent enregistrées dans le CRI.");
+    } finally {
+      exportInProgress.current = false;
+      setExporting(false);
+    }
   }
 
   if (!cri || !settings) {
@@ -511,6 +561,13 @@ function CriEditor() {
         {dirty && <span className="ml-auto text-warning">Modifié…</span>}
       </div>
 
+      {operationError && (
+        <p role="alert" className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+          {operationError}
+        </p>
+      )}
+      {exporting && <p role="status" className="mb-3 text-xs text-muted-foreground">Export en cours…</p>}
+
       {!online && (
         <div className="mb-4 flex items-center gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-3 text-sm">
           <WifiOff className="h-3.5 w-3.5 text-warning" />
@@ -545,7 +602,7 @@ function CriEditor() {
                   photos={photos}
                   onPhotosChange={(next) => {
                     setPhotos(next);
-                    setDirty(true);
+                    markDirty();
                   }}
                 />
               ) : (
@@ -576,7 +633,7 @@ function CriEditor() {
                       onAddressChange={(a) => {
                         setAddress(a);
                         setAddressStatus("manual");
-                        setDirty(true);
+                        markDirty();
                       }}
                       criId={cri.id}
                       hasPhoto={!!photos[f.id]}
@@ -597,7 +654,7 @@ function CriEditor() {
       {/* FAB : Enregistrer → ouvre l'écran de finalisation / export */}
       <button
         type="button"
-        disabled={saving}
+        disabled={saving || exporting}
         onClick={() => {
           // Réagit au premier tap : la vérification s'ouvre tout de suite,
           // tandis que le brouillon est persisté une seule fois en arrière-plan.

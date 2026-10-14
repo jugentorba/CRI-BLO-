@@ -85,3 +85,38 @@ async function createBitmap(file: File | Blob): Promise<ImageBitmap | HTMLImageE
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }
+
+/**
+ * ExcelJS accepts PNG and JPEG bytes only. Gallery/USB imports may contain
+ * WebP, HEIC, GIF or BMP when the optional watermark is disabled.
+ * Convert these to a genuine JPEG instead of embedding incompatible bytes
+ * under a misleading JPEG extension (which corrupts image display in Excel).
+ */
+export async function ensureExcelCompatiblePhoto(file: File | Blob): Promise<Blob> {
+  const type = file.type.toLowerCase();
+  if (type === "image/png" || type === "image/jpeg" || type === "image/jpg") {
+    return file;
+  }
+  let image: ImageBitmap | HTMLImageElement;
+  try {
+    image = await createBitmap(file);
+  } catch {
+    throw new Error("Format photo non reconnu sur cet appareil. Importez une image JPG ou PNG.");
+  }
+  const maxEdge = 4096;
+  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Conversion de photo indisponible sur cet appareil.");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  if ("close" in image && typeof image.close === "function") image.close();
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (result) => result ? resolve(result) : reject(new Error("Conversion JPG impossible.")),
+      "image/jpeg",
+      0.9,
+    );
+  });
+}
