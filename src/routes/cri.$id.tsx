@@ -461,7 +461,9 @@ function CriEditor() {
 
     // Choix de dossier si pas encore défini et supporté
     let folderName: string | undefined;
+    let attemptedFolderPicker = false;
     if (isFolderPickerSupported() && !settings?.exportFolderName) {
+      attemptedFolderPicker = true;
       try {
         const handle = await pickExportFolder();
         if (handle) {
@@ -478,7 +480,7 @@ function CriEditor() {
     const nativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
     // A WebView blob download is not proof that Android saved anything. If a
     // previous folder permission expired, let the user select a new destination.
-    if (!res.wrote && nativeAndroid) {
+    if (!res.wrote && nativeAndroid && !attemptedFolderPicker) {
       const selection = await pickExportFolder();
       if (selection) res = await writeFileToExportFolder(fileName, blob);
     }
