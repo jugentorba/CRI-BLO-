@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { ImagePlus, Loader2 } from "lucide-react";
 import { savePhoto } from "@/lib/photos/repository";
-import { watermarkImage } from "@/lib/photos/watermark";
+import { watermarkImage, ensureExcelCompatiblePhoto } from "@/lib/photos/watermark";
 import { downloadBlob } from "@/lib/export/folder";
 import type { Address } from "@/lib/cri/types";
 
@@ -28,6 +28,7 @@ export function ExtraPhotosBatchAdd({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function handleFiles(fileList: FileList | null) {
@@ -48,32 +49,47 @@ export function ExtraPhotosBatchAdd({
 
     const toProcess = files.slice(0, freeSlots.length);
     setBusy(true);
+    setError(null);
     setProgress({ done: 0, total: toProcess.length });
     try {
       // Process a few images concurrently so the UI does not feel blocked,
       // while still avoiding a large memory spike on mobile devices.
       const results: Array<{ slot: string; blob: Blob }> = [];
+      const failures: string[] = [];
       let cursor = 0;
       const worker = async () => {
         while (cursor < toProcess.length) {
           const i = cursor++;
           const file = toProcess[i];
           const slot = freeSlots[i];
-          const blob = watermarkEnabled
-            ? await watermarkImage(file, { date: new Date(), address })
-            : file;
-          await savePhoto(criId, slot, blob);
-          results.push({ slot, blob });
-          setProgress((p) => p ? { ...p, done: p.done + 1 } : p);
+          try {
+            const blob = watermarkEnabled
+              ? await watermarkImage(file, { date: new Date(), address })
+              : await ensureExcelCompatiblePhoto(file);
+            await savePhoto(criId, slot, blob);
+            results.push({ slot, blob });
+          } catch {
+            failures.push(file.name);
+          } finally {
+            setProgress((p) => p ? { ...p, done: p.done + 1 } : p);
+          }
         }
       };
       await Promise.all(Array.from({ length: Math.min(3, toProcess.length) }, () => worker()));
-      const next = { ...photos };
-      for (const { slot, blob } of results) {
-        next[slot] = slot;
-        if (saveToGallery) downloadBlob(`${slot}-${Date.now()}.jpg`, blob);
+      if (results.length) {
+        const next = { ...photos };
+        for (const { slot, blob } of results) {
+          next[slot] = slot;
+          if (saveToGallery) {
+            const ext = blob.type === "image/png" ? "png" : "jpg";
+            downloadBlob(`${slot}-${Date.now()}.${ext}`, blob);
+          }
+        }
+        onPhotosChange(next);
       }
-      onPhotosChange(next);
+      if (failures.length) {
+        setError(`Impossible d'importer : ${failures.slice(0, 3).join(", ")}${failures.length > 3 ? "…" : ""}. Essayez des photos JPG ou PNG.`);
+      }
     } finally {
       setBusy(false);
       setProgress(null);
@@ -94,6 +110,7 @@ export function ExtraPhotosBatchAdd({
           ? `Ajout ${progress.done}/${progress.total}…`
           : "Ajouter plusieurs photos"}
       </button>
+      {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
       <p className="mt-2 text-xs text-muted-foreground">
         Sélection multiple d’images depuis la galerie ou un fournisseur de fichiers — les photos sont placées
         automatiquement dans les prochains emplacements libres. Les autres documents vont dans « Fichiers supplémentaires ».
