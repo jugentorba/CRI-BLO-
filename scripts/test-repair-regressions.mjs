@@ -674,7 +674,7 @@ requireText(
 );
 requireText(
   "src/routes/cri.$id.tsx",
-  /if \(!res\.wrote && nativeAndroid\)[\s\S]{0,200}pickExportFolder\(\)/,
+  /if \(!res\.wrote && nativeAndroid && !attemptedFolderPicker\)[\s\S]{0,200}pickExportFolder\(\)/,
   "Expired Android folder grants must trigger a new destination selection",
 );
 requireText(
