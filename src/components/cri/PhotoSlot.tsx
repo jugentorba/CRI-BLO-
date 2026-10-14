@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Image as ImageIcon, Eye, RefreshCw, Trash2, Pencil, FolderOpen } from "lucide-react";
 import { deletePhoto, getPhoto, savePhoto } from "@/lib/photos/repository";
-import { watermarkImage } from "@/lib/photos/watermark";
+import { watermarkImage, ensureExcelCompatiblePhoto } from "@/lib/photos/watermark";
 import { downloadBlob } from "@/lib/export/folder";
 import { PhotoAnnotator } from "@/components/cri/PhotoAnnotator";
 import type { Address } from "@/lib/cri/types";
@@ -32,6 +32,7 @@ export function PhotoSlot({
   const [viewing, setViewing] = useState(false);
   const [annotating, setAnnotating] = useState<Blob | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const galRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -58,17 +59,23 @@ export function PhotoSlot({
     const scrollY = window.scrollY;
     const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name);
     if (!isImage) return;
-    const blob = watermarkEnabled && isImage
-      ? await watermarkImage(file, { date: new Date(), address })
-      : file;
-    await savePhoto(criId, slot, blob);
-    onChange(true);
-    if (saveToGallery) {
-      downloadBlob(`${slot}-${Date.now()}.jpg`, blob);
+    setPhotoError(null);
+    try {
+      const blob = watermarkEnabled
+        ? await watermarkImage(file, { date: new Date(), address })
+        : await ensureExcelCompatiblePhoto(file);
+      await savePhoto(criId, slot, blob);
+      onChange(true);
+      if (saveToGallery) {
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        downloadBlob(`${slot}-${Date.now()}.${ext}`, blob);
+      }
+      // Restore scroll position after camera/gallery return (iOS/Android may jump).
+      requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
+      setTimeout(() => window.scrollTo({ top: scrollY }), 120);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Impossible d'enregistrer la photo.");
     }
-    // Restore scroll position after camera/gallery return (iOS/Android may jump).
-    requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
-    setTimeout(() => window.scrollTo({ top: scrollY }), 120);
   }
 
   async function handleDelete() {
@@ -95,6 +102,7 @@ export function PhotoSlot({
       <div className="mb-2">
         <div className="text-sm font-semibold text-foreground">{label}</div>
         {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+        {photoError && <p role="alert" className="mt-1 text-xs text-destructive">{photoError}</p>}
       </div>
 
       {preview ? (
