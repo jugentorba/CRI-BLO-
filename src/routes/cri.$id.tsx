@@ -90,6 +90,7 @@ function CriEditor() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const exportInProgress = useRef(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   // A save must never mark newer, unsaved edits as saved.
   const editsVersion = useRef(0);
@@ -417,7 +418,8 @@ function CriEditor() {
   }
 
   async function handleExport(kind: "xlsx" | "pdf" | "zip-xlsx" | "zip-pdf") {
-    if (exporting) return;
+    if (exportInProgress.current) return;
+    exportInProgress.current = true;
     setExporting(true);
     setOperationError(null);
     const revision = editsVersion.current;
@@ -512,6 +514,7 @@ function CriEditor() {
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : "Export impossible. Vos données restent enregistrées dans le CRI.");
     } finally {
+      exportInProgress.current = false;
       setExporting(false);
     }
   }
