@@ -715,4 +715,20 @@ requireText(
   "A failing photo in a batch must not hide other successfully imported photos",
 );
 
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /\[photoRevision, setPhotoRevision\][\s\S]{0,1100}\[criId, slot, hasPhoto, photoRevision\]/,
+  "Replacing a photo must refresh its preview even when the slot was already occupied",
+);
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /async function handleAnnotatedSave\(edited: Blob\)[\s\S]{0,460}setPhotoRevision/,
+  "Saving an annotation must refresh its preview without temporarily deleting the saved slot",
+);
+forbidText(
+  "src/components/cri/PhotoSlot.tsx",
+  /onChange\(false\);\s*setTimeout\(\(\) => onChange\(true\)/,
+  "Editing a photo must not fake deletion that can race with autosave",
+);
+
 console.log("CRI BLO repair regression checks passed.");
