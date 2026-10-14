@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapPin,
@@ -471,8 +472,18 @@ function CriEditor() {
       }
     }
 
-    const res = await writeFileToExportFolder(fileName, blob);
+    let res = await writeFileToExportFolder(fileName, blob);
+    const nativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+    // A WebView blob download is not proof that Android saved anything. If a
+    // previous folder permission expired, let the user select a new destination.
+    if (!res.wrote && nativeAndroid) {
+      const selection = await pickExportFolder();
+      if (selection) res = await writeFileToExportFolder(fileName, blob);
+    }
     if (!res.wrote) {
+      if (nativeAndroid) {
+        throw new Error("Fichier non enregistré. Choisissez un dossier de destination Android et réessayez.");
+      }
       downloadBlob(fileName, blob);
     } else {
       folderName = res.folderName;
@@ -483,7 +494,7 @@ function CriEditor() {
     const exportedRecord = await updateCri(saved.id, { status: "exported", exportedAt: new Date().toISOString(), exported: true });
     setCri(exportedRecord);
     // Queue an OneDrive upload (local-first: local save already happened above).
-    if (settings?.cloudSyncEnabled) {
+    if (settings?.cloudSyncEnabled && settings.cloudProvider === "onedrive") {
       try {
         const { enqueueUpload, drainQueue } = await import("@/lib/onedrive/queue");
         await enqueueUpload(kind.startsWith("zip") ? "zip" : "excel", fileName, blob);
