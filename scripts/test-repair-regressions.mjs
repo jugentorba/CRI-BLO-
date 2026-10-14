@@ -688,4 +688,31 @@ requireText(
   "Other cloud providers must not enqueue exports in the OneDrive-only queue",
 );
 
+/* Photo imports must never embed HEIC/WebP/GIF bytes disguised as JPEG. */
+requireText(
+  "src/lib/photos/watermark.ts",
+  /export async function ensureExcelCompatiblePhoto[\s\S]{0,1800}canvas\.toBlob/,
+  "Non-JPEG/PNG photo imports must be transcoded before use in Excel",
+);
+requireText(
+  "src/lib/export/xlsx.ts",
+  /await ensureExcelCompatiblePhoto\(stored\.blob\)/,
+  "Excel export must also repair photos already saved by earlier app versions",
+);
+requireText(
+  "src/components/cri/PhotoSlot.tsx",
+  /await ensureExcelCompatiblePhoto\(file\)/,
+  "Photo slots must normalize gallery images when the watermark is disabled",
+);
+requireText(
+  "src/components/cri/ExtraPhotosBatchAdd.tsx",
+  /await ensureExcelCompatiblePhoto\(file\)/,
+  "Supplementary PHOTOS OI imports must normalize unsupported image formats",
+);
+requireText(
+  "src/components/cri/ExtraPhotosBatchAdd.tsx",
+  /if \(results\.length\)[\s\S]{0,500}onPhotosChange\(next\)/,
+  "A failing photo in a batch must not hide other successfully imported photos",
+);
+
 console.log("CRI BLO repair regression checks passed.");
