@@ -33,26 +33,30 @@ export function PhotoSlot({
   const [annotating, setAnnotating] = useState<Blob | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoRevision, setPhotoRevision] = useState(0);
   const camRef = useRef<HTMLInputElement>(null);
   const galRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let url: string | null = null;
+    let active = true;
     if (hasPhoto) {
       void getPhoto(criId, slot).then((p) => {
-        if (p) {
-          url = URL.createObjectURL(p.blob);
-          setPreview(url);
-        }
+        if (!active || !p) return;
+        url = URL.createObjectURL(p.blob);
+        setPreview(url);
+      }).catch(() => {
+        if (active) setPhotoError("Impossible de charger l'aperçu de cette photo.");
       });
     } else {
       setPreview(null);
     }
     return () => {
+      active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [criId, slot, hasPhoto]);
+  }, [criId, slot, hasPhoto, photoRevision]);
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
@@ -66,6 +70,7 @@ export function PhotoSlot({
         : await ensureExcelCompatiblePhoto(file);
       await savePhoto(criId, slot, blob);
       onChange(true);
+      setPhotoRevision((previous) => previous + 1);
       if (saveToGallery) {
         const ext = blob.type === "image/png" ? "png" : "jpg";
         downloadBlob(`${slot}-${Date.now()}.${ext}`, blob);
@@ -90,11 +95,15 @@ export function PhotoSlot({
   }
 
   async function handleAnnotatedSave(edited: Blob) {
-    await savePhoto(criId, slot, edited);
-    setAnnotating(null);
-    // Force preview refresh.
-    onChange(false);
-    setTimeout(() => onChange(true), 0);
+    try {
+      await savePhoto(criId, slot, await ensureExcelCompatiblePhoto(edited));
+      setAnnotating(null);
+      setPhotoError(null);
+      onChange(true);
+      setPhotoRevision((previous) => previous + 1);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Impossible d'enregistrer l'annotation.");
+    }
   }
 
   return (
@@ -179,6 +188,7 @@ export function PhotoSlot({
         onCapture={async (blob) => {
           await savePhoto(criId, slot, blob);
           onChange(true);
+          setPhotoRevision((previous) => previous + 1);
         }}
       />
 
