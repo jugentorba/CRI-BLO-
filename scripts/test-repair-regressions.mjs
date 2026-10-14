@@ -646,4 +646,46 @@ requireText(
   "Anthropic default model must use the current Sonnet API model ID",
 );
 
+/* A CRI may be edited while autosave, manual save and export overlap. */
+requireText(
+  "src/routes/cri.$id.tsx",
+  /saveQueue\.current\.catch\(\(\) => null\)\.then\(\(\) => updateCri/,
+  "Concurrent CRI writes must be serialized to prevent stale saves from winning",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /if \(editsVersion\.current === revision\)\s*\{[\s\S]{0,250}setDirty\(false\)/,
+  "An old save must not clear the dirty state of newer edits",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /const payload: CriRecord = saved;/,
+  "Excel, PDF and ZIP exports must use the saved snapshot",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /const exportedRecord = await updateCri\(saved\.id,[\s\S]{0,180}setCri\(exportedRecord\)/,
+  "The editor must immediately reflect a successful export in history",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /exportInProgress\.current = true;[\s\S]{0,5000}exportInProgress\.current = false;/,
+  "Rapid repeat taps must not launch multiple exports",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /if \(!res\.wrote && nativeAndroid\)[\s\S]{0,200}pickExportFolder\(\)/,
+  "Expired Android folder grants must trigger a new destination selection",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /if \(nativeAndroid\)\s*\{\s*throw new Error\("Fichier non enregistré/,
+  "Android exports must never falsely report that a WebView blob was saved",
+);
+requireText(
+  "src/routes/cri.$id.tsx",
+  /settings\.cloudProvider === "onedrive"/,
+  "Other cloud providers must not enqueue exports in the OneDrive-only queue",
+);
+
 console.log("CRI BLO repair regression checks passed.");
