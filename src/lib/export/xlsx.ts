@@ -6,6 +6,7 @@
 import ExcelJS from "exceljs";
 import type { CriRecord } from "@/lib/cri/types";
 import { getPhoto } from "@/lib/photos/repository";
+import { ensureExcelCompatiblePhoto } from "@/lib/photos/watermark";
 
 interface CellMap {
   sheet: string;
@@ -281,9 +282,12 @@ export async function buildXlsxExport(cri: CriRecord): Promise<Blob> {
     if (!stored) continue;
     const ws = wb.getWorksheet(anchor.sheet);
     if (!ws) continue;
-    const bufImg = await stored.blob.arrayBuffer();
-    const ext = stored.blob.type.includes("png") ? "png" : "jpeg";
-    const imgId = wb.addImage({ buffer: bufImg, extension: ext as "png" | "jpeg" });
+    // Existing drafts can contain older WebP/HEIC/GIF photos; normalize those
+    // too, so importing before an app update does not break PHOTOS OI.
+    const image = await ensureExcelCompatiblePhoto(stored.blob);
+    const bufImg = await image.arrayBuffer();
+    const ext = image.type === "image/png" ? "png" : "jpeg";
+    const imgId = wb.addImage({ buffer: bufImg, extension: ext });
     ws.addImage(imgId, {
       tl: { col: anchor.col, row: anchor.row } as ExcelJS.ImageRange["tl"],
       br: { col: anchor.col + anchor.cols, row: anchor.row + anchor.rows } as ExcelJS.ImageRange["br"],
