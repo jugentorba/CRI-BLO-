@@ -45,6 +45,9 @@ export async function parseCriXlsx(file: File): Promise<ImportResult> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await file.arrayBuffer());
 
+  if (!Array.isArray(wb.worksheets) || wb.worksheets.length === 0) {
+    throw new Error("Classeur Excel sans feuilles lisibles. Vérifiez le fichier d’origine.");
+  }
   const fields: ImportedField[] = [];
   const values: Record<string, unknown> = {};
 
