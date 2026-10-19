@@ -1,3 +1,4 @@
+import { loadCriWorkbook } from "@/lib/import/workbook";
 // Import d'un CRI BLO existant (Excel officiel ou PDF) : analyse le document
 // et retourne les informations reconnues. Aucune écriture automatique : le
 // technicien valide ce qui doit être repris.
@@ -41,9 +42,7 @@ function cellText(value: unknown): string {
 
 /** Lit les cellules officielles du template Orange et en déduit les champs. */
 export async function parseCriXlsx(file: File): Promise<ImportResult> {
-  const ExcelJS = (await import("exceljs")).default;
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await file.arrayBuffer());
+  const wb = await loadCriWorkbook(await file.arrayBuffer());
 
   if (!Array.isArray(wb.worksheets) || wb.worksheets.length === 0) {
     throw new Error("Classeur Excel sans feuilles lisibles. Vérifiez le fichier d’origine.");
