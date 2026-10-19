@@ -1,3 +1,4 @@
+import { loadCriWorkbook } from "@/lib/import/workbook";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
@@ -42,9 +43,7 @@ export const Route = createFileRoute("/importer")({
 
 async function restoreImportedPhotos(file: File, criId: string): Promise<Record<string,string>> {
   if (!/\.(xlsx|xlsm)$/i.test(file.name)) return {};
-  const ExcelJS = (await import("exceljs")).default;
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await file.arrayBuffer());
+  const wb = await loadCriWorkbook(await file.arrayBuffer());
   const slots: Record<string, Array<[number,number,string]>> = {
     "PHOTOS OI": [[0,2,"photo_oi_situation"],[4,2,"photo_oi_etiquette"],[0,20,"photo_oi_avant"],[4,20,"photo_oi_apres"]],
     "PHOTOS OC": [[0,2,"photo_oc_defaut"],[4,2,"photo_oc_apres_def"],[0,20,"photo_oc_avant"],[4,20,"photo_oc_apres"],[0,37,"photo_oc_mesure1"],[4,37,"photo_oc_mesure2"]],
