@@ -9,7 +9,8 @@ export async function detectDocument(file: File): Promise<DetectionResult> {
       const ExcelJS = (await import("exceljs")).default;
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(await file.arrayBuffer());
-      const names = wb.worksheets.map((w) => w.name);
+      const names = (wb.worksheets ?? []).map((w) => w.name);
+      if (!names.length) throw new Error("Aucune feuille Excel trouvée.");
       return detectFromSheets(names, file.name);
     } catch {
       return {
