@@ -1,4 +1,5 @@
 import { loadCriWorkbook } from "@/lib/import/workbook";
+import { CriExcelViewer } from "@/components/cri/CriExcelViewer";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
@@ -79,6 +80,8 @@ function Importer() {
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [detection, setDetection] = useState<DetectionResult | null>(null);
@@ -92,6 +95,7 @@ function Importer() {
   async function handleFile(file: File | undefined) {
     if (!file) return;
     fileRef.current = file;
+    setSelectedFile(file);
     setBusy(true);
     setError(null);
     setResult(null);
@@ -195,6 +199,8 @@ function Importer() {
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
 
+      {selectedFile && /\.(xlsx|xlsm)$/i.test(selectedFile.name) && <button type="button" onClick={() => setPreviewFile(selectedFile)} className="mt-3 flex w-full items-center justify-center rounded-xl border border-primary p-3 text-sm font-semibold text-primary">Ouvrir et consulter le classeur Excel</button>}
+      {previewFile && <CriExcelViewer file={previewFile} onClose={() => setPreviewFile(null)}/>}
       {error && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
