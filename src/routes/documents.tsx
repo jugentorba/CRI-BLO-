@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { UniversalDocumentEditor } from "@/components/UniversalDocumentEditor";
+import { CriExcelViewer } from "@/components/cri/CriExcelViewer";
 import {
   deleteOtherDoc,
   listOtherDocs,
@@ -54,6 +55,7 @@ function Documents() {
   const fileRef = useRef<File | null>(null);
   const [docs, setDocs] = useState<OtherDocRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [excelPreview, setExcelPreview] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detection, setDetection] = useState<DetectionResult | null>(null);
   const [pending, setPending] = useState<{
@@ -206,6 +208,8 @@ function Documents() {
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
 
+      {fileRef.current && /\.(xlsx|xlsm)$/i.test(fileRef.current.name) && <button type="button" className="mt-2 w-full rounded-xl border border-primary p-3 text-sm font-semibold text-primary" onClick={() => setExcelPreview(fileRef.current)}>Ouvrir le classeur Excel</button>}
+      {excelPreview && <CriExcelViewer file={excelPreview} onClose={() => setExcelPreview(null)}/>}
       {error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
