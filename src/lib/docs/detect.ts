@@ -1,3 +1,4 @@
+import { loadCriWorkbook } from "@/lib/import/workbook";
 // Analyse d'un fichier importé pour déterminer son TYPE avant toute action.
 // Module isolé : n'écrit rien et ne touche jamais aux données CRI BLO.
 
@@ -6,9 +7,7 @@ import { detectFromSheets, detectFromText, type DetectionResult } from "@/lib/do
 export async function detectDocument(file: File): Promise<DetectionResult> {
   if (/\.(xlsx|xlsm)$/i.test(file.name)) {
     try {
-      const ExcelJS = (await import("exceljs")).default;
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(await file.arrayBuffer());
+      const wb = await loadCriWorkbook(await file.arrayBuffer());
       const names = (wb.worksheets ?? []).map((w) => w.name);
       if (!names.length) throw new Error("Aucune feuille Excel trouvée.");
       return detectFromSheets(names, file.name);
