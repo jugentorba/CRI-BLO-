@@ -61,6 +61,18 @@ export async function buildZipExport(
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
+  // Round-trip validation catches truncated archives before they are downloaded.
+  const verified = await JSZip.loadAsync(bytes, { checkCRC32: true });
+  const expected = Object.keys(zip.files).filter((name) => !zip.files[name].dir);
+  for (const name of expected) {
+    const item = verified.file(name);
+    if (!item) throw new Error(`Export ZIP invalide : fichier manquant : ${name}`);
+    const original = await zip.file(name)?.async("uint8array");
+    const extracted = await item.async("uint8array");
+    if (!original || original.byteLength !== extracted.byteLength) {
+      throw new Error(`Export ZIP invalide : fichier incomplet : ${name}`);
+    }
+  }
   const zipBuffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(zipBuffer).set(bytes);
   return new Blob([zipBuffer], { type: "application/zip" });
