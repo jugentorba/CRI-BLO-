@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { parseCriFile, type ImportResult } from "@/lib/import/parse";
-import { createCri } from "@/lib/cri/repository";
+import { createCri, updateCri } from "@/lib/cri/repository";
+import { savePhoto } from "@/lib/photos/repository";
 import { getProfile } from "@/lib/profile/repository";
 import { detectDocument } from "@/lib/docs/detect";
 import { DOC_TYPES, type DetectionResult } from "@/lib/docs/registry";
@@ -37,6 +38,42 @@ export const Route = createFileRoute("/importer")({
   }),
   component: Importer,
 });
+
+
+async function restoreImportedPhotos(file: File, criId: string): Promise<Record<string,string>> {
+  if (!/\.(xlsx|xlsm)$/i.test(file.name)) return {};
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const slots: Record<string, Array<[number,number,string]>> = {
+    "PHOTOS OI": [[0,2,"photo_oi_situation"],[4,2,"photo_oi_etiquette"],[0,20,"photo_oi_avant"],[4,20,"photo_oi_apres"]],
+    "PHOTOS OC": [[0,2,"photo_oc_defaut"],[4,2,"photo_oc_apres_def"],[0,20,"photo_oc_avant"],[4,20,"photo_oc_apres"],[0,37,"photo_oc_mesure1"],[4,37,"photo_oc_mesure2"]],
+    "MESURES": [[0,4,"photo_mesures_loc1"],[6,4,"photo_mesures_loc2"]],
+    "RDSUR": [[1,4,"photo_rdsur_avant"],[5,4,"photo_rdsur_apres"]],
+    "PLAN": [[0,1,"photo_plan"]],
+  };
+  const photos: Record<string,string> = {};
+  for (const ws of wb.worksheets) {
+    for (const img of ws.getImages()) {
+      const tl = img.range.tl;
+      if (!tl) continue;
+      const col = Math.round(tl.nativeCol ?? tl.col);
+      const row = Math.round(tl.nativeRow ?? tl.row);
+      let slot = (slots[ws.name] ?? []).find(([c,r])=>Math.abs(c-col)<=1 && Math.abs(r-row)<=1)?.[2];
+      if (!slot && ws.name === "PHOTOS OI" && row >= 36) {
+        const n = Math.floor(Math.max(0,row-37)/15)*2 + (col>=3?2:1);
+        slot = "photo_extra_" + n;
+      }
+      if (!slot || photos[slot]) continue;
+      const media = wb.getImage(img.imageId);
+      if (!media?.buffer) continue;
+      const mime = media.extension === "png" ? "image/png" : "image/jpeg";
+      await savePhoto(criId, slot, new Blob([media.buffer], {type:mime}));
+      photos[slot] = criId + ":" + slot;
+    }
+  }
+  return photos;
+}
 
 function Importer() {
   const navigate = useNavigate();
@@ -128,6 +165,15 @@ function Importer() {
       values,
       photos: {},
     });
+    try {
+      if (fileRef.current) {
+        const photos = await restoreImportedPhotos(fileRef.current, record.id);
+        if (Object.keys(photos).length) await updateCri(record.id, { photos });
+      }
+    } catch (e) {
+      console.error("[importer] photo restoration failed", e);
+      setError("Intervention créée, mais les photos ne sont pas toutes restaurées.");
+    }
     navigate({ to: "/cri/$id", params: { id: record.id } });
   }
 
