@@ -38,9 +38,8 @@ export function AttachmentViewer({ attachment, onClose }: { attachment: Attachme
           setPages(pdf.numPages);
           setPreview({ kind: "pdf" });
         } else if (ext === "xlsx") {
-          const ExcelJS = (await import("exceljs")).default;
-          const book = new ExcelJS.Workbook();
-          await book.xlsx.load(await attachment.blob.arrayBuffer());
+          const { loadCriWorkbook } = await import("@/lib/import/workbook");
+          const book = await loadCriWorkbook(await attachment.blob.arrayBuffer());
           const rows: string[][] = [];
           book.eachSheet((sheet) => {
             rows.push([sheet.name]);
