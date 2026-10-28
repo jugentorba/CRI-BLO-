@@ -23,8 +23,12 @@ export function attachmentMimeType(name: string, supplied?: string): string {
 export async function openAttachment(file: { name: string; type?: string; blob: Blob }): Promise<void> {
   const mimeType = attachmentMimeType(file.name, file.type || file.blob.type);
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") {
-    const { token } = await Files.beginOpen({ fileName: file.name, mimeType });
+    // The native bridge is not present in older APKs. Always retain a way to
+    // access the attachment instead of making the Open button a dead end.
+    let token: string | null = null;
     try {
+      const result = await Files.beginOpen({ fileName: file.name, mimeType });
+      token = result.token;
       const chunkSize = 384 * 1024;
       for (let offset = 0; offset < file.blob.size; offset += chunkSize) {
         const bytes = new Uint8Array(await file.blob.slice(offset, offset + chunkSize).arrayBuffer());
@@ -35,11 +39,14 @@ export async function openAttachment(file: { name: string; type?: string; blob: 
         await Files.writeChunk({ token, base64: btoa(binary) });
       }
       await Files.finishOpen({ token });
+      return;
     } catch (error) {
-      await Files.abortOpen({ token }).catch(() => {});
-      throw error;
+      if (token) await Files.abortOpen({ token }).catch(() => {});
+      // A failed Android intent (or an APK without CriBloFiles) must not lose
+      // access to the stored Blob. Save a local copy for opening in Files.
+      downloadBlob(file.name, file.blob);
+      return;
     }
-    return;
   }
   if (/Android/i.test(navigator.userAgent)) {
     const sharedFile = new File([file.blob], file.name, { type: mimeType });
