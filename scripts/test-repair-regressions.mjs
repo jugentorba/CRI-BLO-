@@ -282,8 +282,8 @@ requireText(
 );
 requireText(
   "src/components/cri/AttachmentsSection.tsx",
-  /openAttachment\(a\)/,
-  "Stored supplementary files must use the platform-aware attachment opener",
+  /AttachmentViewer[\\s\\S]*attachment=\\{selected\\}/,
+  "Stored supplementary files must use the embedded attachment viewer",
 );
 requireText(
   "src/lib/export/naming.ts",
