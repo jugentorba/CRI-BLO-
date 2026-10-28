@@ -282,7 +282,7 @@ requireText(
 );
 requireText(
   "src/components/cri/AttachmentsSection.tsx",
-  /AttachmentViewer[\\s\\S]*attachment=\\{selected\\}/,
+  /AttachmentViewer[\s\S]*attachment=\{selected\}/,
   "Stored supplementary files must use the embedded attachment viewer",
 );
 requireText(
