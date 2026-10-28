@@ -17,6 +17,24 @@ export function AttachmentViewer({ attachment, onClose }: { attachment: Attachme
   const mime = attachmentMimeType(attachment.name, attachment.type || attachment.blob.type);
   const ext = attachment.name.split(".").pop()?.toLowerCase() || "";
 
+  // Ensure the attachment can be dismissed by keyboard and Android system Back.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const marker = { criAttachmentViewer: true };
+    window.history.pushState(marker, "");
+    const handlePopState = () => closeRef.current();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRef.current();
+    };
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     let blobUrl: string | undefined;
@@ -108,9 +126,9 @@ export function AttachmentViewer({ attachment, onClose }: { attachment: Attachme
   }, [preview, page]);
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-background" role="dialog" aria-modal="true" aria-label={attachment.name}>
-      <div className="flex items-center gap-2 border-b bg-background px-3 py-3">
-        <button type="button" onClick={onClose} aria-label="Fermer"><X className="h-5 w-5" /></button>
+    <div className="fixed inset-0 z-[200] flex flex-col bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" role="dialog" aria-modal="true" aria-label={attachment.name}>
+      <div className="flex shrink-0 items-center gap-2 border-b bg-background px-3 py-3">
+        <button type="button" onClick={onClose} aria-label="Fermer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md"><X className="h-5 w-5" /></button>
         <strong className="min-w-0 flex-1 truncate text-sm">{attachment.name}</strong>
         <button type="button" onClick={() => downloadBlob(attachment.name, attachment.blob)} aria-label="Télécharger"><Download className="h-5 w-5" /></button>
       </div>
