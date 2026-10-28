@@ -3,6 +3,9 @@ package com.criblo.app;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
+import android.content.pm.PackageManager;
+import java.util.List;
 import android.net.Uri;
 import android.util.Base64;
 import androidx.core.content.FileProvider;
@@ -86,10 +89,23 @@ public class CriBloFilesPlugin extends Plugin {
             intent.setDataAndType(uri, copy.mimeType);
             intent.setClipData(ClipData.newRawUri(copy.file.getName(), uri));
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            // Grant direct access to viewers: some Android choosers fail to
+            // propagate the temporary content URI permission.
+            PackageManager pm = getContext().getPackageManager();
+            List<ResolveInfo> handlers = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            for (ResolveInfo handler : handlers) {
+                if (handler.activityInfo != null) {
+                    getContext().grantUriPermission(handler.activityInfo.packageName, uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            }
+            Intent chooser = Intent.createChooser(intent, "Ouvrir avec");
+            chooser.setClipData(ClipData.newRawUri(copy.file.getName(), uri));
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             getActivity().runOnUiThread(() -> {
                 try {
                     // Do not preflight with resolveActivity: package visibility can hide a valid viewer.
-                    getActivity().startActivity(intent);
+                    getActivity().startActivity(chooser);
                     copies.remove(token);
                     call.resolve();
                 } catch (ActivityNotFoundException error) {
