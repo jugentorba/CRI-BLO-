@@ -7,12 +7,12 @@ import {
   listAttachments,
   type AttachmentRecord,
 } from "@/lib/attachments/repository";
-import { openAttachment } from "@/lib/attachments/open";
+import { AttachmentViewer } from "@/components/cri/AttachmentViewer";
 
 export function AttachmentsSection({ criId }: { criId: string }) {
   const [items, setItems] = useState<AttachmentRecord[]>([]);
   const [busy, setBusy] = useState(false);
-  const [opening, setOpening] = useState<string | null>(null);
+  const [selected, setSelected] = useState<AttachmentRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -34,17 +34,9 @@ export function AttachmentsSection({ criId }: { criId: string }) {
     }
   }
 
-  async function handleOpen(a: AttachmentRecord) {
-    if (opening) return;
-    setOpening(a.id);
+  function handleOpen(a: AttachmentRecord) {
     setError(null);
-    try {
-      await openAttachment(a);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Impossible d'ouvrir ce fichier.");
-    } finally {
-      setOpening(null);
-    }
+    setSelected(a);
   }
 
   async function handleDelete(id: string) {
@@ -64,7 +56,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
       </p>
 
       {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
-      {opening && <p role="status" className="mb-3 text-xs">Ouverture du fichier…</p>}
+
       <div className="space-y-2">
         {items.length === 0 && (
           <div className="rounded-xl border border-dashed border-border bg-card p-4 text-center text-xs text-muted-foreground">
@@ -81,8 +73,8 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             </div>
             <button
               type="button"
-              onClick={() => void handleOpen(a)}
-              disabled={opening !== null}
+              onClick={() => handleOpen(a)}
+              
               className="min-w-0 flex-1 text-left"
               aria-label={`Ouvrir ${a.name}`}
             >
@@ -94,7 +86,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
             <button
               type="button"
               onClick={() => void handleOpen(a)}
-              disabled={opening !== null}
+              
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-primary transition active:scale-95"
               aria-label="Ouvrir le fichier"
             >
@@ -129,6 +121,7 @@ export function AttachmentsSection({ criId }: { criId: string }) {
         className="hidden"
         onChange={(e) => void handleFiles(e.target.files)}
       />
+      {selected && <AttachmentViewer attachment={selected} onClose={() => setSelected(null)} />}
     </section>
   );
 }
