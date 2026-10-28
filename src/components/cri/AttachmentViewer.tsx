@@ -20,12 +20,22 @@ export function AttachmentViewer({ attachment, onClose }: { attachment: Attachme
   // Ensure the attachment can be dismissed by keyboard and Android system Back.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const requestClose = () => {
+    // Consume the viewer-only history entry for both the X button and Escape.
+    // Android system Back pops this entry and triggers the same close callback.
+    if (window.history.state?.criAttachmentViewer) window.history.back();
+    else closeRef.current();
+  };
   useEffect(() => {
-    const marker = { criAttachmentViewer: true };
+    const marker = { ...window.history.state, criAttachmentViewer: true };
     window.history.pushState(marker, "");
     const handlePopState = () => closeRef.current();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeRef.current();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (window.history.state?.criAttachmentViewer) window.history.back();
+        else closeRef.current();
+      }
     };
     window.addEventListener("popstate", handlePopState);
     window.addEventListener("keydown", handleKeyDown);
@@ -128,7 +138,7 @@ export function AttachmentViewer({ attachment, onClose }: { attachment: Attachme
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" role="dialog" aria-modal="true" aria-label={attachment.name}>
       <div className="flex shrink-0 items-center gap-2 border-b bg-background px-3 py-3">
-        <button type="button" onClick={onClose} aria-label="Fermer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md"><X className="h-5 w-5" /></button>
+        <button type="button" onClick={requestClose} aria-label="Fermer" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md"><X className="h-5 w-5" /></button>
         <strong className="min-w-0 flex-1 truncate text-sm">{attachment.name}</strong>
         <button type="button" onClick={() => downloadBlob(attachment.name, attachment.blob)} aria-label="Télécharger"><Download className="h-5 w-5" /></button>
       </div>
