@@ -40,19 +40,37 @@ export async function maybeRunAutomaticCloudBackup(): Promise<void> {
     const last = settings.lastCloudBackupAt ? new Date(settings.lastCloudBackupAt).getTime() : 0;
     if (last && Date.now() - last < hours * 60 * 60 * 1000) return;
 
+    // Après un échec, on ne réessaie pas en boucle toutes les 90 s.
+    const lastAttempt = settings.lastCloudAttemptAt
+      ? new Date(settings.lastCloudAttemptAt).getTime()
+      : 0;
+    if (settings.lastCloudError && Date.now() - lastAttempt < 5 * 60 * 1000) return;
+
     try {
       // Never open an authentication popup during an automatic backup.
       const result = await uploadDeviceSnapshot(false);
       clearCloudBackupDirty();
-      await saveSettings({ lastCloudBackupAt: result.at });
+      await saveSettings({
+        lastCloudBackupAt: result.at,
+        lastCloudAttemptAt: result.at,
+        lastCloudError: undefined,
+      });
       window.dispatchEvent(
         new CustomEvent("criblo:auto-backup", {
           detail: { ok: true, at: result.at, size: result.size },
         }),
       );
-    } catch {
-      // Expected when a cloud login needs user interaction. Keep the dirty flag
-      // so the next foreground/manual backup can retry without losing anything.
+    } catch (error) {
+      // On garde la marque « modifié » pour réessayer, mais l'erreur est
+      // visible : plus de sauvegarde cloud silencieusement absente.
+      const message = error instanceof Error ? error.message : "Sauvegarde cloud impossible.";
+      await saveSettings({
+        lastCloudAttemptAt: new Date().toISOString(),
+        lastCloudError: message,
+      });
+      window.dispatchEvent(
+        new CustomEvent("criblo:auto-backup", { detail: { ok: false, error: message } }),
+      );
     }
   })().finally(() => {
     running = null;

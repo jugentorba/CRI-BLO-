@@ -80,9 +80,30 @@ function Parametres() {
     try {
       const picked = await pickCloudBackupFolder();
       if (picked) {
+        await patchSettings({ lastCloudError: undefined });
         setSettings(await getSettings());
         markCloudBackupDirty();
         setSyncMessage(`Dossier cloud sélectionné : ${picked.name}`);
+        // Première sauvegarde immédiate : l'utilisateur voit que ça fonctionne.
+        try {
+          const r = await uploadDeviceSnapshot();
+          clearCloudBackupDirty();
+          await patchSettings({
+            lastCloudBackupAt: r.at,
+            lastCloudAttemptAt: r.at,
+            lastCloudError: undefined,
+          });
+          setSettings(await getSettings());
+          setSyncMessage(
+            `Dossier cloud sélectionné : ${picked.name} — sauvegarde envoyée (${Math.round(r.size / 1024)} Ko).`,
+          );
+        } catch (uploadError) {
+          const message =
+            uploadError instanceof Error ? uploadError.message : "Sauvegarde impossible.";
+          await patchSettings({ lastCloudError: message });
+          setSettings(await getSettings());
+          setSyncMessage(`Dossier sélectionné, mais la sauvegarde a échoué : ${message}`);
+        }
       }
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "Impossible de choisir le dossier cloud.");
@@ -213,6 +234,29 @@ function Parametres() {
               Sauvegardez toute la base CRI BLO (historique, photos, pièces jointes, réglages) puis restaurez-la sur un autre appareil.
               Sur Android, le mode « Dossier cloud » peut utiliser Google Drive, OneDrive, Dropbox, USB ou un dossier local via le sélecteur système, sans identifiant OAuth à configurer.
             </p>
+
+            <div
+              className={
+                "mt-3 rounded-xl border p-3 text-[11px] " +
+                (settings.lastCloudError
+                  ? "border-warning/40 bg-warning/10"
+                  : "border-border/60 bg-background")
+              }
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Dernière sauvegarde</span>
+                <span className="font-semibold text-foreground">
+                  {settings.lastCloudBackupAt
+                    ? new Date(settings.lastCloudBackupAt).toLocaleString("fr-FR")
+                    : "aucune"}
+                </span>
+              </div>
+              {settings.lastCloudError && (
+                <div className="mt-1 text-warning">
+                  Dernière erreur : {settings.lastCloudError}
+                </div>
+              )}
+            </div>
             <label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Fournisseur principal</label>
             <select
               value={settings.cloudProvider ?? "cloud-folder"}
@@ -273,8 +317,24 @@ function Parametres() {
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" disabled={syncBusy} onClick={async () => {
                 setSyncBusy(true); setSyncMessage(null);
-                try { const r = await uploadDeviceSnapshot(); clearCloudBackupDirty(); setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`); await patchSettings({ cloudSyncEnabled: true, lastCloudBackupAt: r.at }); }
-                catch (e) { setSyncMessage(e instanceof Error ? e.message : "Synchronisation impossible."); }
+                try {
+                  const r = await uploadDeviceSnapshot();
+                  clearCloudBackupDirty();
+                  setSyncMessage(`Synchronisé ${Math.round(r.size / 1024)} Ko.`);
+                  await patchSettings({
+                    cloudSyncEnabled: true,
+                    lastCloudBackupAt: r.at,
+                    lastCloudAttemptAt: r.at,
+                    lastCloudError: undefined,
+                  });
+                } catch (e) {
+                  const message = e instanceof Error ? e.message : "Synchronisation impossible.";
+                  setSyncMessage(message);
+                  await patchSettings({
+                    lastCloudAttemptAt: new Date().toISOString(),
+                    lastCloudError: message,
+                  });
+                }
                 finally { setSyncBusy(false); }
               }} className="h-10 rounded-xl bg-primary text-xs font-bold text-primary-foreground disabled:opacity-50">{syncBusy ? "…" : "Sauvegarder dans le cloud"}</button>
               <button type="button" disabled={syncBusy} onClick={async () => {

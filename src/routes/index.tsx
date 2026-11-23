@@ -18,6 +18,8 @@ import { initAddressQueueWatcher } from "@/lib/geo/queue";
 import { useOnline } from "@/hooks/use-online";
 import { getProfile } from "@/lib/profile/repository";
 import { getSettings } from "@/lib/settings/repository";
+import { isOneDriveConfigured } from "@/lib/onedrive/config";
+import { isGoogleDriveConfigured } from "@/lib/google/config";
 import { OnboardingDialog } from "@/components/OnboardingDialog";
 import type { CriRecord } from "@/lib/cri/types";
 
@@ -55,24 +57,55 @@ function when(iso?: string): string {
   return d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function timeAgo(iso?: string): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return "";
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return `il y a ${Math.floor(hours / 24)} j`;
+}
+
 function Accueil() {
   const navigate = useNavigate();
   const online = useOnline();
   const [today, setToday] = useState(0);
   const [cris, setCris] = useState<CriRecord[]>([]);
-  const [cloud, setCloud] = useState(false);
+  const [cloud, setCloud] = useState<{
+    enabled: boolean;
+    lastBackupAt?: string;
+    error?: string;
+  }>({ enabled: false });
   const [creating, setCreating] = useState(false);
 
   async function load() {
     const [t, all, s] = await Promise.all([countToday(), listCris(), getSettings()]);
     setToday(t);
     setCris(all);
-    setCloud(!!s.cloudSyncEnabled);
+    // « Cloud actif » doit vouloir dire « réellement configuré », pas juste
+    // « la case est cochée ».
+    const providerReady =
+      s.cloudProvider === "onedrive"
+        ? isOneDriveConfigured()
+        : s.cloudProvider === "google-drive"
+          ? isGoogleDriveConfigured()
+          : !!s.cloudFolderName;
+    setCloud({
+      enabled: !!s.cloudSyncEnabled && providerReady,
+      lastBackupAt: s.lastCloudBackupAt,
+      error: s.lastCloudError,
+    });
   }
 
   useEffect(() => {
     void load();
     initAddressQueueWatcher(() => void load());
+    const onBackup = () => void load();
+    window.addEventListener("criblo:auto-backup", onBackup);
+    return () => window.removeEventListener("criblo:auto-backup", onBackup);
   }, []);
 
   const drafts = cris.filter((c) => c.status !== "exported");
@@ -114,15 +147,37 @@ function Accueil() {
           {online ? <Cloud className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
           {online ? "En ligne" : "Hors-ligne"}
         </span>
-        <span
+        <Link
+          to="/parametres"
+          title={
+            cloud.error
+              ? `Sauvegarde cloud : ${cloud.error}`
+              : cloud.enabled
+                ? "Sauvegarde cloud configurée"
+                : "Configurer la sauvegarde cloud"
+          }
           className={
-            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 " +
-            (cloud ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")
+            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 active:scale-95 " +
+            (cloud.error
+              ? "bg-warning/15 text-warning"
+              : cloud.enabled
+                ? "bg-primary/10 text-primary"
+                : "bg-muted text-muted-foreground")
           }
         >
-          {cloud ? <Cloud className="h-3 w-3" /> : <CloudOff className="h-3 w-3" />}
-          {cloud ? "Cloud actif" : "Cloud inactif"}
-        </span>
+          {cloud.enabled && !cloud.error ? (
+            <Cloud className="h-3 w-3" />
+          ) : (
+            <CloudOff className="h-3 w-3" />
+          )}
+          {cloud.error
+            ? "Cloud : à vérifier"
+            : cloud.enabled
+              ? cloud.lastBackupAt
+                ? `Cloud · ${timeAgo(cloud.lastBackupAt)}`
+                : "Cloud actif"
+              : "Cloud inactif"}
+        </Link>
         <span className="ml-auto text-muted-foreground">Aujourd'hui : {today}</span>
       </div>
 

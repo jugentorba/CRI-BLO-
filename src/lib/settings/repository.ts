@@ -23,6 +23,10 @@ export interface AppSettings {
   cloudAutoBackupIntervalHours?: number;
   lastSyncAt?: string;
   lastCloudBackupAt?: string;
+  /** Dernière erreur de sauvegarde cloud (affichée à l'utilisateur). */
+  lastCloudError?: string;
+  /** Dernière tentative, réussie ou non (sert au délai de reprise). */
+  lastCloudAttemptAt?: string;
   aiProvider?: AiProvider;
   aiEndpoint?: string;
   aiApiKey?: string;

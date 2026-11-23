@@ -96,6 +96,8 @@ export function OneDriveSection({
             <div className="font-semibold">Configuration OneDrive requise</div>
             <div className="mt-0.5 opacity-80">
               La configuration Microsoft appartient à l'application CRI BLO. L'utilisateur n'a rien à saisir.
+              En attendant, utilisez « Dossier cloud Android » ci-dessus : la sauvegarde fonctionne
+              sans identifiant Microsoft et le dossier peut être votre Google Drive ou OneDrive.
             </div>
           </div>
         </div>
