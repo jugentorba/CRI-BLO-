@@ -74,6 +74,14 @@ const ADVANCED_TONES: { id: Tone; label: string }[] = [
   { id: "explain", label: "Explication" },
 ];
 
+/** Consigne système partagée par les appels en ligne. */
+const AI_SYSTEM = [
+  "Assistant de rédaction pour techniciens fibre optique (CRI BLO / SAV Orange France).",
+  "N'invente aucune information. Conserve exactement les nombres, références, mesures, lieux et sigles.",
+  "Réponds uniquement avec le texte final : pas de titre, pas de liste à puces, pas de Markdown, pas d'explication.",
+  "Exemple de style attendu : « Câble coupé entre PB 12 et PB 13. Réfection de 2 soudures sur 35 m. Essais conformes. »",
+].join("\n");
+
 const OBJECTIVE_INSTRUCTIONS: Record<Tone, string> = {
   professional:
     "Réécris réellement la note en compte-rendu télécom professionnel. Corrige grammaire et orthographe, change la structure des phrases, et organise si possible en constat/défaut, action réalisée, résultat. 2 à 3 phrases maximum. Ne recopie pas la phrase source mot pour mot.",
@@ -176,28 +184,39 @@ function Assistant() {
             .filter(Boolean)
             .join("\n\n");
 
-          output = await callIndependentAi(aiConfig, request, {
-            system:
-              "Assistant CRI BLO pour techniciens fibre. N'invente rien. Conserve exactement nombres, références, mesures, lieux et sigles. Réponds uniquement avec le texte final.",
-            maxTokens: 220,
+          // Une reformulation doit rester fidèle : température basse. La
+          // traduction encore plus. Sans ce réglage, le fournisseur utilise 1.0
+          // et produit des textes longs et parfois inventés.
+          const temperature = tone === "translate" ? 0.1 : tone === "simple" ? 0.2 : 0.3;
+          const maxTokens = tone === "translate" ? 260 : 320;
+          let usedModel = aiConfig.model;
+          const callOptions = {
+            system: AI_SYSTEM,
+            maxTokens,
             fast: true,
-          });
+            temperature,
+            onModelUsed: (model: string) => {
+              usedModel = model;
+            },
+          };
+
+          output = await callIndependentAi(aiConfig, request, callOptions);
+          engineLabel = `${getAiProviderLabel(aiConfig.provider)} · ${usedModel}`;
 
           if (tone !== "translate" && sameNormalizedText(output, clean)) {
             output = await callIndependentAi(
               aiConfig,
               `${request}\n\nLa réponse précédente était trop proche de la note. Reformule avec une structure et des mots réellement différents sans changer aucun fait.`,
-              {
-                system:
-                  "Assistant CRI BLO pour techniciens fibre. N'invente rien. Conserve exactement nombres, références, mesures, lieux et sigles. Réponds uniquement avec le texte final.",
-                maxTokens: 220,
-                fast: true,
-              },
+              callOptions,
             );
+            engineLabel = `${getAiProviderLabel(aiConfig.provider)} · ${usedModel}`;
           }
 
           if (tone !== "translate" && sameNormalizedText(output, clean)) {
-            throw new Error("L’IA a renvoyé pratiquement le même texte. Réessayez.");
+            // On garde le texte : mieux vaut une réponse fidèle qu'une erreur.
+            setNotice(
+              "L'IA a très peu reformulé. Essayez l'objectif « Professionnel » ou ajoutez un détail à la note.",
+            );
           }
         }
       }

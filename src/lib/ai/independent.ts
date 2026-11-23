@@ -182,6 +182,28 @@ function isTimeoutError(error: unknown): boolean {
   return /timeout|timed out|time out|délai dépassé/i.test(message);
 }
 
+/** Erreurs qui justifient d'essayer un autre modèle du même fournisseur. */
+function isUnknownModelError(response: ProviderHttpResponse): boolean {
+  if (response.status === 404) return true;
+  if (response.status !== 400) return false;
+  const message = readErrorMessage(response.data) ?? "";
+  // Attention : « Invalid reasoning level for selected model » contient le mot
+  // « model » mais ne signifie pas que le modèle est inconnu.
+  return /(model|modèle)\s+(?:is\s+)?(?:not\s+found|not\s+supported|unsupported|does\s+not\s+exist|inconnu)/i.test(
+    message,
+  ) || /unknown\s+model|invalid\s+model|no\s+such\s+model/i.test(message);
+}
+
+/** Modèles essayés dans l'ordre si l'identifiant configuré est refusé. */
+function modelCandidates(config: IndependentAiConfig): string[] {
+  const configured = config.model.trim();
+  if (config.provider !== "gemini") return [configured];
+  const fallbacks = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
+  return [...new Set([configured, ...fallbacks].filter(Boolean))];
+}
+
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
 async function postProviderJson(
   url: string,
   headers: Record<string, string>,
@@ -200,7 +222,9 @@ async function postProviderJson(
           headers,
           data,
           connectTimeout: fast ? 10000 : 20000,
-          readTimeout: provider === "gemini" && fast ? 35000 : 120000,
+          // 35 s était trop court quand le modèle « réfléchit » : l'assistant
+          // semblait s'arrêter. On laisse 60 s, avec une seule relance.
+          readTimeout: fast ? 60000 : 120000,
         });
         return { status: response.status, data: normalizeHttpData(response.data) };
       } catch (error) {
@@ -217,11 +241,25 @@ async function postProviderJson(
     throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "Requête IA impossible."));
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(data),
-  });
+  // Sans timeout, une requête bloquée laissait l'assistant « occupé » indéfiniment.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), fast ? 45000 : 90000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Délai dépassé : l'IA n'a pas répondu. Réessayez.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   let body: unknown = null;
   try {
     body = await response.json();
@@ -278,16 +316,56 @@ function extractAnthropicText(data: unknown): string {
     .trim();
 }
 
+export interface CallAiOptions {
+  system?: string;
+  maxTokens?: number;
+  fast?: boolean;
+  /** 0 = très déterministe. Défaut 0.2 : reformulation fidèle. */
+  temperature?: number;
+  /** Modèle réellement utilisé (après bascule éventuelle). */
+  onModelUsed?: (model: string) => void;
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Une seule nouvelle tentative sur les erreurs transitoires (429 / 5xx). */
+async function postWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  data: Record<string, unknown>,
+  provider: AiProvider,
+  fast: boolean,
+): Promise<ProviderHttpResponse> {
+  let response = await postProviderJson(url, headers, data, provider, fast);
+  if (RETRYABLE.has(response.status)) {
+    await wait(response.status === 429 ? 900 : 400);
+    response = await postProviderJson(url, headers, data, provider, fast);
+  }
+  return response;
+}
+
+function tokenBudget(config: IndependentAiConfig, model: string, requested?: number): number {
+  // Les jetons de raisonnement comptent dans la limite de sortie : une limite
+  // trop basse (220) peut renvoyer une réponse vide sur les modèles 3.7/3.8.
+  if (config.provider === "gemini" && /^gemini-3\.(?:7|8)-flash(?:$|-)/.test(model)) {
+    return Math.max(requested ?? 1200, 1536);
+  }
+  return requested ?? 1200;
+}
+
 export async function callIndependentAi(
   config: IndependentAiConfig,
   input: string,
-  options?: { system?: string; maxTokens?: number; fast?: boolean },
+  options?: CallAiOptions,
 ): Promise<string> {
   if (!config.endpoint.trim()) throw new Error("Endpoint IA non configuré.");
   if (!config.apiKey.trim()) throw new Error("Clé API manquante.");
 
+  const temperature = options?.temperature ?? 0.2;
+  const fast = options?.fast ?? false;
+
   if (config.protocol === "anthropic") {
-    const response = await postProviderJson(
+    const response = await postWithRetry(
       config.endpoint.trim(),
       {
         "Content-Type": "application/json",
@@ -298,17 +376,19 @@ export async function callIndependentAi(
       {
         model: config.model,
         max_tokens: options?.maxTokens ?? 1200,
+        temperature,
         ...(options?.system ? { system: options.system } : {}),
         messages: [{ role: "user", content: input }],
       },
       config.provider,
-      options?.fast ?? false,
+      fast,
     );
     if (response.status < 200 || response.status >= 300) {
       await throwProviderError(response, config.provider);
     }
     const text = extractAnthropicText(response.data);
     if (!text) throw new Error(`${getAiProviderLabel(config.provider)} : réponse vide.`);
+    options?.onModelUsed?.(config.model);
     return text;
   }
 
@@ -316,33 +396,54 @@ export async function callIndependentAi(
     ...(options?.system ? [{ role: "system", content: options.system }] : []),
     { role: "user", content: input },
   ];
-  const response = await postProviderJson(
-    config.endpoint.trim(),
-    {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey.trim()}`,
-    },
-    {
-      model: config.model,
+  const endpoint = config.endpoint.trim();
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${config.apiKey.trim()}`,
+  };
+  const models = modelCandidates(config);
+  let lastResponse: ProviderHttpResponse | null = null;
+
+  for (const model of models) {
+    const body: Record<string, unknown> = {
+      model,
       messages,
-      // Reasoning tokens count against the output limit. A tiny limit such as
-      // 220 can silently return no user-visible text on 3.7/3.8 Flash.
-      max_tokens: config.provider === "gemini" && /^gemini-3\.(?:7|8)-flash(?:$|-)/.test(config.model)
-        ? Math.max(options?.maxTokens ?? 1200, 1536)
-        : options?.maxTokens ?? 1200,
-      ...(config.provider === "gemini" && getGeminiReasoningEffort(config.model, options?.fast ?? false)
-        ? { reasoning_effort: getGeminiReasoningEffort(config.model, options?.fast ?? false) }
+      temperature,
+      max_tokens: tokenBudget(config, model, options?.maxTokens),
+      ...(config.provider === "gemini" && getGeminiReasoningEffort(model, fast)
+        ? { reasoning_effort: getGeminiReasoningEffort(model, fast) }
         : {}),
-    },
-    config.provider,
-    options?.fast ?? false,
-  );
-  if (response.status < 200 || response.status >= 300) {
+    };
+
+    let response = await postWithRetry(endpoint, headers, body, config.provider, fast);
+
+    if (response.status >= 200 && response.status < 300) {
+      let text = extractOpenAiText(response.data);
+      if (!text) {
+        // Réponse vide : souvent une limite de sortie atteinte par les jetons
+        // de raisonnement. Une seule relance avec un budget doublé.
+        const bigger = {
+          ...body,
+          max_tokens: Math.max(Number(body.max_tokens ?? 1200) * 2, 1024),
+        };
+        response = await postWithRetry(endpoint, headers, bigger, config.provider, fast);
+        text = response.status >= 200 && response.status < 300 ? extractOpenAiText(response.data) : "";
+      }
+      if (!text) throw new Error(`${getAiProviderLabel(config.provider)} : réponse vide.`);
+      options?.onModelUsed?.(model);
+      return text;
+    }
+
+    // Modèle refusé (identifiant inconnu) : on essaie le suivant avant d'échouer.
+    if (isUnknownModelError(response) && model !== models[models.length - 1]) {
+      lastResponse = response;
+      continue;
+    }
     await throwProviderError(response, config.provider);
   }
-  const text = extractOpenAiText(response.data);
-  if (!text) throw new Error(`${getAiProviderLabel(config.provider)} : réponse vide.`);
-  return text;
+
+  if (lastResponse) await throwProviderError(lastResponse, config.provider);
+  throw new Error(`${getAiProviderLabel(config.provider)} : aucun modèle disponible.`);
 }
 
 export async function testAiConnection(config: IndependentAiConfig): Promise<void> {

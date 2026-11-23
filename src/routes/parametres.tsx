@@ -111,8 +111,12 @@ function Parametres() {
       const current = await getSettings();
       const config = buildAiConfig(current);
       if (!config) throw new Error("Choisissez d’abord un fournisseur IA.");
+      const startedAt = Date.now();
       await testAiConnection(config);
-      setAiTestMessage(`${getAiProviderLabel(config.provider)} (${config.model}) : connexion réussie ✓`);
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1).replace(".", ",");
+      setAiTestMessage(
+        `${getAiProviderLabel(config.provider)} (${config.model}) : connexion réussie ✓ — ${seconds} s`,
+      );
     } catch (e) {
       setAiTestMessage(e instanceof Error ? e.message : "Test de connexion impossible.");
     } finally {

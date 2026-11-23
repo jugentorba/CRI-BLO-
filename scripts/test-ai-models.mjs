@@ -19,6 +19,7 @@ let native = false;
 let status = 200;
 let data = { choices: [{ message: { content: "OK" } }] };
 let sent = null;
+let statusQueue = [];
 const fakeCapacitor = {
   Capacitor: { isNativePlatform: () => native },
   CapacitorHttp: {
@@ -37,9 +38,11 @@ const sandbox = {
   },
   fetch: async (url, init) => {
     sent = { transport: "web", url, headers: init.headers, body: JSON.parse(init.body) };
-    return { status, json: async () => data };
+    const code = statusQueue.length ? statusQueue.shift() : status;
+    sent.status = code;
+    return { status: code, json: async () => data };
   },
-  setTimeout, console,
+  setTimeout, clearTimeout, AbortController, console,
 };
 vm.runInNewContext(compiled.outputText, sandbox, { filename: "independent.cjs" });
 const ai = output.exports;
@@ -71,6 +74,32 @@ assert.equal(sent.transport, "native");
 assert.equal(sent.body.model, "gemini-3.7-flash");
 assert.equal(sent.body.reasoning_effort, "low");
 assert.ok(sent.body.max_tokens >= 1024, "connection test needs thinking token headroom");
+
+// La température doit être transmise (sans elle, le fournisseur utilise 1.0).
+statusQueue = [];
+native = false;
+status = 200;
+data = { choices: [{ message: { content: "OK" } }] };
+await ai.callIndependentAi(config("gemini-3.5-flash-lite"), "x", { fast: true, temperature: 0.3 });
+assert.equal(sent.body.temperature, 0.3, "la température doit être envoyée au fournisseur");
+
+// Modèle inconnu (404) : bascule automatique sur le modèle de secours.
+statusQueue = [404];
+status = 200;
+data = { choices: [{ message: { content: "OK" } }] };
+let usedModel = null;
+const fallbackText = await ai.callIndependentAi(config("gemini-3.7-flash"), "x", {
+  fast: true,
+  onModelUsed: (model) => { usedModel = model; },
+});
+assert.equal(fallbackText, "OK");
+assert.equal(usedModel, "gemini-3.5-flash", "un modèle refusé doit basculer sur le suivant");
+
+// Limite d'utilisation (429) : une seule nouvelle tentative, puis succès.
+statusQueue = [429];
+status = 200;
+data = { choices: [{ message: { content: "OK" } }] };
+assert.equal(await ai.callIndependentAi(config("gemini-3.5-flash-lite"), "x", { fast: true }), "OK");
 
 native = false;
 status = 400;
