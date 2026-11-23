@@ -48,6 +48,10 @@ jobs:
 
       - name: Build PWA
         working-directory: source
+        env:
+          # GitHub Pages sert le site sous /CRI-BLO-/ : assets et routeur doivent suivre.
+          VITE_BASE: /CRI-BLO-/
+          VITE_ROUTER_BASE: /CRI-BLO-/
         run: npm run build
 
       - name: Add GitHub Pages SPA fallback

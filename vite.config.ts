@@ -5,7 +5,8 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   // Relative asset URLs for Android WebView/APK Forge.
-  base: "./",
+  // GitHub Pages publishes under a subpath and overrides this with VITE_BASE.
+  base: process.env.VITE_BASE || "./",
   plugins: [tsconfigPaths(), tailwindcss(), react()],
   build: {
     outDir: "dist",
