@@ -577,23 +577,23 @@ requireText(
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /getGeminiReasoningEffort\(config\.model,\s*options\?\.fast\s*\?\?\s*false\)/,
-  "Fast Gemini calls must choose a model-compatible reasoning level",
+  /getGeminiReasoningEffort\(model,\s*fast\)/,
+  "Fast Gemini calls must choose a model-compatible reasoning level (per selected model)",
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /readTimeout:\s*provider\s*===\s*"gemini"[\s\S]{0,120}35000/,
-  "Gemini native HTTP must fail quickly instead of waiting minutes",
+  /readTimeout:\s*fast\s*\?\s*60000\s*:\s*120000/,
+  "AI calls must time out instead of waiting indefinitely (60 s fast / 120 s full)",
 );
 requireText(
   "src/lib/ai/independent.ts",
-  /max_tokens:\s*options\?\.maxTokens/,
+  /max_tokens:\s*tokenBudget\(config,\s*model,\s*options\?\.maxTokens\)/,
   "AI calls must support a small output budget for field-note speed",
 );
 requireText(
   "src/routes/assistant.tsx",
-  /maxTokens:\s*220[\s\S]{0,200}fast:\s*true/,
-  "Main Assistant must use the fast small-output AI path",
+  /const maxTokens = tone === "translate" \? 260 : 320;[\s\S]{0,200}fast: true/,
+  "Main Assistant must use the fast, small-output AI path with enough headroom",
 );
 requireText(
   "src/routes/assistant.tsx",
