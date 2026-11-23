@@ -13,7 +13,7 @@ import {
   User,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { translateNotes } from "@/lib/ai/glossary";
+import { composeLocalAssistant } from "@/lib/ai/assistant.local";
 import {
   appendExchange,
   clearChats,
@@ -25,7 +25,7 @@ import {
 import { useOnline } from "@/hooks/use-online";
 import { cn } from "@/lib/utils";
 import { getSettings } from "@/lib/settings/repository";
-import { buildAiConfig, callIndependentAi } from "@/lib/ai/independent";
+import { buildAiConfig, callIndependentAi, getAiProviderLabel } from "@/lib/ai/independent";
 
 export const Route = createFileRoute("/assistant")({
   head: () => ({
@@ -110,6 +110,8 @@ function Assistant() {
   const [showMoreObjectives, setShowMoreObjectives] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [engine, setEngine] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const [chats, setChats] = useState<AiChat[]>([]);
@@ -130,12 +132,19 @@ function Assistant() {
     setError(null);
     let output = "";
     let activeProvider: string | null = null;
+    let engineLabel = "local (sans clé API)";
     try {
       if (!online) {
-        if (outputLang !== "fr") {
-          setError("Hors-ligne : seule la mise en forme en français est disponible.");
+        const local = composeLocalAssistant(clean, tone, outputLang);
+        output = local.text;
+        engineLabel = local.approximate
+          ? "local · traduction approximative"
+          : "local (hors-ligne)";
+        if (local.approximate) {
+          setNotice(
+            "Hors-ligne : traduction approximative. Ajoutez une clé API dans Réglages pour une traduction exacte.",
+          );
         }
-        output = translateNotes(clean);
       } else {
         const shortHistory = chat
           ? chat.messages
@@ -148,9 +157,15 @@ function Assistant() {
         const aiConfig = buildAiConfig(settings);
         activeProvider = aiConfig?.provider ?? null;
         if (!aiConfig) {
-          setError("Aucun fournisseur IA configuré — moteur local utilisé.");
-          output = outputLang === "fr" ? translateNotes(clean) : "";
+          const local = composeLocalAssistant(clean, tone, outputLang);
+          output = local.text;
+          if (local.approximate) {
+            setNotice(
+              "Traduction approximative : ajoutez une clé API dans Réglages pour une traduction exacte.",
+            );
+          }
         } else {
+          engineLabel = `${getAiProviderLabel(aiConfig.provider)} · ${aiConfig.model}`;
           const instruction = OBJECTIVE_INSTRUCTIONS[tone];
           const request = [
             `Langue d'entrée : ${inputLang}. Langue de sortie : ${outputLang}.`,
@@ -193,11 +208,14 @@ function Assistant() {
         setError("Google Gemini : délai dépassé. Votre note est conservée : réessayez.");
         output = "";
       } else {
-        setError(`${detail} — texte mis en forme hors-ligne.`);
-        output = outputLang === "fr" ? translateNotes(clean) : "";
+        const local = composeLocalAssistant(clean, tone, outputLang);
+        setError(`${detail} — texte rédigé par le moteur local.`);
+        output = local.text;
+        engineLabel = "local (secours)";
       }
     } finally {
       setBusy(false);
+      setEngine(engineLabel);
     }
     if (!output) return;
     const saved = await appendExchange(chat?.id ?? null, clean, output);
@@ -225,6 +243,8 @@ function Assistant() {
             setChat(null);
             setText("");
             setError(null);
+            setNotice(null);
+            setEngine(null);
             setShowHistory(false);
           }}
           className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary px-2 text-[10px] font-bold text-primary-foreground active:scale-95"
@@ -311,7 +331,7 @@ function Assistant() {
       {!online && (
         <p className="mb-2 flex items-center gap-1.5 rounded-lg bg-warning/10 px-2 py-1.5 text-[11px] font-semibold text-warning">
           <WifiOff className="h-3 w-3" />
-          Hors-ligne : mise en forme locale en français uniquement.
+          Hors-ligne : rédaction par le moteur local, sans IA.
         </p>
       )}
 
@@ -407,6 +427,18 @@ function Assistant() {
         {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
         {busy ? "Rédaction…" : chat ? "Continuer" : "Générer le texte"}
       </button>
+
+      {engine && !busy && (
+        <p className="mt-1.5 text-center text-[10px] font-semibold text-muted-foreground">
+          Moteur : {engine}
+        </p>
+      )}
+
+      {notice && (
+        <p className="mt-2 rounded-lg border border-border bg-muted/40 p-2 text-[11px] text-muted-foreground">
+          {notice}
+        </p>
+      )}
 
       {error && (
         <p className="mt-2 rounded-lg border border-warning/40 bg-warning/10 p-2 text-[11px] text-warning">

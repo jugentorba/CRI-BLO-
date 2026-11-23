@@ -19,7 +19,7 @@ export interface CommentContext {
 }
 
 /** Traductions mot-à-mot (anglais / albanais / abréviations → français télécom). */
-const TERMS: Record<string, string> = {
+export const TERMS: Record<string, string> = {
   // actions
   repair: "réparation",
   repaired: "réparé",
@@ -189,7 +189,7 @@ const TERMS: Record<string, string> = {
 };
 
 /** Abréviations métier laissées telles quelles (jamais traduites). */
-const KEEP_UPPER = new Set([
+export const KEEP_UPPER = new Set([
   "PB", "PM", "PMZ", "PEP", "PEO", "PTO", "NRO", "BTI", "BE", "OI", "OC", "RIP",
   "AMI", "AMII", "GTR", "OTDR", "SOR", "FO", "D3", "APPUI", "IPON", "OPTIMUM",
   "AGIR", "RDSUR", "NBSOUD", "NBJRT", "CAPA", "CC", "NBCPL", "NBOC", "INGE",
