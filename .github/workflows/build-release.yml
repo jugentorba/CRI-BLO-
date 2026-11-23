@@ -57,6 +57,7 @@ jobs:
         run: |
           node scripts/test-ai-models.mjs
           node scripts/test-repair-regressions.mjs
+          node scripts/test-frozen-export.mjs
 
       - name: Set release version
         env:

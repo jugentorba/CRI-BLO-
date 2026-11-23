@@ -1,0 +1,300 @@
+{
+  "templateSha256": "ef242d78ee81e736dfb607af5f815c21d4e5d75a9debc98c1b767b6bc8727782",
+  "fieldCells": {
+    "interventionStart": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B3"
+    },
+    "interventionEnd": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E3"
+    },
+    "siteAccessContact": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B5"
+    },
+    "referenceOrange": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B6"
+    },
+    "centre": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E6"
+    },
+    "zone": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "H6"
+    },
+    "ripZone": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B7"
+    },
+    "oiOc": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E7"
+    },
+    "nbLiaisonsGTR": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "H7"
+    },
+    "clientProvisoire": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B8"
+    },
+    "nomValideur": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F8"
+    },
+    "dommageReseau": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B9"
+    },
+    "constatNum": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F9"
+    },
+    "longueur": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E15"
+    },
+    "adresseA": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A17"
+    },
+    "adresseB": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F17"
+    },
+    "gpsCoordsA": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A20"
+    },
+    "gpsCoordsB": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F20"
+    },
+    "chambrePoteauA": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A22"
+    },
+    "chambrePoteauB": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F22"
+    },
+    "distanceDefautA": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A24"
+    },
+    "distanceDefautB": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F24"
+    },
+    "defautLocalise": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B26"
+    },
+    "referenceContenant": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B27"
+    },
+    "causePrincipale": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B28"
+    },
+    "numTroncon": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B30"
+    },
+    "transportDistribution": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E30"
+    },
+    "typeCable": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B31"
+    },
+    "longueurCable": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "G31"
+    },
+    "NBJRT": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "C35"
+    },
+    "BE": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "F35"
+    },
+    "NBSOUD": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "C36"
+    },
+    "INGE": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "G36"
+    },
+    "CAPA": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "C37"
+    },
+    "PEO": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E37"
+    },
+    "PBremplace": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "G37"
+    },
+    "CC": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "C38"
+    },
+    "NBCPL": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "G38"
+    },
+    "NBOC": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "C39"
+    },
+    "descriptionTravaux": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A41"
+    },
+    "majIPON": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B45"
+    },
+    "majOPTIMUM": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "E45"
+    },
+    "majGeofibre": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "D46"
+    },
+    "testAGIR": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "B49"
+    },
+    "numDecharge": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "D49"
+    },
+    "commentaires": {
+      "sheet": "FICHE SAV BLO",
+      "cell": "A52"
+    },
+    "rdsurFacture": {
+      "sheet": "RDSUR",
+      "cell": "A3"
+    }
+  },
+  "photoAnchors": {
+    "photo_oi_situation": {
+      "sheet": "PHOTOS OI",
+      "col": 0,
+      "row": 2,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oi_etiquette": {
+      "sheet": "PHOTOS OI",
+      "col": 4,
+      "row": 2,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oi_avant": {
+      "sheet": "PHOTOS OI",
+      "col": 0,
+      "row": 20,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oi_apres": {
+      "sheet": "PHOTOS OI",
+      "col": 4,
+      "row": 20,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oc_defaut": {
+      "sheet": "PHOTOS OC",
+      "col": 0,
+      "row": 2,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oc_apres_def": {
+      "sheet": "PHOTOS OC",
+      "col": 4,
+      "row": 2,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oc_avant": {
+      "sheet": "PHOTOS OC",
+      "col": 0,
+      "row": 20,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oc_apres": {
+      "sheet": "PHOTOS OC",
+      "col": 4,
+      "row": 20,
+      "cols": 3,
+      "rows": 15
+    },
+    "photo_oc_mesure1": {
+      "sheet": "PHOTOS OC",
+      "col": 0,
+      "row": 37,
+      "cols": 3,
+      "rows": 14
+    },
+    "photo_oc_mesure2": {
+      "sheet": "PHOTOS OC",
+      "col": 4,
+      "row": 37,
+      "cols": 3,
+      "rows": 14
+    },
+    "photo_mesures_loc1": {
+      "sheet": "MESURES",
+      "col": 0,
+      "row": 4,
+      "cols": 6,
+      "rows": 8
+    },
+    "photo_mesures_loc2": {
+      "sheet": "MESURES",
+      "col": 6,
+      "row": 4,
+      "cols": 6,
+      "rows": 8
+    },
+    "photo_rdsur_avant": {
+      "sheet": "RDSUR",
+      "col": 1,
+      "row": 4,
+      "cols": 4,
+      "rows": 14
+    },
+    "photo_rdsur_apres": {
+      "sheet": "RDSUR",
+      "col": 5,
+      "row": 4,
+      "cols": 4,
+      "rows": 14
+    },
+    "photo_plan": {
+      "sheet": "PLAN",
+      "col": 0,
+      "row": 1,
+      "cols": 7,
+      "rows": 20
+    }
+  }
+}

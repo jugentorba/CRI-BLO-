@@ -51,13 +51,120 @@ function nativeDataToArrayBuffer(data: unknown): ArrayBuffer {
   return new TextEncoder().encode(JSON.stringify(data ?? "")).buffer;
 }
 
-/** Script injecté : les clics et formulaires remontent au parent (navigation). */
+/**
+ * Neutralise le menu natif de iOS sur les zones interactives (liens, images,
+ * canvas/svg des cartes) pour que l'appui long arrive jusqu'à notre script.
+ * Le reste du texte (sélection/copie) reste intact.
+ */
+const CONTEXT_CSS = `<style>a,img,canvas,svg{-webkit-touch-callout:none}</style>`;
+
+/**
+ * Script injecté dans la page distante :
+ * - navigation (clics, formulaires) ;
+ * - menu contextuel unifié : clic droit (souris), appui long natif (Android),
+ *   appui long simulé (iOS, qui n'émet jamais `contextmenu`).
+ *
+ * L'événement est d'abord renvoyé à la page (les cartes télécom ouvrent alors
+ * leur propre fenêtre « identifier »), puis le parent n'affiche son menu que si
+ * la page ne l'a pas pris en charge.
+ */
 const BRIDGE = `
 <script>
 (function(){
+  function closest(el, sel){ try { return el && el.closest ? el.closest(sel) : null; } catch(e){ return null; } }
   function send(url, dl){ try{ parent.postMessage({ __briblo_nav: String(url), download: !!dl }, "*"); }catch(e){} }
+
+  var lastMenuAt = 0;
+  var swallowClickUntil = 0;
+  var pressTimer = null, startX = 0, startY = 0, startEl = null, moved = false;
+  var LONG_PRESS_MS = 650, MOVE_TOLERANCE = 12;
+  var synthetic = false;
+
+  function describe(el){
+    var a = closest(el, "a");
+    var img = closest(el, "img");
+    var src = img ? (img.currentSrc || img.getAttribute("src") || "") : "";
+    try { if (src) src = new URL(src, location.href).toString(); } catch(e){}
+    var href = "";
+    try { if (a) href = a.href || ""; } catch(e){}
+    return {
+      href: href,
+      download: a ? a.hasAttribute("download") : false,
+      text: a ? (a.textContent || "").trim().slice(0, 160) : "",
+      image: src,
+      alt: img ? (img.getAttribute("alt") || "") : ""
+    };
+  }
+
+  function openMenu(kind, x, y, el){
+    var now = Date.now();
+    if (now - lastMenuAt < 700) return;
+    lastMenuAt = now;
+    var info = describe(el);
+    info.kind = kind;
+    info.x = Math.round(x || 0);
+    info.y = Math.round(y || 0);
+    try { parent.postMessage({ __briblo_ctx: info }, "*"); } catch(e){}
+  }
+
+  function cancelPress(){ if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }
+
+  // Clic droit (Mac/Windows) ou appui long déjà géré par le moteur (Android).
+  document.addEventListener("contextmenu", function(e){
+    if(synthetic) return;
+    var handledByPage = e.defaultPrevented;
+    e.preventDefault();
+    swallowClickUntil = Date.now() + 900;
+    openMenu(handledByPage ? "page" : "app", e.clientX, e.clientY, e.target);
+  }, false);
+
+  // Appui long simulé — indispensable sur iOS.
+  document.addEventListener("touchstart", function(e){
+    if(e.touches.length !== 1){ cancelPress(); return; }
+    var t = e.touches[0];
+    startX = t.clientX; startY = t.clientY; startEl = e.target; moved = false;
+    cancelPress();
+    pressTimer = setTimeout(function(){
+      pressTimer = null;
+      if(moved) return;
+      if(Date.now() - lastMenuAt < 900) return;
+      var el = document.elementFromPoint(startX, startY) || startEl;
+      var ev;
+      try {
+        ev = new MouseEvent("contextmenu", {
+          bubbles: true, cancelable: true, view: window,
+          clientX: startX, clientY: startY, button: 2, buttons: 2
+        });
+      } catch(err) {
+        ev = document.createEvent("MouseEvents");
+        ev.initMouseEvent("contextmenu", true, true, window, 1,
+          startX, startY, startX, startY, false, false, false, false, 2, null);
+      }
+      var notHandled = true;
+      synthetic = true;
+      try { notHandled = el.dispatchEvent(ev); } catch(err2){} finally { synthetic = false; }
+      swallowClickUntil = Date.now() + 900;
+      try { if(navigator.vibrate) navigator.vibrate(12); } catch(err3){}
+      openMenu(notHandled ? "app" : "page", startX, startY, el);
+    }, LONG_PRESS_MS);
+  }, { passive: true, capture: true });
+
+  document.addEventListener("touchmove", function(e){
+    if(!pressTimer) return;
+    var t = e.touches[0]; if(!t) return;
+    if(Math.abs(t.clientX - startX) > MOVE_TOLERANCE || Math.abs(t.clientY - startY) > MOVE_TOLERANCE){
+      moved = true; cancelPress();
+    }
+  }, { passive: true, capture: true });
+
+  document.addEventListener("touchend", cancelPress, true);
+  document.addEventListener("touchcancel", cancelPress, true);
+  window.addEventListener("blur", cancelPress);
+
+  // Navigation
   document.addEventListener("click", function(e){
-    var a = e.target && e.target.closest ? e.target.closest("a") : null;
+    if(Date.now() < swallowClickUntil){ e.preventDefault(); e.stopPropagation(); return; }
+    var a = closest(e.target, "a");
     if(!a) return;
     var href = a.getAttribute("href") || "";
     if(!href || href.charAt(0) === "#" || /^javascript:/i.test(href)) return;
@@ -114,7 +221,7 @@ function prepareHtml(raw: string, finalUrl: string): { html: string; title: stri
     .replace(/integrity=("|')[^"']*\1/gi, "");
 
   const title = raw.match(/<title[^>]*>([\s\S]{0,200}?)<\/title>/i)?.[1]?.trim() ?? finalUrl;
-  const head = `<base href="${finalUrl.replace(/"/g, "&quot;")}" target="_self">`;
+  const head = `<base href="${finalUrl.replace(/"/g, "&quot;")}" target="_self">${CONTEXT_CSS}`;
 
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => `${m}${head}`);

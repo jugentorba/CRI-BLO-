@@ -15,6 +15,29 @@ aucune nouvelle fonctionnalité ne doit modifier ses fichiers.
 
 Toute évolution demandée sur ces fichiers doit être explicitement destinée au CRI BLO.
 
+### Contrat gelé — classeur officiel Orange
+
+Le classeur CRI BLO **ne change jamais**. Sont figés :
+
+- `public/cri_blo_template.xlsx` (empreinte SHA-256 vérifiée) ;
+- les cellules écrites (`FIELD_CELLS` : 47 cellules) ;
+- les ancrages photos (`PHOTO_ANCHORS` : 15 emplacements) ;
+- le contenu du ZIP : **un** document officiel + les pièces jointes ajoutées par
+  le technicien, rien d'autre ;
+- le nom des fichiers (`CRI_BLO_Commune_Dossier.ext`).
+
+Règle simple : **de nouvelles valeurs dans les cellules existantes, jamais de
+nouvelle cellule, feuille, image ou fichier.**
+
+Vérification (aussi exécutée par la CI avant chaque version signée) :
+
+```bash
+node scripts/test-frozen-export.mjs
+```
+
+Le test échoue dès qu'un de ces éléments bouge. Ne jamais régénérer l'empreinte
+(`--write`) pour faire passer une modification non validée.
+
 ## Module « Autres documents »
 
 - Détection de type : `src/lib/docs/registry.ts`, `src/lib/docs/detect.ts`

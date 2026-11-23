@@ -35,3 +35,6 @@ dist-ssr
 *.jks
 *.keystore
 release-signing/
+
+# APK Forge build output
+dist-apkforge

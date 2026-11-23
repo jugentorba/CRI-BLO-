@@ -13,6 +13,7 @@ import {
   X,
   Lock,
   Plus, Star, History, KeyRound, Eye, EyeOff, Shield, MoreHorizontal,
+  Copy, ExternalLink, CornerUpRight,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -82,6 +83,18 @@ function hostOf(url: string): string {
 type BrowserTab = { id: string; url: string; title: string; incognito?: boolean };
 type PasswordEntry = { id: string; site: string; username: string; password: string };
 
+/** Menu contextuel remonté par la page (clic droit / appui long). */
+type ContextMenuInfo = {
+  kind?: "app" | "page";
+  href?: string;
+  text?: string;
+  image?: string;
+  alt?: string;
+  download?: boolean;
+  x?: number;
+  y?: number;
+};
+
 function loadLocal<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -110,6 +123,7 @@ function Navigateur() {
   const [passwordSheet, setPasswordSheet] = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [incognito, setIncognito] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuInfo | null>(null);
 
   const url = state.index >= 0 ? (state.stack[state.index] ?? "") : "";
 
@@ -165,6 +179,61 @@ function Navigateur() {
     [loadDownloads],
   );
 
+  /** Copie de secours : `navigator.clipboard` est indisponible dans certains WebView. */
+  const copyText = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("Lien copié.");
+      return;
+    } catch {
+      /* fallback ci-dessous */
+    }
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      setNotice("Lien copié.");
+    } catch {
+      setNotice("Copie impossible sur cet appareil.");
+    }
+  }, []);
+
+  /** Ouvre hors de l'application (navigateur système). */
+  const openExternal = useCallback((target: string) => {
+    try {
+      window.open(target, "_system");
+    } catch {
+      window.open(target, "_blank");
+    }
+    setCtxMenu(null);
+  }, []);
+
+  const openInNewTab = useCallback(
+    (raw: string) => {
+      const next = normalizeUrl(raw);
+      if (!next) return;
+      setTabs((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID?.() ?? String(Date.now()),
+          url: next,
+          title: hostOf(next) || "Nouvel onglet",
+          incognito,
+        },
+      ]);
+      setActiveTab(tabs.length);
+      setState(pushUrl(next));
+      setInput(next);
+      setCtxMenu(null);
+    },
+    [incognito, tabs.length],
+  );
+
   // Chargement de la page via le proxy serveur (contourne les refus d'iframe).
   useEffect(() => {
     if (!url) {
@@ -215,8 +284,16 @@ function Navigateur() {
   // Liens et formulaires cliqués dans la page proxifiée.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
-      const data = e.data as { __briblo_nav?: string; download?: boolean } | null;
-      if (!data || typeof data.__briblo_nav !== "string") return;
+      const data = e.data as
+        | { __briblo_nav?: string; download?: boolean; __briblo_ctx?: ContextMenuInfo }
+        | null;
+      if (!data) return;
+      if (data.__briblo_ctx) {
+        // La page a déjà affiché son propre menu (« identifier » des cartes).
+        if (data.__briblo_ctx.kind !== "page") setCtxMenu(data.__briblo_ctx);
+        return;
+      }
+      if (typeof data.__briblo_nav !== "string") return;
       if (data.download) void download(data.__briblo_nav);
       else open(data.__briblo_nav);
     }
@@ -528,7 +605,146 @@ function Navigateur() {
           </div>
         </div>
       )}
+
+      {/* Menu contextuel : clic droit (Mac/Windows), appui long (Android/iOS) */}
+      {ctxMenu && (
+        <div
+          className="fixed inset-0 z-[95] flex items-end justify-center bg-black/40 p-3"
+          onClick={() => setCtxMenu(null)}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-elevated)]"
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-border px-4 py-3">
+              <div className="truncate text-xs font-bold text-foreground">
+                {ctxMenu.text || ctxMenu.alt || (ctxMenu.href ? hostOf(ctxMenu.href) : "Page")}
+              </div>
+              {ctxMenu.href && (
+                <div className="truncate text-[10px] text-muted-foreground">{ctxMenu.href}</div>
+              )}
+            </div>
+            <div className="divide-y divide-border">
+              {ctxMenu.href && (
+                <>
+                  <MenuAction
+                    icon={<CornerUpRight className="h-4 w-4" />}
+                    label="Ouvrir le lien"
+                    onClick={() => {
+                      const target = ctxMenu.href!;
+                      setCtxMenu(null);
+                      open(target);
+                    }}
+                  />
+                  <MenuAction
+                    icon={<Plus className="h-4 w-4" />}
+                    label="Ouvrir dans un nouvel onglet"
+                    onClick={() => openInNewTab(ctxMenu.href!)}
+                  />
+                  <MenuAction
+                    icon={<Copy className="h-4 w-4" />}
+                    label="Copier le lien"
+                    onClick={() => {
+                      const target = ctxMenu.href!;
+                      setCtxMenu(null);
+                      void copyText(target);
+                    }}
+                  />
+                  <MenuAction
+                    icon={<ExternalLink className="h-4 w-4" />}
+                    label="Ouvrir dans le navigateur"
+                    onClick={() => openExternal(ctxMenu.href!)}
+                  />
+                </>
+              )}
+              {ctxMenu.image && (
+                <>
+                  <MenuAction
+                    icon={<CornerUpRight className="h-4 w-4" />}
+                    label="Ouvrir l'image"
+                    onClick={() => {
+                      const src = ctxMenu.image!;
+                      setCtxMenu(null);
+                      open(src);
+                    }}
+                  />
+                  <MenuAction
+                    icon={<Download className="h-4 w-4" />}
+                    label="Télécharger l'image"
+                    onClick={() => {
+                      const src = ctxMenu.image!;
+                      setCtxMenu(null);
+                      void download(src);
+                    }}
+                  />
+                </>
+              )}
+              {ctxMenu.download && ctxMenu.href && (
+                <MenuAction
+                  icon={<Download className="h-4 w-4" />}
+                  label="Télécharger le fichier"
+                  onClick={() => {
+                    const target = ctxMenu.href!;
+                    setCtxMenu(null);
+                    void download(target);
+                  }}
+                />
+              )}
+              {!ctxMenu.href && !ctxMenu.image && url && (
+                <>
+                  <MenuAction
+                    icon={<RotateCw className="h-4 w-4" />}
+                    label="Recharger la page"
+                    onClick={() => {
+                      setCtxMenu(null);
+                      setState(reload());
+                    }}
+                  />
+                  <MenuAction
+                    icon={<Download className="h-4 w-4" />}
+                    label="Télécharger cette page"
+                    onClick={() => {
+                      setCtxMenu(null);
+                      void download(url);
+                    }}
+                  />
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setCtxMenu(null)}
+                className="w-full px-4 py-3 text-center text-xs font-bold text-muted-foreground active:bg-muted"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
+  );
+}
+
+function MenuAction({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-semibold text-foreground active:bg-muted"
+    >
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
   );
 }
 
