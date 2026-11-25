@@ -16,6 +16,8 @@ export interface AppSettings {
   density: DisplayDensity;
   /** Custom scale in percent, 80–110. Defaults to 100. */
   scale: number;
+  /** true = liens du navigateur ouverts dans Safari / Chrome du téléphone. */
+  externalBrowser?: boolean;
   cloudSyncEnabled?: boolean;
   cloudProvider?: "onedrive" | "google-drive" | "cloud-folder";
   cloudFolderName?: string;

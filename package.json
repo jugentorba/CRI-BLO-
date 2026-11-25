@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^5.17.0",
+    "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.5.0",
     "@capacitor/geolocation": "8.2.2",
     "@capawesome/capacitor-google-sign-in": "^0.1.0",

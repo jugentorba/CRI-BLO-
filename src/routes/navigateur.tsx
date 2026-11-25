@@ -27,6 +27,9 @@ import {
   reload,
   setPageCache,
 } from "@/lib/browser/state";
+import { Browser } from "@capacitor/browser";
+import { Capacitor } from "@capacitor/core";
+import { getSettings, saveSettings } from "@/lib/settings/repository";
 import { openRemotePage } from "@/lib/browser/proxy.functions";
 import { downloadRemoteFile } from "@/lib/browser/fetch.functions";
 import {
@@ -126,6 +129,22 @@ function Navigateur() {
   const [ctxMenu, setCtxMenu] = useState<ContextMenuInfo | null>(null);
   /** null = inconnu, true = le script de la page répond, false = absent. */
   const [bridgeReady, setBridgeReady] = useState<boolean | null>(null);
+  /** Sur mobile : ouvrir les pages dans Safari / Chrome (vrai navigateur). */
+  const isNative = Capacitor.isNativePlatform();
+  const [external, setExternal] = useState(isNative);
+  useEffect(() => {
+    if (!isNative) return;
+    void getSettings().then((s) => {
+      if (typeof s.externalBrowser === "boolean") setExternal(s.externalBrowser);
+    });
+  }, [isNative]);
+
+  async function toggleExternal() {
+    const next = !external;
+    setExternal(next);
+    await saveSettings({ externalBrowser: next });
+    if (!next) setState(reload());
+  }
 
   const url = state.index >= 0 ? (state.stack[state.index] ?? "") : "";
 
@@ -143,13 +162,25 @@ function Navigateur() {
   const open = useCallback((raw: string) => {
     const next = normalizeUrl(raw);
     if (!next) return;
+
+    // Vrai navigateur du téléphone : cookies, connexions, appui long natif.
+    if (external && Capacitor.isNativePlatform()) {
+      void Browser.open({ url: next });
+      setInput(next);
+      setEditing(false);
+      setNotice(null);
+      setTabs((prev) => prev.map((t, i) => i === activeTab ? { ...t, url: next, title: hostOf(next) || "Nouvel onglet", incognito } : t));
+      if (!incognito) setHistory((prev) => [{ id: String(Date.now()), url: next, title: hostOf(next) }, ...prev.filter((h) => h.url !== next)].slice(0, 100));
+      return;
+    }
+
     setState(pushUrl(next));
     setInput(next);
     setNotice(null);
     setEditing(false);
     setTabs((prev) => prev.map((t, i) => i === activeTab ? { ...t, url: next, title: hostOf(next) || "Nouvel onglet", incognito } : t));
     if (!incognito) setHistory((prev) => [{ id: String(Date.now()), url: next, title: hostOf(next) }, ...prev.filter((h) => h.url !== next)].slice(0, 100));
-  }, [activeTab, incognito]);
+  }, [activeTab, incognito, external]);
 
   const download = useCallback(
     async (raw: string) => {
@@ -432,11 +463,29 @@ function Navigateur() {
               <Download className="h-3 w-3" />
             )}
           </PillBtn>
-          {url && (
+          {isNative ? (
+            <button
+              type="button"
+              onClick={() => void toggleExternal()}
+              title={
+                external
+                  ? "Les liens s'ouvrent dans Safari / Chrome du téléphone"
+                  : "Les liens s'ouvrent dans l'application"
+              }
+              className={
+                "inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-bold active:scale-95 " +
+                (external
+                  ? "border-primary/20 bg-primary/5 text-primary"
+                  : "border-border bg-card text-muted-foreground")
+              }
+            >
+              <Globe className="h-3 w-3" /> {external ? "Safari" : "Intégré"}
+            </button>
+          ) : url ? (
             <span title="Navigation intégrée" className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 text-[10px] font-bold text-primary">
               <Globe className="h-3 w-3" /> Intégré
             </span>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => setSheet(true)}
@@ -463,7 +512,29 @@ function Navigateur() {
         </div>
       )}
 
-      {page ? (
+      {isNative && external ? (
+        <div className="rounded-2xl border border-border bg-card p-5 text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Globe className="h-5 w-5" />
+          </div>
+          <p className="mt-2 text-xs font-bold text-foreground">
+            Navigation dans le navigateur du téléphone
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Les pages s'ouvrent dans Safari / Chrome : connexions, cookies, PDF et
+            appui long fonctionnent comme d'habitude.
+          </p>
+          {url && (
+            <button
+              type="button"
+              onClick={() => void Browser.open({ url })}
+              className="mt-3 h-9 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground active:scale-95"
+            >
+              Rouvrir {hostOf(url)}
+            </button>
+          )}
+        </div>
+      ) : page ? (
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <iframe
             key={`${url}#${state.reloadKey}`}
