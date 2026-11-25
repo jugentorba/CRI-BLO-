@@ -124,6 +124,8 @@ function Navigateur() {
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [incognito, setIncognito] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuInfo | null>(null);
+  /** null = inconnu, true = le script de la page répond, false = absent. */
+  const [bridgeReady, setBridgeReady] = useState<boolean | null>(null);
 
   const url = state.index >= 0 ? (state.stack[state.index] ?? "") : "";
 
@@ -281,13 +283,33 @@ function Navigateur() {
     };
   }, [url, state.reloadKey, loadDownloads]);
 
+  // Si la page ne répond pas, l'appui long ne peut pas fonctionner : autant le dire.
+  useEffect(() => {
+    if (!page) {
+      setBridgeReady(null);
+      return;
+    }
+    setBridgeReady(null);
+    const timer = window.setTimeout(() => setBridgeReady((value) => value ?? false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [page]);
+
   // Liens et formulaires cliqués dans la page proxifiée.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       const data = e.data as
-        | { __briblo_nav?: string; download?: boolean; __briblo_ctx?: ContextMenuInfo }
+        | {
+            __briblo_nav?: string;
+            download?: boolean;
+            __briblo_ctx?: ContextMenuInfo;
+            __briblo_ready?: boolean;
+          }
         | null;
       if (!data) return;
+      if (data.__briblo_ready) {
+        setBridgeReady(true);
+        return;
+      }
       if (data.__briblo_ctx) {
         // La page a déjà affiché son propre menu (« identifier » des cartes).
         if (data.__briblo_ctx.kind !== "page") setCtxMenu(data.__briblo_ctx);
@@ -432,6 +454,12 @@ function Navigateur() {
           <button type="button" aria-label="Fermer" onClick={() => setNotice(null)}>
             <X className="h-3 w-3" />
           </button>
+        </div>
+      )}
+
+      {page && bridgeReady === false && (
+        <div className="mb-1.5 rounded-xl border border-warning/40 bg-warning/10 p-2 text-[11px] text-warning">
+          Appui long indisponible : cette page bloque le script de l'application (cadre protégé).
         </div>
       )}
 

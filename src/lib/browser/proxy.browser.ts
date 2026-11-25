@@ -71,13 +71,20 @@ const CONTEXT_CSS = `<style>a,img,canvas,svg{-webkit-touch-callout:none}</style>
 const BRIDGE = `
 <script>
 (function(){
+  // Source du script : réutilisée pour équiper les cadres de même origine.
+  var SELF = (document.currentScript && document.currentScript.textContent) || "";
   function closest(el, sel){ try { return el && el.closest ? el.closest(sel) : null; } catch(e){ return null; } }
   function send(url, dl){ try{ parent.postMessage({ __briblo_nav: String(url), download: !!dl }, "*"); }catch(e){} }
 
+  // Handshake : l'application sait ainsi si le pont est actif sur cette page.
+  try { parent.postMessage({ __briblo_ready: true }, "*"); } catch(e){}
+
   var lastMenuAt = 0;
   var swallowClickUntil = 0;
-  var pressTimer = null, startX = 0, startY = 0, startEl = null, moved = false;
-  var LONG_PRESS_MS = 650, MOVE_TOLERANCE = 12;
+  var pressTimer = null, startX = 0, startY = 0, startEl = null, moved = false, startAt = 0;
+  // 450 ms : plus court que la reconnaissance d'appui long d'Android (~500 ms),
+  // qui annulait notre minuterie avant qu'elle ne se déclenche.
+  var LONG_PRESS_MS = 450, MOVE_TOLERANCE = 12;
   var synthetic = false;
 
   function describe(el){
@@ -118,34 +125,39 @@ const BRIDGE = `
     openMenu(handledByPage ? "page" : "app", e.clientX, e.clientY, e.target);
   }, false);
 
+  function fireLongPress(){
+    if(moved) return;
+    if(Date.now() - lastMenuAt < 700) return;
+    var el = document.elementFromPoint(startX, startY) || startEl;
+    var ev;
+    try {
+      ev = new MouseEvent("contextmenu", {
+        bubbles: true, cancelable: true, view: window,
+        clientX: startX, clientY: startY, button: 2, buttons: 2
+      });
+    } catch(err) {
+      ev = document.createEvent("MouseEvents");
+      ev.initMouseEvent("contextmenu", true, true, window, 1,
+        startX, startY, startX, startY, false, false, false, false, 2, null);
+    }
+    var notHandled = true;
+    synthetic = true;
+    try { notHandled = el.dispatchEvent(ev); } catch(err2){} finally { synthetic = false; }
+    swallowClickUntil = Date.now() + 900;
+    try { if(navigator.vibrate) navigator.vibrate(12); } catch(err3){}
+    openMenu(notHandled ? "app" : "page", startX, startY, el);
+  }
+
   // Appui long simulé — indispensable sur iOS.
   document.addEventListener("touchstart", function(e){
     if(e.touches.length !== 1){ cancelPress(); return; }
     var t = e.touches[0];
     startX = t.clientX; startY = t.clientY; startEl = e.target; moved = false;
+    startAt = Date.now();
     cancelPress();
     pressTimer = setTimeout(function(){
       pressTimer = null;
-      if(moved) return;
-      if(Date.now() - lastMenuAt < 900) return;
-      var el = document.elementFromPoint(startX, startY) || startEl;
-      var ev;
-      try {
-        ev = new MouseEvent("contextmenu", {
-          bubbles: true, cancelable: true, view: window,
-          clientX: startX, clientY: startY, button: 2, buttons: 2
-        });
-      } catch(err) {
-        ev = document.createEvent("MouseEvents");
-        ev.initMouseEvent("contextmenu", true, true, window, 1,
-          startX, startY, startX, startY, false, false, false, false, 2, null);
-      }
-      var notHandled = true;
-      synthetic = true;
-      try { notHandled = el.dispatchEvent(ev); } catch(err2){} finally { synthetic = false; }
-      swallowClickUntil = Date.now() + 900;
-      try { if(navigator.vibrate) navigator.vibrate(12); } catch(err3){}
-      openMenu(notHandled ? "app" : "page", startX, startY, el);
+      fireLongPress();
     }, LONG_PRESS_MS);
   }, { passive: true, capture: true });
 
@@ -158,8 +170,50 @@ const BRIDGE = `
   }, { passive: true, capture: true });
 
   document.addEventListener("touchend", cancelPress, true);
-  document.addEventListener("touchcancel", cancelPress, true);
+  // iOS annule le toucher quand il prend la main pour sa propre sélection :
+  // si l'appui a déjà duré assez longtemps, on ouvre quand même le menu.
+  document.addEventListener("touchcancel", function(){
+    if(pressTimer && !moved && Date.now() - startAt >= 380){
+      pressTimer = null;
+      fireLongPress();
+    }
+    cancelPress();
+  }, true);
   window.addEventListener("blur", cancelPress);
+
+  // Relaie les messages des cadres imbriqués vers l'application.
+  window.addEventListener("message", function(e){
+    var d = e.data;
+    if(!d || typeof d !== "object") return;
+    if(!(d.__briblo_ctx || d.__briblo_nav || d.__briblo_ready)) return;
+    if(window.parent && window.parent !== window){
+      try { window.parent.postMessage(d, "*"); } catch(err){}
+    }
+  });
+
+  // Équipe les cadres de même origine (certaines cartes s'y trouvent).
+  function knitFrames(){
+    if(!SELF) return;
+    var frames;
+    try { frames = document.querySelectorAll("iframe, frame"); } catch(e){ return; }
+    for(var i = 0; i < frames.length; i++){
+      try {
+        var doc = frames[i].contentDocument;
+        if(!doc || doc.__bribloBridge) continue;
+        doc.__bribloBridge = true;
+        var script = doc.createElement("script");
+        script.textContent = SELF;
+        (doc.body || doc.documentElement).appendChild(script);
+      } catch(e) {
+        // cadre d'une autre origine : inaccessible, on ignore
+      }
+    }
+  }
+  try {
+    new MutationObserver(function(){ knitFrames(); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  } catch(e){}
+  setTimeout(knitFrames, 900);
 
   // Navigation
   document.addEventListener("click", function(e){
