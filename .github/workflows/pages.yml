@@ -52,6 +52,8 @@ jobs:
           # GitHub Pages sert le site sous /CRI-BLO-/ : assets et routeur doivent suivre.
           VITE_BASE: /CRI-BLO-/
           VITE_ROUTER_BASE: /CRI-BLO-/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          VITE_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
         run: npm run build
 
       - name: Add GitHub Pages SPA fallback
