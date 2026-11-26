@@ -1,6 +1,13 @@
 import { getGoogleAccessToken } from "./auth";
 
 const DRIVE = "https://www.googleapis.com/drive/v3";
+
+/** Sans délai, le bouton « Sauvegarder » pouvait rester bloqué indéfiniment. */
+function withTimeout(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 
 async function headers(json = false, interactive = true): Promise<HeadersInit> {
@@ -14,7 +21,7 @@ async function headers(json = false, interactive = true): Promise<HeadersInit> {
 async function findFile(name: string, interactive = true): Promise<string | null> {
   const h = await headers(false, interactive);
   const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and 'appDataFolder' in parents and trashed=false`);
-  const res = await fetch(`${DRIVE}/files?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=10`, { headers: h });
+  const res = await fetch(`${DRIVE}/files?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=10`, { headers: h, signal: withTimeout(60000) });
   if (!res.ok) throw new Error(`Google Drive list failed [${res.status}]`);
   const j = (await res.json()) as { files?: Array<{ id: string }> };
   return j.files?.[0]?.id ?? null;
@@ -33,6 +40,7 @@ async function createUploadSession(name: string, mimeType: string, existingId: s
       "X-Upload-Content-Type": mimeType,
     },
     body: JSON.stringify(body),
+    signal: withTimeout(60000),
   });
   if (!res.ok) throw new Error(`Google Drive session failed [${res.status}]`);
   const location = res.headers.get("Location");
@@ -55,6 +63,7 @@ export async function uploadGoogleDriveFile(name: string, blob: Blob, interactiv
         "Content-Range": `bytes ${offset}-${end - 1}/${blob.size}`,
       },
       body: chunk,
+      signal: withTimeout(120000),
     });
     if (!(res.ok || res.status === 308)) {
       const body = await res.text().catch(() => "");
@@ -68,7 +77,7 @@ export async function downloadGoogleDriveFile(name: string, interactive = true):
   const id = await findFile(name, interactive);
   if (!id) throw new Error("Aucune sauvegarde CRI BLO trouvée dans Google Drive.");
   const h = await headers(false, interactive);
-  const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: h });
+  const res = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers: h, signal: withTimeout(60000) });
   if (!res.ok) throw new Error(`Google Drive download failed [${res.status}]`);
   return res.blob();
 }

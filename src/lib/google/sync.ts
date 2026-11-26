@@ -1,12 +1,20 @@
 import { exportSyncSnapshot, importSyncSnapshot } from "@/lib/db";
-import { getGoogleProfile } from "./auth";
+import { getGoogleAccessToken } from "./auth";
 import { isGoogleDriveConfigured } from "./config";
 import { downloadGoogleDriveFile, uploadGoogleDriveFile } from "./drive";
 
 const SYNC_FILE = "criblo-device-sync.json";
 
 export async function googleDriveSyncAvailable(interactive = true): Promise<boolean> {
-  return isGoogleDriveConfigured() && !!(await getGoogleProfile(interactive));
+  if (!isGoogleDriveConfigured()) return false;
+  try {
+    // Un jeton suffit : l'ancienne version exigeait un appel userinfo qui
+    // pouvait échouer et faisait croire que le compte n'était pas connecté.
+    await getGoogleAccessToken(interactive);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function uploadGoogleDeviceSnapshot(interactive = true): Promise<{ size: number; at: string }> {

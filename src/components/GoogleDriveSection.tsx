@@ -41,6 +41,7 @@ export function GoogleDriveSection({
         cloudProvider: "google-drive",
         cloudSyncEnabled: true,
         cloudAutoBackupEnabled: true,
+        lastCloudError: undefined,
       });
       markCloudBackupDirty();
       onSettings(next);
@@ -72,13 +73,17 @@ export function GoogleDriveSection({
         cloudSyncEnabled: true,
         cloudAutoBackupEnabled: true,
         lastCloudBackupAt: r.at,
+        lastCloudAttemptAt: r.at,
+        lastCloudError: undefined,
       });
       onSettings(next);
       setMessage(
         `Sauvegarde Google Drive terminée (${Math.max(1, Math.round(r.size / 1024))} Ko).`,
       );
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Sauvegarde Google Drive impossible.");
+      const message = e instanceof Error ? e.message : "Sauvegarde Google Drive impossible.";
+      await saveSettings({ lastCloudError: message, lastCloudAttemptAt: new Date().toISOString() });
+      setMessage(message);
     } finally {
       setBusy(null);
     }
