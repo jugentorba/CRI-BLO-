@@ -34,6 +34,8 @@ export interface AppSettings {
   aiApiKey?: string;
   aiModel?: string;
   permissionsOnboardingDone?: boolean;
+  /** L'utilisateur a choisi « plus tard » pour son profil. */
+  profileOnboardingSkipped?: boolean;
 }
 
 const DEFAULTS: AppSettings = {

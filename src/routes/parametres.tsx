@@ -9,6 +9,7 @@ import { isFolderPickerSupported, pickExportFolder } from "@/lib/export/folder";
 import { OneDriveSection } from "@/components/OneDriveSection";
 import { GoogleDriveSection } from "@/components/GoogleDriveSection";
 import { LocalBackupSection } from "@/components/LocalBackupSection";
+import { PermissionSetupDialog } from "@/components/PermissionSetupDialog";
 import { uploadDeviceSnapshot, restoreDeviceSnapshot } from "@/lib/cloud/sync";
 import { nativeCloudFolderSupported, pickCloudBackupFolder } from "@/lib/cloud/folder-sync";
 import { clearCloudBackupDirty, markCloudBackupDirty } from "@/lib/cloud/auto-backup";
@@ -32,6 +33,7 @@ function Parametres() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [cloudFolderBusy, setCloudFolderBusy] = useState(false);
+  const [permOpen, setPermOpen] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [aiTestBusy, setAiTestBusy] = useState(false);
   const [customGeminiModel, setCustomGeminiModel] = useState(false);
@@ -217,6 +219,23 @@ function Parametres() {
               className="mt-3 h-11 w-full rounded-xl border border-border bg-background text-sm font-semibold text-foreground transition active:scale-95 disabled:opacity-50"
             >
               {settings.exportFolderName ? "Changer le dossier CRI BLO" : "Choisir le dossier CRI BLO"}
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-muted-foreground">Autorisations</h2>
+          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-[var(--shadow-card)]">
+            <p className="text-xs text-muted-foreground">
+              La caméra et la localisation sont demandées uniquement quand vous les utilisez
+              (photo d'intervention, point A/B). Vous pouvez aussi les vérifier ici.
+            </p>
+            <button
+              type="button"
+              onClick={() => setPermOpen(true)}
+              className="mt-3 h-10 w-full rounded-xl border border-primary/40 bg-background text-xs font-bold text-primary active:scale-95"
+            >
+              Vérifier les autorisations
             </button>
           </div>
         </section>
@@ -593,6 +612,8 @@ function Parametres() {
         </section>
         <AppUpdateSection />
       </form>
+
+      <PermissionSetupDialog open={permOpen} onClose={() => setPermOpen(false)} />
 
       <p className="mt-8 text-center text-xs text-muted-foreground">CRI BLO Assistant · Orange France</p>
     </AppShell>

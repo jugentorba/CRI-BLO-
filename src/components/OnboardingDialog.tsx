@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Building2, UserCircle2, ArrowRight } from "lucide-react";
 import { getProfile, isProfileComplete, saveProfile } from "@/lib/profile/repository";
+import { getSettings, saveSettings } from "@/lib/settings/repository";
 
 export function OnboardingDialog() {
   const [open, setOpen] = useState(false);
@@ -9,8 +10,8 @@ export function OnboardingDialog() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void getProfile().then((p) => {
-      if (!isProfileComplete(p)) setOpen(true);
+    void Promise.all([getProfile(), getSettings()]).then(([p, s]) => {
+      if (!isProfileComplete(p) && !s.profileOnboardingSkipped) setOpen(true);
       else {
         setCompany(p?.company ?? "");
         setLastName(p?.lastName ?? "");
@@ -19,6 +20,11 @@ export function OnboardingDialog() {
   }, []);
 
   if (!open) return null;
+
+  async function skip() {
+    await saveSettings({ profileOnboardingSkipped: true });
+    setOpen(false);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,7 +77,14 @@ export function OnboardingDialog() {
           <ArrowRight className="h-5 w-5" />
         </button>
 
-        <p className="mt-3 text-center text-xs text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => void skip()}
+          className="mt-2 h-10 w-full text-xs font-semibold text-muted-foreground"
+        >
+          Plus tard — renseigner dans Réglages
+        </button>
+        <p className="mt-1 text-center text-xs text-muted-foreground">
           Modifiable à tout moment dans Paramètres.
         </p>
       </form>

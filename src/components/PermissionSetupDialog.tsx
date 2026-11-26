@@ -1,18 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Camera, Check, FileUp, MapPin, ShieldCheck } from "lucide-react";
-import { getSettings, saveSettings } from "@/lib/settings/repository";
+import { saveSettings } from "@/lib/settings/repository";
 import { getCurrentPosition } from "@/lib/geo/gps";
 
-export function PermissionSetupDialog() {
-  const [open, setOpen] = useState(false);
+export function PermissionSetupDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const [location, setLocation] = useState<"unknown" | "granted" | "denied">("unknown");
   const [camera, setCamera] = useState<"unknown" | "granted" | "denied">("unknown");
   const [files, setFiles] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    void getSettings().then((s) => setOpen(!s.permissionsOnboardingDone));
-  }, []);
 
   async function requestLocation() {
     try {
@@ -35,7 +36,7 @@ export function PermissionSetupDialog() {
 
   async function finish() {
     await saveSettings({ permissionsOnboardingDone: true });
-    setOpen(false);
+    onClose();
   }
 
   if (!open) return null;
@@ -55,7 +56,7 @@ export function PermissionSetupDialog() {
           <input ref={fileRef} type="file" className="hidden" onChange={() => setFiles(true)} />
         </div>
         <button type="button" onClick={() => void finish()} disabled={!done} className="mt-4 h-12 w-full rounded-2xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-40">Continuer</button>
-        {!done && <button type="button" onClick={() => void finish()} className="mt-2 w-full text-xs font-semibold text-muted-foreground">Continuer plus tard</button>}
+        <button type="button" onClick={() => void finish()} className="mt-2 w-full text-xs font-semibold text-muted-foreground">Plus tard — les autorisations seront demandées quand vous en aurez besoin</button>
       </div>
     </div>
   );

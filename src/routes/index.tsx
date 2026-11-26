@@ -11,6 +11,7 @@ import {
   FileUp,
   CheckCircle2,
   Files,
+  ShieldCheck,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { countToday, createCri, listCris } from "@/lib/cri/repository";
@@ -21,6 +22,7 @@ import { getSettings } from "@/lib/settings/repository";
 import { isOneDriveConfigured } from "@/lib/onedrive/config";
 import { isGoogleDriveConfigured } from "@/lib/google/config";
 import { OnboardingDialog } from "@/components/OnboardingDialog";
+import { PermissionSetupDialog } from "@/components/PermissionSetupDialog";
 import type { CriRecord } from "@/lib/cri/types";
 
 export const Route = createFileRoute("/")({
@@ -80,6 +82,8 @@ function Accueil() {
     error?: string;
   }>({ enabled: false });
   const [creating, setCreating] = useState(false);
+  const [permsOpen, setPermsOpen] = useState(false);
+  const [permsDone, setPermsDone] = useState(true);
 
   async function load() {
     const [t, all, s] = await Promise.all([countToday(), listCris(), getSettings()]);
@@ -98,6 +102,7 @@ function Accueil() {
       lastBackupAt: s.lastCloudBackupAt,
       error: s.lastCloudError,
     });
+    setPermsDone(!!s.permissionsOnboardingDone);
   }
 
   useEffect(() => {
@@ -135,6 +140,32 @@ function Accueil() {
   return (
     <AppShell title="CRI BLO Assistant" subtitle="Prêt pour l'intervention">
       <OnboardingDialog />
+      <PermissionSetupDialog
+        open={permsOpen}
+        onClose={() => {
+          setPermsOpen(false);
+          void load();
+        }}
+      />
+
+      {!permsDone && (
+        <div className="mb-2 flex items-center gap-2 rounded-2xl border border-primary/25 bg-primary/5 p-2.5">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-foreground">Autorisations</div>
+            <div className="text-[10px] leading-tight text-muted-foreground">
+              Caméra, localisation, fichiers — demandées seulement quand vous les utilisez.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPermsOpen(true)}
+            className="h-8 shrink-0 rounded-lg border border-primary/40 bg-background px-2 text-[10px] font-bold text-primary active:scale-95"
+          >
+            Configurer
+          </button>
+        </div>
+      )}
 
       {/* État : réseau + cloud, très compact */}
       <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold">
